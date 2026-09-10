@@ -41,4 +41,5 @@ async def startup_exchanges() -> None:
 async def shutdown_exchanges() -> None:
     for name, adapter in EXCHANGE_REGISTRY.items():
         logger.info(f"   Closing {name}...")
+        await adapter.cancel_warm()
         await adapter.shutdown()

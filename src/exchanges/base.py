@@ -426,6 +426,19 @@ class BaseExchange(ABC):
         self._warm_task = asyncio.create_task(self._run_warm())
 
 
+    async def cancel_warm(self) -> None:
+        task            = self._warm_task
+        self._warm_task = None
+        if task is None or task.done():
+            return
+
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
     async def _run_warm(self) -> None:
         started = time.monotonic()
         logger.info(f"[{self.name}] preload: starting")
