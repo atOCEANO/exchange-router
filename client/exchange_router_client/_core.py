@@ -210,12 +210,16 @@ class AsyncCore:
 
 
     async def get_ticker(self, exchange: str, market_type: str, symbol: str, verbose: Optional[bool] = None) -> rows.Row:
-        await self._preflight(exchange, market_type, "ticker", symbol=symbol)
+        v = self.verbose if verbose is None else verbose
+
+        await self._preflight(exchange, market_type, "ticker", symbol=symbol, verbose=v)
         return rows.ticker_row(await self._request("GET", f"{exchange}/{market_type}/ticker/{symbol}"))
 
 
     async def get_book_ticker(self, exchange: str, market_type: str, symbol: str, verbose: Optional[bool] = None) -> rows.Row:
-        await self._preflight(exchange, market_type, "book_ticker", symbol=symbol)
+        v = self.verbose if verbose is None else verbose
+
+        await self._preflight(exchange, market_type, "book_ticker", symbol=symbol, verbose=v)
         return rows.book_ticker_row(await self._request("GET", f"{exchange}/{market_type}/book_ticker/{symbol}"))
 
 
