@@ -8,12 +8,12 @@
 </div>
 
 <sub>
-  <a href="../README.md">Introduction</a> &nbsp;•&nbsp; 
-  <a href="API_Reference.md">API Reference</a> &nbsp;•&nbsp; 
-  <a href="Python_SDK.md">Python SDK</a> &nbsp;•&nbsp; 
-  <a href="Exchange_Notes.md">Exchange Notes</a> &nbsp;•&nbsp; 
-  <a href="System_Architecture.md">System Architecture</a> &nbsp;•&nbsp; 
-  <a href="Auditor_Guide.md">Auditor Guide</a> &nbsp;•&nbsp; 
+  <a href="../README.md">Introduction</a> &nbsp;•&nbsp;
+  <a href="API_Reference.md">API Reference</a> &nbsp;•&nbsp;
+  <a href="Python_SDK.md">Python SDK</a> &nbsp;•&nbsp;
+  <a href="Exchange_Notes.md">Exchange Notes</a> &nbsp;•&nbsp;
+  <a href="System_Architecture.md">System Architecture</a> &nbsp;•&nbsp;
+  <a href="Auditor_Guide.md">Auditor Guide</a> &nbsp;•&nbsp;
   <b>Contributor Guide</b>
 </sub>
 
@@ -32,7 +32,7 @@ The router is extended through isolated exchange adapters. Almost every contribu
 
 Every record (Trade, Candle, MarkPrice, etc.) goes through a `build_*` helper in `src/exchanges/base.py`. Adapters pass in raw upstream values; the builders construct the nested value objects and compute USD where derivable. The wire-format spec is in [API Reference](API_Reference.md#response-shapes); the builder signatures are below.
 
-An inverse trade, where USD is computed as `native × contract_size` and is price-independent:
+An inverse trade, where USD is computed as `native * contract_size` and is price-independent:
 
 ```python
 from src.exchanges.base import (
@@ -158,7 +158,7 @@ All adapters must inherit from `BaseExchange` in `src/exchanges/base.py`. The fo
 - [ ] **`_fetch_exchange_info`:** Implement `async def _fetch_exchange_info(market_type) -> List[SymbolInfo]`. The base class owns the cache around it (`_ensure_info_cache`, `_info_for`, the 24h refresh); the adapter only supplies the fetch. Do not declare your own `_info_cache` fields.
 - [ ] **Data Normalization:** Map all raw upstream JSON payloads to the Pydantic models in `src/models.py`.
 - [ ] **Market Routing:** Handle `spot`, `linear`, and `inverse` market types, including any subdomain or parameter differences between them.
-- [ ] **Symbol Normalization:** Implement `get_model_symbol(api_symbol, market_type)` to translate raw exchange symbols to normalized form (e.g. `BTCUSD_PERP` → `BTCUSD`), and `get_api_symbol(symbol, market_type)` to reverse the translation when constructing upstream requests. Normalized symbols must be bare pairs with no suffixes.
+- [ ] **Symbol Normalization:** Implement `get_model_symbol(api_symbol, market_type)` to translate raw exchange symbols to normalized form (e.g. `BTCUSD_PERP` -> `BTCUSD`), and `get_api_symbol(symbol, market_type)` to reverse the translation when constructing upstream requests. Normalized symbols must be bare pairs with no suffixes.
 - [ ] **Perpetuals Filter:** For `linear` and `inverse` markets, `_fetch_exchange_info` must exclude dated and quarterly contracts. Only perpetual instruments should appear in `/markets` and `/markets/{symbol}`.
 - [ ] **`native_symbol` Field:** Populate `native_symbol` on every `SymbolInfo` object with the raw exchange symbol before normalization.
 - [ ] **`funding` Field:** Set `SymbolInfo.funding = None` on spot, `build_funding_convention("discrete")` on discrete-funding perps, and `build_funding_convention("continuous")` on continuous-funding perps.
@@ -322,9 +322,9 @@ The harness uses `min(big_limit, retention_ms / period_ms, market_age_ms / perio
 
 ### Pagination safety caps
 
-Most adapters use the shared `_paginate_backwards` helper, bounded by an internal `max_requests = 100` page count. When that cap fires before the requested `limit` is reached, the helper logs a `WARNING` and returns whatever it managed to collect. Natural termination ("no more new data") handles every correctly-paginating case; the 100-page cap only fires for genuinely pathological asks (e.g. `?limit=1_000_000` on 1m candles, which would need ~120,000 pages).
+Most adapters use the shared `_paginate_backwards` helper, bounded by an internal `max_requests = 100` page count. When that cap fires before the requested `limit` is reached, the helper logs a `WARNING` and returns whatever it managed to collect. Natural termination ("no more new data") handles every correctly-paginating case; the 100-page cap only fires for genuinely pathological asks (e.g. `?limit=1_000_000` on 1m candles, which would need roughly 1,000 pages).
 
-Some adapters use custom loops with different bounds: Kraken futures candles iterates at most 20 times (no warning on exhaustion) because the upstream chart endpoint returns large batches and 20 rounds cover the supported retention; OKX candles combines a "recent" fetch with `_paginate_backwards`-driven "history" walks, both bounded by 100 pages. These are defense-in-depth knobs, not part of the capability contract; consumers should not rely on a specific cap.
+Some adapters use custom loops with different bounds: Kraken futures candles iterates at most 20 times (logs a WARNING on exhaustion) because the upstream chart endpoint returns large batches and 20 rounds cover the supported retention; OKX candles combines a "recent" fetch with `_paginate_backwards`-driven "history" walks, both bounded by 100 pages. These are defense-in-depth knobs, not part of the capability contract; consumers should not rely on a specific cap.
 
 If you want a different bound, fork the helper. The cap is not surfaced as a capability field.
 
@@ -336,7 +336,7 @@ If you want a different bound, fork the helper. The cap is not surfaced as a cap
 - **`max_limit`**: the upstream's hard ceiling for non-paginated routes only. For paginated routes set `null`. The adapter walks back through history with no router-side cap, bounded only by retention or the asset's age. Per-page upstream caps that the pagination loop uses internally (the per-call limit on each upstream's history endpoint) are inline literals in the route method, not declared in the capability map.
 - **`retention_ms`**: read upstream docs for the route. Common patterns: OI and long/short history retain 30 days on some venues, 7 days on others; funding rate is typically asset-bounded so `None` is correct. When you cannot find an explicit retention statement, `None` is the safe choice; the harness falls back to the crypto-market-age ceiling.
 - **`paginated`**: read the request schema. If there is no `start` / `endTime` / `begin` / `after` field, declare `False`. Some upstream endpoints (notably some account-ratio endpoints) ship with no time anchor and are honest single-page routes.
-- **`intervals`**: copy from the route's documented interval list, in ascending order. The adapter is responsible for mapping these to whatever the upstream expects (e.g. `"1d"` → `"D"`).
+- **`intervals`**: copy from the route's documented interval list, in ascending order. The adapter is responsible for mapping these to whatever the upstream expects (e.g. `"1d"` -> `"D"`).
 
 <br>
 
@@ -434,7 +434,7 @@ The first of those is the one worth knowing about. `load_exchanges()` catches an
 
 `SERVICE_VERSION` in `src/version.py` is the single source of the version, and **the tag must equal it**. CI enforces this rather than generating it: a workflow that wrote the version would leave a running container reporting a number that is in no commit. `v2.2.0` was tagged on a commit still reading `2.1.0` before the rule existed; every tag from `v2.2.1` on agrees, and the guard job is what keeps it that way.
 
-To cut a release, bump `src/version.py` in its own commit (the history keeps these separate, `chore(version): bump service to X.Y.Z`), then tag `vX.Y.Z` and push the tag. `.github/workflows/release.yml` checks the tag against `src/version.py` and publishes a GitHub Release with generated notes. A manual dispatch from the Actions tab runs the guard and stops, so the check can be dry-run before you commit to a tag.
+To cut a release, bump `src/version.py` in its own commit (the history keeps these separate, `chore(version): bump service to X.Y.Z`), then tag `vX.Y.Z` and push the tag. `.github/workflows/release.yml` checks the tag against `src/version.py` and publishes a GitHub Release with generated notes. Both jobs in that workflow are gated on the tag ref, so a manual dispatch from the Actions tab runs neither of them; there is no way to dry-run the guard short of pushing a tag.
 
 The release builds and attaches nothing, which is deliberate. A library has to arrive as a file, so emsl ships wheels; this is a service you run, and the artifact is the repository at the tag, which GitHub attaches by itself. The release body carries the three things a reader actually needs instead: running it from a checkout without Docker, building the image from the same checkout, and installing the client. The client SDK carries its own version in `client/exchange_router_client/_version.py` and installs straight from the tag, so publishing a wheel here would only produce a file whose number disagrees with the release it is attached to.
 
@@ -466,7 +466,7 @@ These are conventions adapter authors follow that are not visible from the user-
 
 ### `_paginate_backwards` helper
 
-Every method that accepts `start_time` should route through `_paginate_backwards`, which lives on `BaseExchange` (or its equivalent in the adapter, like the Kraken forward walk), seeded with `start_time` on the first iteration. The helper collects forward-sorted batches, walks the response back by setting the upstream end-anchored parameter to one less than the oldest record's timestamp, and stops when no new records arrive or `max_requests` is reached. The user-facing contract is "inclusive backward-walking upper bound"; this is how that contract is implemented.
+Every method that accepts `start_time` should route through `_paginate_backwards`, which lives on `BaseExchange` (or its equivalent in the adapter, like the Kraken forward walk), seeded with `start_time` on the first iteration. The helper collects forward-sorted batches, walks the response back by re-anchoring the upstream end-anchored parameter on the oldest record's timestamp itself, and drops the boundary row that repeats as a result by keying every record on its `model_dump_json()` in a `seen` set. It stops when a batch carries no new records, when the next anchor fails to move backwards, or when `max_requests` is reached. The plus-one and minus-one adjustments belong to the adapters whose upstream parameter is exclusive, in the table below. The user-facing contract is "inclusive backward-walking upper bound"; this is how that contract is implemented.
 
 <br>
 
@@ -540,7 +540,7 @@ async def _resolve_symbol(self, symbol: str, market_type: MarketType) -> str:
 
 Route methods call `await self._resolve_symbol(symbol, market_type)` instead of the sync `self.get_api_symbol(...)`. The cache is lazy-loaded on first spot use, double-checked-locked for concurrency, and survives a fetch failure by falling back to the static heuristic.
 
-When the cache loads successfully and the requested symbol is missing, raise `ValueError` (which the router maps to HTTP 400). Some exchanges return a stub object for unknown symbols rather than a clean error, so trusting upstream is unsafe. The cache is the source of truth. Newly listed symbols become resolvable on the next service restart.
+When the cache loads successfully and the requested symbol is missing, raise `ValueError` (which the router maps to HTTP 400). Some exchanges return a stub object for unknown symbols rather than a clean error, so trusting upstream is unsafe. The cache is the source of truth. Newly listed symbols become resolvable on the next service restart. KuCoin does this; OKX is a known deviation, its `_resolve_symbol` logs a WARNING and returns a `SPOT_QUOTES`-derived native id instead, so an unknown OKX spot symbol reaches upstream fabricated rather than failing with a 400.
 
 `get_api_symbol` and `SPOT_QUOTES` are the fallback path for the rare case where the live `/symbols` fetch fails, not the primary mechanism.
 
@@ -558,7 +558,7 @@ Per-exchange implementation specifics:
 
 | Exchange | Header(s) | Trigger |
 | :--- | :--- | :--- |
-| Binance | `x-mbx-used-weight-1m` | back off 2s if used weight > 1150/1200; tracked per upstream host (api / fapi / dapi have independent weight buckets) |
+| Binance | `x-mbx-used-weight-1m` | back off 2s when used weight climbs above 95 percent of the per-host budget (5700/6000 on api, 2280/2400 on fapi and dapi; the 1200 in the code is only the fallback for a host missing from `_WEIGHT_LIMITS`); tracked per upstream host (api / fapi / dapi have independent weight buckets) |
 | Bybit | `X-Bapi-Limit-Status`, `X-Bapi-Limit-Reset-Timestamp` | back off until reset if remaining < 10 |
 | KuCoin | none (30s rolling window, no per-response remaining-weight header) | reactive only on HTTP 429 |
 | OKX | none | reactive only on HTTP 429 |
@@ -640,7 +640,7 @@ For adapter authors hitting these surfaces:
 USD-M futures (`wss://fstream.binance.com`) requires per-stream routing into three sub-endpoints: `/public`, `/market`, `/private`. A subscription on the wrong bucket connects but silently drops frames, so the adapter selects the correct bucket per topic before opening the connection.
 
 | Stream | Bucket |
-|--------|--------|
+| :--- | :--- |
 | `<symbol>@trade` | public |
 | `<symbol>@bookTicker` | public |
 | `<symbol>@depth<level>@<speed>` | public |

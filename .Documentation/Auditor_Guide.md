@@ -8,12 +8,12 @@
 </div>
 
 <sub>
-  <a href="../README.md">Introduction</a> &nbsp;•&nbsp; 
-  <a href="API_Reference.md">API Reference</a> &nbsp;•&nbsp; 
-  <a href="Python_SDK.md">Python SDK</a> &nbsp;•&nbsp; 
-  <a href="Exchange_Notes.md">Exchange Notes</a> &nbsp;•&nbsp; 
-  <a href="System_Architecture.md">System Architecture</a> &nbsp;•&nbsp; 
-  <b>Auditor Guide</b> &nbsp;•&nbsp; 
+  <a href="../README.md">Introduction</a> &nbsp;•&nbsp;
+  <a href="API_Reference.md">API Reference</a> &nbsp;•&nbsp;
+  <a href="Python_SDK.md">Python SDK</a> &nbsp;•&nbsp;
+  <a href="Exchange_Notes.md">Exchange Notes</a> &nbsp;•&nbsp;
+  <a href="System_Architecture.md">System Architecture</a> &nbsp;•&nbsp;
+  <b>Auditor Guide</b> &nbsp;•&nbsp;
   <a href="Contributor_Guide.md">Contributor Guide</a>
 </sub>
 
@@ -36,7 +36,7 @@ The auditor stamps the served `schema_version` field on every `results.json` and
 ## Quick orientation
 
 | You want to ... | Open this file |
-| --- | --- |
+| :--- | :--- |
 | Run the suite or interpret results | this document, sections [Running the suite](#running-the-suite) and [Run output](#run-output) |
 | Add a new probe | `tools/auditor/probes/<your_probe>.py` next to a similar one. Register in `probes/__init__.py::market_probes` or `exchange_probes` |
 | Tune an env knob (timeouts, concurrency, freshness threshold) | `tools/auditor/config.py` |
@@ -52,7 +52,7 @@ The auditor stamps the served `schema_version` field on every `results.json` and
 The CLI in `__main__.py` invokes `runner.run(...)`, which executes a fixed top-of-run sequence (`/status`, `/version`, `/exchanges`), then pre-flights `/capabilities` for every target exchange in parallel. Pre-flight emits the capabilities pass/fail result per exchange and counts the probes each will dispatch (via `applies(ctx)` against a placeholder symbol), so the live progress display knows its denominator before any probe runs. The runner then fans out to one task per exchange. Inside each exchange task it runs the exchange-level probes, then iterates per market type, picks a real symbol via `/markets`, and runs the market-level probes filtered by `applies(ctx)`. Results feed into an `Aggregator`; `LiveReporter` updates the console as they arrive (one progress bar per exchange plus a global total) and `write_json` persists the final summary.
 
 | File | Class / Role | Lines (approx) |
-| --- | --- | --- |
+| :--- | :--- | :--- |
 | `__main__.py` | CLI entry: `python -m tools.auditor [exchange ...]` | 100 |
 | `config.py` | env knobs, interval map, symbol picker, theoretical-max | 130 |
 | `runner.py` | top-of-run sequence, `/capabilities` pre-flight + per-exchange probe-count, semaphore gating, `asyncio.gather` | 380 |
@@ -60,7 +60,8 @@ The CLI in `__main__.py` invokes `runner.run(...)`, which executes a fixed top-o
 | `output/json.py` | machine-readable run output writer | 25 |
 | `output/ordering.py` | display-ordering constants for the HTML report (market / route / period / sub-probe / caps-key) | 20 |
 | `output/live.py` | rich live console with one progress bar per exchange plus a global total, end-of-run failure table | 265 |
-| `output/html.py` | HTML report renderer (analytics ↔ sample toggle) | 505 |
+| `output/html.py` | HTML report renderer (analytics <-> sample toggle) | 465 |
+| `output/_urlfmt.py` | per-result request URL synthesis, param extraction, evidence compaction, shared by the HTML and live renderers | 80 |
 | `probes/__init__.py` | re-exports + `market_probes()` / `exchange_probes()` registry | 75 |
 | `probes/base.py` | `Probe` ABC, `ProbeContext`, `fetch`, validators, REST throttling | 190 |
 | `probes/snapshot.py` | `SnapshotProbe` + ticker / book / mark check helpers | 125 |
@@ -68,7 +69,7 @@ The CLI in `__main__.py` invokes `runner.run(...)`, which executes a fixed top-o
 | `probes/trades.py` | `TradesProbe` (multi-limit, uniqueness, ordering) | 140 |
 | `probes/paginated.py` | `PaginatedProbe` (recent + 5 sub-probes covering limit checks and anchored windows) | 275 |
 | `probes/websocket.py` | `WebSocketProbe` + `WS_CHANNEL_MODEL` registry | 180 |
-| `probes/info.py` | `InfoProbe` (reads `/markets/{symbol}`, name `markets:detail`) | 75 |
+| `probes/info.py` | `InfoProbe` (reads `/markets/{symbol}`, name `markets:detail`) | 95 |
 | `probes/markets.py` | `MarketsProbe` (reads the lite `/markets` dict shape) | 90 |
 | `probes/capabilities.py` | `CapabilitiesConsistencyProbe` (drift detection) | 160 |
 | `probes/errors.py` | `ErrorPathProbe` (404/400 negative paths) | 60 |
@@ -84,7 +85,7 @@ Every probe inherits from a single ABC: `Probe` in `probes/base.py`. Each subcla
 
 The base class gives every probe two helpers so probes don't repeat their identity at every result construction:
 
-- `self.result(ctx, name, started, *, status, error_type, message, evidence=None, ended=None)` builds a `ProbeResult` populated with `self.route`, `self.kind`, the context's exchange/market/symbol, and the latency derived from `started → time.time()`. Pass `ended` explicitly when the probe wants to clock end time at a moment other than result-construction (e.g. `cross_route` runs two fetches before emitting a single result).
+- `self.result(ctx, name, started, *, status, error_type, message, evidence=None, ended=None)` builds a `ProbeResult` populated with `self.route`, `self.kind`, the context's exchange/market/symbol, and the latency derived from `started -> time.time()`. Pass `ended` explicitly when the probe wants to clock end time at a moment other than result-construction (e.g. `cross_route` runs two fetches before emitting a single result).
 - `self.http_failure(ctx, name, started, status_code, data, net_err, expected="200")` builds the standard fail result for non-200 responses. Override `expected` when the probe is asserting against something other than 200 (e.g. `error_paths` expecting 404).
 
 <br>
@@ -104,7 +105,7 @@ Probes run against every advertised route. Each probe carries the capability fie
 
 ### Orderbook
 
-Probed at every depth in `caps.depths`, or `[1, 20, max_depth]` when no discrete list is declared. Each level: bids strictly descending, asks strictly ascending, top-of-book not crossed, no zero or negative price or qty, `len <= depth`. Failure evidence carries the offending pair (`{"side": "bids", "idx": 5, "prev": 30001.5, "this": 30001.7}`).
+Probed at every declared depth in `caps.depths` that falls within `[1, 100]`, or at `[1, 20, min(max_depth, 100)]` when no discrete list is declared, so Binance's declared 500 and 1000 are never probed and Kraken's `max_depth` of 500 is probed as 100. A venue whose declared depths all exceed 100 falls back to its smallest declared depth. Each level: bids strictly descending, asks strictly ascending, top-of-book not crossed, no zero or negative price or qty, `len <= depth`. Failure evidence carries the offending pair (`{"side": "bids", "idx": 5, "prev": 30001.5, "this": 30001.7}`).
 
 <br>
 
@@ -116,10 +117,10 @@ Probed at `[1, min(100, max_limit), max_limit]`. Asserts ascending timestamps (r
 
 ### Paginated routes
 
-`agg_trades`, `candles`, `funding_rate`, `open_interest`, `liquidations`, `long_short_ratio`. Each paginated route runs an unconditional set (shape, exact-count, at-most-N) plus an anchored set (past anchor at a near offset, past anchor at a deeper offset, future anchor expected empty); anchored probes are skipped when the route declares `paginated: False`. The sub-probes today are:
+`agg_trades`, `candles`, `funding_rate`, `open_interest`, `liquidations`, `long_short_ratio`. Each paginated route runs an unconditional set (shape, exact-count, at-most-N) plus an anchored set (past anchor at a near offset, past anchor at a deeper offset, future anchor expected to return the newest available records); anchored probes are skipped when the route declares `paginated: False`. The sub-probes today are:
 
-- `recent`: no `start`, big limit, validates ascending order and freshness. Theoretical-max calibration tied to `retention_ms` and `period_ms`, so a 1-week candle ask for 3000 records is treated as PASS at ~250 records. The freshness threshold defaults to `3 × period_ms + 30s`; per-`(exchange, market_type, period)` overrides live in `config.py::FRESHNESS_OVERRIDE_MS` for upstreams documented to publish slowly (for example, an inverse 1m feed that skips empty buckets, requiring a 600s override).
-- `limit=1`: must return exactly 1.
+- `recent`: no `start`, big limit, validates ascending order and freshness. The count check runs against a ceiling rather than the raw ask: `config.py::theoretical_max` is the smallest of the requested limit, the periods elapsed since `CRYPTO_EPOCH_MS` (2010-01-01), and `retention_ms // period_ms`, and the PASS floor is `THEORETICAL_MAX_RATIO` (0.9) of it, so a long period never fails for returning fewer records than a big limit asked for. The freshness threshold defaults to `3 * period_ms + 30s`; per-`(exchange, market_type, period)` overrides live in `config.py::FRESHNESS_OVERRIDE_MS` for upstreams documented to publish slowly (for example, an inverse 1m feed that skips empty buckets, requiring a 600s override).
+- `limit=1`: must return exactly 1; an empty response warns rather than fails, and the count check does not run.
 - `limit=5`: must return at most 5; > 5 is a hard FAIL.
 - `before=1h_ago`: last record at or before the anchor. Skipped if `paginated: False`.
 - `before=24h_ago`: same check at a deeper anchor. Skipped if `paginated: False`, and additionally skipped when `period_ms > 12h` (24h does not give enough room to cover one period).
@@ -132,7 +133,7 @@ Probed at `[1, min(100, max_limit), max_limit]`. Asserts ascending timestamps (r
 Holds the connection for `WS_TEST_DURATION` (default 180s) and validates **every** frame against `WS_CHANNEL_MODEL`. Minimum frame thresholds are per-channel (`config.py::WS_MIN_FRAMES`):
 
 | Channel | Min frames | Rationale |
-| --- | --- | --- |
+| :--- | :--- | :--- |
 | `orderbook` | 10 | Very chatty |
 | `ticker`, `book_ticker` | 5 | Steady cadence |
 | `trades`, `agg_trades`, `mark_price` | 1 | Activity-dependent |
@@ -177,7 +178,7 @@ Runs first. Unknown exchange (expects 404), bad market type (expects 400/422), b
 
 ## Concurrency
 
-```
+```text
 MAX_CONCURRENT_EXCHANGES            default 5     all exchanges in parallel
 MAX_CONCURRENT_REST_PER_EXCHANGE    default 4     REST probes within an exchange
 MAX_CONCURRENT_WS_PER_EXCHANGE      default 32    WS probes within an exchange
@@ -293,7 +294,7 @@ A new probe is ~50-80 lines. If yours is bigger, look at `PaginatedProbe` for ho
 
 A FAIL in the report does not always mean an adapter regression. Rule out these before chasing a bug:
 
-- **Upstream publish lag on analytics-style endpoints.** Some analytics endpoints (open interest, long/short ratio, similar aggregated stats) publish their buckets with a delay that fluctuates with upstream load. The `recent` sub-probe's freshness threshold defaults to `3 × period + 30s` (about 45 minutes for 15m); a slow window can push real lag above that. Re-run after 20 to 30 minutes. If the failure clears, it was transient upstream. If the same `(exchange, market_type, period)` keeps failing, add an entry to `config.py::FRESHNESS_OVERRIDE_MS`.
+- **Upstream publish lag on analytics-style endpoints.** Some analytics endpoints (open interest, long/short ratio, similar aggregated stats) publish their buckets with a delay that fluctuates with upstream load. The `recent` sub-probe's freshness threshold defaults to `3 * period + 30s` (about 45 minutes for 15m); a slow window can push real lag above that. Re-run after 20 to 30 minutes. If the failure clears, it was transient upstream. If the same `(exchange, market_type, period)` keeps failing, add an entry to `config.py::FRESHNESS_OVERRIDE_MS`.
 
 - **Quiet-market WebSocket activity.** `trades`, `agg_trades`, and `liquidations` depend on real events. On low-volume contracts a 180-second window can legitimately produce few or zero frames. Liquidations have threshold 0 for this reason. Trades and agg_trades (threshold 1) WARN on quiet pairs; raising `WS_TEST_DURATION` reduces the chance, at the cost of wall time.
 

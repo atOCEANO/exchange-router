@@ -8,12 +8,12 @@
 </div>
 
 <sub>
-  <a href="../README.md">Introduction</a> &nbsp;•&nbsp; 
-  <a href="API_Reference.md">API Reference</a> &nbsp;•&nbsp; 
-  <b>Python SDK</b> &nbsp;•&nbsp; 
-  <a href="Exchange_Notes.md">Exchange Notes</a> &nbsp;•&nbsp; 
-  <a href="System_Architecture.md">System Architecture</a> &nbsp;•&nbsp; 
-  <a href="Auditor_Guide.md">Auditor Guide</a> &nbsp;•&nbsp; 
+  <a href="../README.md">Introduction</a> &nbsp;•&nbsp;
+  <a href="API_Reference.md">API Reference</a> &nbsp;•&nbsp;
+  <b>Python SDK</b> &nbsp;•&nbsp;
+  <a href="Exchange_Notes.md">Exchange Notes</a> &nbsp;•&nbsp;
+  <a href="System_Architecture.md">System Architecture</a> &nbsp;•&nbsp;
+  <a href="Auditor_Guide.md">Auditor Guide</a> &nbsp;•&nbsp;
   <a href="Contributor_Guide.md">Contributor Guide</a>
 </sub>
 
@@ -31,14 +31,14 @@ The return surface follows one rule, so you never have to remember what a call h
 > Anything tabular is a pandas **DataFrame** with flat, stable columns. A single quote is a flat **Row** you read with `t.price`. Batches are a **BatchResult**. Every quantity is named the same way everywhere: `x` (native), `x_usd` (quote notional), `x_unit` (what `x` counts).
 
 | Kind | Returns |
-|---|---|
+| :--- | :--- |
 | Time series (candles, trades, agg_trades, funding_rate, open_interest, liquidations, long_short_ratio) | `pandas.DataFrame`, datetime index, sorted oldest-first, flat stable columns |
 | Point snapshot (ticker, book_ticker, mark_price, symbol_info) | `Row`, a flat `dict` with attribute access and a `.raw` wire-dict escape hatch |
 | Order book | one `DataFrame` with columns `side, price, qty` |
 | Batch (`*_many`) | `BatchResult`, behaves like a dict over the symbols that returned |
 | Discovery (exchanges, market_types, capabilities, markets) | `dict` / `list` |
 
-If you are coming from 3.x, see [Migrating from 3.x](#migrating-from-3x); the wire schema is unchanged, only the client's return shapes moved.
+If you are coming from 4.x, see [Migrating from 4.x](#migrating-from-4x); from 3.x, take [Migrating from 3.x](#migrating-from-3x) first and then the 4.x hop. The wire schema is unchanged across both, only the client's return shapes and the index dtype moved.
 
 <br>
 <br>
@@ -124,7 +124,7 @@ Series methods return a plain `pandas.DataFrame`. Nothing is wrapped, so `concat
 Columns and `df.attrs` per route:
 
 | Route | Columns | `df.attrs` constants |
-|---|---|---|
+| :--- | :--- | :--- |
 | candles | `open, high, low, close, volume, volume_usd` | `quote, interval, volume_unit, contract_size, usd_basis` |
 | trades | `price, qty, qty_usd, side, id` | `quote, qty_unit, contract_size` |
 | agg_trades | `price, qty, qty_usd, side, agg_id, first_trade_id, last_trade_id` | `quote, qty_unit, contract_size` |
@@ -133,7 +133,7 @@ Columns and `df.attrs` per route:
 | liquidations | `price, qty, qty_usd, side` | `quote, qty_unit, contract_size` |
 | long_short_ratio | `ratio, long_account, short_account` | `interval, account_scope` |
 
-Every frame's `attrs` also carries `exchange, market_type, symbol, schema_version, warnings`.
+Every frame's `attrs` also carries `exchange, market_type, symbol, schema_version, warnings`. `schema_version` is the wire schema the client was built against, pinned as a constant in the client, not the number the running service reported; when the two disagree, this field speaks for the client side.
 
 `funding_per_hour` is `per_cycle` normalized to a one-hour rate, so funding compares directly across venues with different cycle lengths. `cycle_ms` is always a column (it can vary mid-window); a change within the window raises a warning. On `long_short_ratio`, `long_account` and `short_account` are always columns and come back `NaN` on venues that expose only the ratio (`account_scope == "opaque"`).
 
@@ -141,7 +141,7 @@ Every frame's `attrs` also carries `exchange, market_type, symbol, schema_versio
 df = client.get_candles("binance", "spot", "BTCUSDT", interval="1h", limit=3)
 ```
 
-```
+```text
                        open      high      low     close    volume    volume_usd
 datetime
 2026-06-13 07:00:00  64010.1  64120.0  63980.2  64088.7    812.34   5.20e7
@@ -192,7 +192,7 @@ mp.funding_per_hour      # 0.0000118  (derived, comparable across venues)
 Row keys per snapshot (missing values are `None`, never absent):
 
 | Snapshot | Keys |
-|---|---|
+| :--- | :--- |
 | ticker | `symbol, market_type, quote, price, open_24h, high_24h, low_24h, volume_24h, volume_24h_usd, volume_24h_unit, price_change_percent, timestamp` |
 | book_ticker | `symbol, market_type, quote, bid_price, bid_qty, bid_qty_usd, ask_price, ask_qty, ask_qty_usd, qty_unit, timestamp` |
 | mark_price | `symbol, market_type, quote, mark_price, index_price, funding_kind, funding_per_cycle, funding_cycle_ms, funding_per_hour, funding_valid_until_ts, timestamp` |
@@ -280,11 +280,11 @@ result.failed      # {symbol: exception}                  never returned
 print(result.report())
 ```
 
-```
+```text
 100 requested: 97 ok, 2 degraded, 1 failed
   degraded
-    APTUSDT    3 of 100 rows have usd=NaN (join missed)
-    SEIUSDT   11 of 100 rows have usd=NaN (join missed)
+    APTUSDT   open_interest binance/linear/APTUSDT: 3 of 100 rows have usd=NaN (join missed; native is populated)
+    SEIUSDT   open_interest binance/linear/SEIUSDT: 11 of 100 rows have usd=NaN (join missed; native is populated)
   failed
     FOOUSDT   BadRequest: ...
 ```
@@ -323,7 +323,7 @@ These are plain functions, not coroutines, so they are never awaited. `funding_p
 The client raises a small typed tree, so failures are programmable without parsing message strings. Every error carries `.status` (the HTTP status, where applicable) and `.detail`.
 
 | Exception | When |
-|---|---|
+| :--- | :--- |
 | `BadRequest` | `400`, including an interval or period the route does not declare |
 | `NotFound` | `404`, an unknown exchange |
 | `RateLimited` | `429` |
@@ -352,7 +352,7 @@ Symbol validity is left to the server, which normalizes case and separators. A b
 
 ## Asynchronous client
 
-For real concurrency, use `AsyncExchangeRouterClient`. It exposes the same methods and the same handle, with `await`.
+For real concurrency, use `AsyncExchangeRouterClient`. It exposes the same methods and the same handle, with `await`. The async handle carries the route methods and `await m.info()`, but not the cached `m.quote` and `m.funding_kind` properties: those are defined on the sync handle only, so on an async handle they raise `AttributeError`. Read `quote_asset` and `funding_kind` off the awaited `info()` Row instead.
 
 ```python
 import asyncio
@@ -426,7 +426,7 @@ get_long_short_ratio(exchange, market_type, symbol, period="5m", limit=30, start
 
 **Provenance helper.** `with_provenance(df)` returns a copy with `exchange`, `symbol`, `quote`, and `unit` promoted to columns.
 
-Every series and snapshot method also takes `verbose` to override the client default for that call.
+`verbose` overrides the client default for that call on every series method, on `get_ticker`, `get_book_ticker`, `get_mark_price` and `get_orderbook`, and on every `*_many` method; `get_symbol_info` does not take it. On `get_ticker` and `get_book_ticker` it changes nothing visible today, since their only warning path is the preflight and the sole preflight warning is the orderbook depth snap.
 
 <br>
 <br>

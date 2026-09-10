@@ -8,12 +8,12 @@
 </div>
 
 <sub>
-  <a href="../README.md">Introduction</a> &nbsp;•&nbsp; 
-  <a href="API_Reference.md">API Reference</a> &nbsp;•&nbsp; 
-  <a href="Python_SDK.md">Python SDK</a> &nbsp;•&nbsp; 
-  <a href="Exchange_Notes.md">Exchange Notes</a> &nbsp;•&nbsp; 
-  <b>System Architecture</b> &nbsp;•&nbsp; 
-  <a href="Auditor_Guide.md">Auditor Guide</a> &nbsp;•&nbsp; 
+  <a href="../README.md">Introduction</a> &nbsp;•&nbsp;
+  <a href="API_Reference.md">API Reference</a> &nbsp;•&nbsp;
+  <a href="Python_SDK.md">Python SDK</a> &nbsp;•&nbsp;
+  <a href="Exchange_Notes.md">Exchange Notes</a> &nbsp;•&nbsp;
+  <b>System Architecture</b> &nbsp;•&nbsp;
+  <a href="Auditor_Guide.md">Auditor Guide</a> &nbsp;•&nbsp;
   <a href="Contributor_Guide.md">Contributor Guide</a>
 </sub>
 
@@ -42,11 +42,11 @@ Before deploying outside localhost, see [Security and Exposure](#security-and-ex
 
 ## Startup Lifecycle
 
-The FastAPI `lifespan` handler in `src/main.py` runs in three phases when the service starts:
+The FastAPI `lifespan` handler in `src/main.py` awaits `startup_exchanges()` from `src/exchanges/__init__.py`, which runs the first two of three phases:
 
 1. **Adapter loading.** `load_exchanges()` scans `src/exchanges/` and instantiates every `BaseExchange` subclass. Each adapter's `__init__` is synchronous and lightweight; it does not hit the network.
-2. **Preload.** For every registered adapter, the lifespan handler calls `await adapter.preload()`. `preload()` is a sealed template on `BaseExchange`: if the adapter overrides `_warm()`, the base class spawns it as a background task and returns immediately. The handler does not block; the router accepts traffic right away. Inside `_warm()`, adapters call `await self._step("label", awaitable)` once per logical warm; the base class times each step and emits a structured log timeline (`[adapter] preload: warming X...`, `[adapter] preload: X ready in Ts`, `[adapter] preload: done in Ts`). Cross-adapter parallelism is preserved (each adapter's warm chain runs in its own background task); within an adapter, steps run sequentially so the log reads as a chronological per-adapter timeline. During the warm window any route that depends on a cache being primed triggers the same fetch the warm step would have performed (the first request to need it does the work under the cache lock, and the warm step finds it already filled); OKX funding intervals additionally fall back to a per-symbol on-demand lookup. Correctness is preserved either way at the cost of a few extra upstream calls until the warm catches up. SymbolInfo caches are owned by `BaseExchange` and refresh at most once per 24 hours after the initial fill; a failed refresh serves the cached copy and retries after an hour.
-3. **Yield.** The service is now serving. Shutdown reverses this: stream-manager teardown first, then `adapter.shutdown()` per adapter to close HTTP clients and WS connections.
+2. **Preload.** `startup_exchanges()` then walks `EXCHANGE_REGISTRY` and calls `await adapter.preload()` on each entry, each call wrapped in a `try`/`except` that logs the traceback and moves to the next adapter, so one adapter failing to warm does not stop the others or the boot. `preload()` is a sealed template on `BaseExchange`: if the adapter overrides `_warm()`, the base class spawns it as a background task and returns immediately. Startup does not block on the warm; the router accepts traffic right away. Inside `_warm()`, adapters call `await self._step("label", awaitable)` once per logical warm; the base class times each step and emits a structured log timeline (`[adapter] preload: warming X...`, `[adapter] preload: X ready in Ts`, `[adapter] preload: done in Ts`). Cross-adapter parallelism is preserved (each adapter's warm chain runs in its own background task); within an adapter, steps run sequentially so the log reads as a chronological per-adapter timeline. During the warm window any route that depends on a cache being primed triggers the same fetch the warm step would have performed (the first request to need it does the work under the cache lock, and the warm step finds it already filled); OKX funding intervals additionally fall back to a per-symbol on-demand lookup. Correctness is preserved either way at the cost of a few extra upstream calls until the warm catches up. SymbolInfo caches are owned by `BaseExchange` and refresh at most once per 24 hours after the initial fill; a failed refresh serves the cached copy and retries after an hour.
+3. **Yield.** The service is now serving. Shutdown reverses this: stream-manager teardown first, then, per adapter, the preload warm task is cancelled and `adapter.shutdown()` closes the HTTP client and WS connections. Cancelling first is what stops a warm still in flight from calling a client that has just been closed.
 
 <div align="center">
   <img src="imgs/204648.png" alt="Startup lifecycle with background warm" width="40%" />
@@ -99,7 +99,7 @@ This is also why re-subscribing on the same connection is not supported. Each co
 
 The backoff and fail-fast flow lives here; user-facing behaviour and per-exchange specifics live in [Exchange Notes](Exchange_Notes.md#rate-limit-and-ban-protection); implementation patterns and header names live in [Contributor Guide](Contributor_Guide.md#rate-limit-headers-and-proactive-backoff).
 
-Each adapter holds a shared `_backoff_until` timestamp guarded by an `asyncio.Lock` (Binance keys it per upstream host, since api, fapi, and dapi carry independent weight buckets). Requests run in parallel by default, but every request consults the timestamp before issuing and sleeps until it clears if a backoff window is active. The lock only protects writes to the timestamp; reads are racy but harmless because the worst case is one extra request slipping through the boundary of a window. When the remaining backoff is large, some adapters fail fast with an `UpstreamUnavailableError` rather than blocking the caller: Bybit and KuCoin fail at 30s, OKX at 60s. Binance sleeps through the backoff and retries, using the upstream's `Retry-After` header (or 5s default) for rate-limit waits with up to 3 retries; Kraken uses exponential backoff with full jitter capped at 60s per attempt, up to 8 retries on Spot REST and 5 on Futures, then fails with `UpstreamUnavailableError`. Per-adapter specifics live in [Exchange Notes](Exchange_Notes.md#rate-limit-and-ban-protection).
+Each adapter holds a shared `_backoff_until` timestamp guarded by an `asyncio.Lock` (Binance keys it per upstream host, since api, fapi, and dapi carry independent weight buckets). Requests run in parallel by default, but every request consults the timestamp before issuing and sleeps until it clears if a backoff window is active. The lock only protects writes to the timestamp; reads are racy but harmless because the worst case is one extra request slipping through the boundary of a window. When the remaining backoff is large, some adapters fail fast with an `UpstreamUnavailableError` rather than blocking the caller: Bybit and KuCoin fail at 30s, OKX at 60s. Binance sleeps through the backoff and retries, using the upstream's `Retry-After` header (or 5s default) for rate-limit waits with up to 3 retries; Kraken waits out any deadline the upstream declares (a `Retry-After` header, or a throttle time parsed out of the error body) and otherwise doubles a one-second base per attempt, caps that base at 60s, then scales it by a random 0.5x to 1.5x jitter factor, so a single wait can reach 90s; the budget is 8 attempts on Spot REST and 5 on Futures, after which it fails with `UpstreamUnavailableError`. Per-adapter specifics live in [Exchange Notes](Exchange_Notes.md#rate-limit-and-ban-protection).
 
 <div align="center">
   <img src="imgs/204651.png" alt="Rate-limit and ban avoidance" width="40%" />
@@ -128,7 +128,7 @@ The route layer adds three more responses that adapters never raise themselves:
 
 One more condition does not correspond to an exception type at all:
 
-* **Upstream rate limiting** (429 or 418, or proactive detection via response headers) causes the adapter to wait for the declared backoff window before retrying. The client request is delayed, not rejected. When the wait exceeds the adapter's fail-fast threshold (30s on Bybit and KuCoin, 60s on OKX), the adapter raises `UpstreamUnavailableError` instead, which falls under the second bullet above. Binance and Kraken do not implement a single fail-fast cutoff; they sleep and retry until the upstream clears or the retry budget exhausts, then raise `UpstreamUnavailableError` (Kraken bounds total backoff at ~4 minutes).
+* **Upstream rate limiting** (429 or 418, or proactive detection via response headers) causes the adapter to wait for the declared backoff window before retrying. The client request is delayed, not rejected. When the wait exceeds the adapter's fail-fast threshold (30s on Bybit and KuCoin, 60s on OKX), the adapter raises `UpstreamUnavailableError` instead, which falls under the second bullet above. Binance and Kraken do not implement a single fail-fast cutoff; they sleep and retry until the upstream clears or the retry budget exhausts, then raise `UpstreamUnavailableError` (Kraken retries 8 times on Spot REST and 5 on Futures, and its waits are exponential to a 60s ceiling with 0.5x to 1.5x jitter, so a Spot budget runs out after roughly 1 to 3 minutes).
 
 The `detail` field in error responses always carries the underlying exception message, whether it came from the adapter or the upstream exchange. Nothing is rewritten or swallowed.
 

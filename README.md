@@ -8,12 +8,12 @@
 </div>
 
 <sub>
-  <b>Introduction</b> &nbsp;•&nbsp; 
-  <a href=".Documentation/API_Reference.md">API Reference</a> &nbsp;•&nbsp; 
-  <a href=".Documentation/Python_SDK.md">Python SDK</a> &nbsp;•&nbsp; 
-  <a href=".Documentation/Exchange_Notes.md">Exchange Notes</a> &nbsp;•&nbsp; 
-  <a href=".Documentation/System_Architecture.md">System Architecture</a> &nbsp;•&nbsp; 
-  <a href=".Documentation/Auditor_Guide.md">Auditor Guide</a> &nbsp;•&nbsp; 
+  <b>Introduction</b> &nbsp;•&nbsp;
+  <a href=".Documentation/API_Reference.md">API Reference</a> &nbsp;•&nbsp;
+  <a href=".Documentation/Python_SDK.md">Python SDK</a> &nbsp;•&nbsp;
+  <a href=".Documentation/Exchange_Notes.md">Exchange Notes</a> &nbsp;•&nbsp;
+  <a href=".Documentation/System_Architecture.md">System Architecture</a> &nbsp;•&nbsp;
+  <a href=".Documentation/Auditor_Guide.md">Auditor Guide</a> &nbsp;•&nbsp;
   <a href=".Documentation/Contributor_Guide.md">Contributor Guide</a>
 </sub>
 
@@ -324,7 +324,7 @@ The only knob exposed at deploy time is the host port:
 
 | Variable | Required | Default | Purpose |
 | :--- | :--- | :--- | :--- |
-| `EXCHANGE_ROUTER_SERVICE_PORT` | Yes | `8040` | Host port that Docker publishes. The container always binds `8040` internally. Change this if `8040` is already taken on the host, or if you run multiple router instances on the same machine. |
+| `EXCHANGE_ROUTER_SERVICE_PORT` | No | `8040` | Host port that Docker publishes. The container always binds `8040` internally. Change this if `8040` is already taken on the host, or if you run multiple router instances on the same machine. |
 
 <br>
 
@@ -379,3 +379,7 @@ finally:
 ```
 
 **Full method reference, DataFrame column layout, warnings, and end-to-end recipes are in the [Python SDK](.Documentation/Python_SDK.md) docs.**
+
+<br>
+
+Five notebooks in [`atOCEANO/examples`](https://github.com/atOCEANO/examples) drive this client end to end, from the first frame it hands back through a backtest, a parameter search, and a reinforcement-learning environment.

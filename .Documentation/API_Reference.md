@@ -8,12 +8,12 @@
 </div>
 
 <sub>
-  <a href="../README.md">Introduction</a> &nbsp;•&nbsp; 
-  <b>API Reference</b> &nbsp;•&nbsp; 
-  <a href="Python_SDK.md">Python SDK</a> &nbsp;•&nbsp; 
-  <a href="Exchange_Notes.md">Exchange Notes</a> &nbsp;•&nbsp; 
-  <a href="System_Architecture.md">System Architecture</a> &nbsp;•&nbsp; 
-  <a href="Auditor_Guide.md">Auditor Guide</a> &nbsp;•&nbsp; 
+  <a href="../README.md">Introduction</a> &nbsp;•&nbsp;
+  <b>API Reference</b> &nbsp;•&nbsp;
+  <a href="Python_SDK.md">Python SDK</a> &nbsp;•&nbsp;
+  <a href="Exchange_Notes.md">Exchange Notes</a> &nbsp;•&nbsp;
+  <a href="System_Architecture.md">System Architecture</a> &nbsp;•&nbsp;
+  <a href="Auditor_Guide.md">Auditor Guide</a> &nbsp;•&nbsp;
   <a href="Contributor_Guide.md">Contributor Guide</a>
 </sub>
 
@@ -52,7 +52,7 @@ Every quantitative record (Trade, Candle, OpenInterest, etc.) carries nested val
 
 ### Endpoints
 
-#### Discovery
+**Discovery**
 
 | Method | Route | Description | Params |
 | :--- | :--- | :--- | :--- |
@@ -64,37 +64,36 @@ Every quantitative record (Trade, Candle, OpenInterest, etc.) carries nested val
 | `GET` | `/{exchange}/status` | Adapter health string. Returns `{"status": "online", "exchange": name}`; does not poll the upstream exchange. | None |
 | `GET` | `/{exchange}/capabilities` | Supported REST routes and WebSocket channels for an adapter. | None |
 | `GET` | `/{exchange}/market_types` | Market types available on the exchange. | None |
-| `GET` | `/{exchange}/{market_type}/markets` | Lite list of every tradable symbol with `base_asset`, `quote_asset`, `qty_unit`, `contract_size`, and `funding.kind`. On `linear` and `inverse`, only perpetuals are returned. Served from the in-memory adapter cache (refreshed at most once per 24h): no upstream calls on the request path. | None |
+| `GET` | `/{exchange}/{market_type}/markets` | Lite list of every tradable symbol with `base_asset`, `quote_asset`, `qty_unit`, `contract_size`, and `funding.kind`. On `linear` and `inverse`, only perpetuals are returned. Served from the in-memory adapter cache (refreshed at most once per 24h): no upstream calls once the cache is warm, and the first request to arrive on a cold cache fills it. | None |
 | `GET` | `/{exchange}/{market_type}/markets/{symbol}` | Full `SymbolInfo` for one symbol: precision, order limits, contract size, funding convention. | None |
 
-#### Pricing
+**Pricing**
 
 | Method | Route | Description | Params |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/{exchange}/{market_type}/ticker/{symbol}` | 24h rolling window price and volume stats. | None |
 | `GET` | `/{exchange}/{market_type}/book_ticker/{symbol}` | Best bid/ask price and quantity. | None |
 
-#### Trades
+**Trades**
 
 | Method | Route | Description | Params |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/{exchange}/{market_type}/trades/{symbol}` | Recent public trades. | `limit` |
 | `GET` | `/{exchange}/{market_type}/agg_trades/{symbol}` | Aggregated trade history. | `start`, `limit` |
 
-#### Orderbook
+**Orderbook**
 
 | Method | Route | Description | Params |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/{exchange}/{market_type}/orderbook/{symbol}` | Current L2 orderbook snapshot. | `depth` |
 
-#### Historical Data
+**Historical Data**
 
 | Method | Route | Description | Params |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/{exchange}/{market_type}/candles/{symbol}` | OHLCV candles. | `interval`, `start`, `limit` |
 
-#### Futures
-*Linear and inverse market types only.*
+**Futures** &nbsp;•&nbsp; *linear and inverse market types only*
 
 | Method | Route | Description | Params |
 | :--- | :--- | :--- | :--- |
@@ -123,11 +122,7 @@ The natural pagination loop for "load older" is therefore: pass the oldest times
 
 <br>
 
-### Response Shapes
-
-All REST responses are normalized to the same schema regardless of the upstream exchange. Timestamps are Unix milliseconds. Prices are floats in the row's `quote` currency. Quantitative fields (qty, volume, open_interest) are **nested value objects** that carry both the native upstream value and a quote-currency notional. WebSocket channels emit the same shapes, noted inline.
-
-#### Interpretation Fields
+### Interpretation Fields
 
 Every quantitative record carries one or more categorical discriminator fields that change how the value should be read. Branching on these is how application code stays exchange-agnostic.
 
@@ -135,21 +130,26 @@ Every quantitative record carries one or more categorical discriminator fields t
 | :--- | :--- | :--- | :--- |
 | `unit` | qty / volume / open_interest / SymbolInfo.qty_unit | `"base"` | `native` is in the base coin (BTC for BTCUSDT, etc.) |
 |  |  | `"contract"` | `native` is a contract count; the same record carries `contract_size` for converting to USD |
-| `usd_basis.method` | volume / open_interest | `"close"` | `usd = native × the row's own close`. The basis object's `close` and `close_ts` are null because the price is the row's own and is already visible to the reader. |
+| `usd_basis.method` | volume / open_interest | `"close"` | `usd = native * the row's own close`. The basis object's `close` and `close_ts` are null because the price is the row's own and is already visible to the reader. |
 |  |  | `"candle_close"` | `usd` came from a separate candle join. The basis carries the actual `close` and `close_ts` used. Both are null if the join missed, in which case `usd` is null too while `native` is always populated. |
-|  |  | `"contract_size"` | `usd = native × contract_size`, exact and price-independent. Used on inverse contracts where each contract represents a fixed quote-currency notional. |
-| `funding.kind` | MarkPrice.funding / FundingRate.rate / SymbolInfo.funding | `"discrete"` | Settles at fixed cycles. `per_cycle × notional` is charged at `valid_until_ts`. |
-|  |  | `"continuous"` | Accrues smoothly between samples. Compute paid via `per_cycle × notional × (overlap_ms / cycle_ms)` over your position window. |
+|  |  | `"contract_size"` | `usd = native * contract_size`, exact and price-independent. Used on inverse contracts where each contract represents a fixed quote-currency notional. |
+| `funding.kind` | MarkPrice.funding / FundingRate.rate / SymbolInfo.funding | `"discrete"` | Settles at fixed cycles. `per_cycle * notional` is charged at `valid_until_ts`. |
+|  |  | `"continuous"` | Accrues smoothly between samples. Compute paid via `per_cycle * notional * (overlap_ms / cycle_ms)` over your position window. |
 | `account_scope` | LongShortRatio | `"top_traders"` | Only top-trader accounts per the upstream's classification. |
 |  |  | `"all_accounts"` | Every account at the venue. |
 |  |  | `"opaque"` | Upstream exposes only the ratio; `long_account` and `short_account` will be null. |
-| `side` | Trade / AggTrade / Liquidation | `"buy"` / `"sell"` | Taker (aggressor) side. Universal across venues. |
+| `side` | Trade / AggTrade | `"buy"` / `"sell"` | Taker (aggressor) side. Universal across venues. |
+|  | Liquidation | `"buy"` / `"sell"` | The liquidation order's book side, the opposite of the liquidated position's side: a long being liquidated produces `"sell"`. |
 
 The SDK helpers (`per_hour_view`, `funding_paid`) already branch on these fields, so application code does not have to. For which value each venue uses on which route, see [Exchange Notes](Exchange_Notes.md).
 
 <br>
 
-**Service root** &nbsp;·&nbsp; `GET /`
+### Response Shapes
+
+All REST responses are normalized to the same schema regardless of the upstream exchange. Timestamps are Unix milliseconds. Prices are floats in the row's `quote` currency. Quantitative fields (qty, volume, open_interest) are **nested value objects** that carry both the native upstream value and a quote-currency notional. WebSocket channels emit the same shapes, noted inline.
+
+**Service root** &nbsp;•&nbsp; `GET /`
 ```json
 {
   "service": "exchange-router-service",
@@ -163,7 +163,7 @@ The SDK helpers (`per_hour_view`, `funding_paid`) already branch on these fields
 }
 ```
 
-**Exchange overview** &nbsp;·&nbsp; `GET /{exchange}`
+**Exchange overview** &nbsp;•&nbsp; `GET /{exchange}`
 ```json
 {
   "exchange": "binance",
@@ -178,7 +178,7 @@ The SDK helpers (`per_hour_view`, `funding_paid`) already branch on these fields
 }
 ```
 
-**Markets list** &nbsp;·&nbsp; `GET /{exchange}/{market_type}/markets`
+**Markets list** &nbsp;•&nbsp; `GET /{exchange}/{market_type}/markets`
 ```json
 {
   "exchange": "binance",
@@ -199,7 +199,7 @@ The SDK helpers (`per_hour_view`, `funding_paid`) already branch on these fields
 
 The lite entry carries just enough metadata to enumerate and filter symbols without a per-symbol round trip. Use `/markets/{symbol}` for the full `SymbolInfo`.
 
-**Symbol Info** &nbsp;·&nbsp; `GET /{exchange}/{market_type}/markets/{symbol}`
+**Symbol Info** &nbsp;•&nbsp; `GET /{exchange}/{market_type}/markets/{symbol}`
 ```json
 {
   "symbol": "BTCUSD",
@@ -221,7 +221,7 @@ The lite entry carries just enough metadata to enumerate and filter symbols with
 
 Only tradeable symbols appear in `/markets` and `/markets/{symbol}`. Paused, halted, and offline instruments are filtered out at the adapter level, so a symbol's presence in the response is itself the liveness signal.
 
-**Ticker** &nbsp;·&nbsp; `GET /ticker/{symbol}` &nbsp;·&nbsp; WS `ticker`
+**Ticker** &nbsp;•&nbsp; `GET /ticker/{symbol}` &nbsp;•&nbsp; WS `ticker`
 ```json
 {
   "symbol": "BTCUSDT",
@@ -245,7 +245,7 @@ Only tradeable symbols appear in `/markets` and `/markets/{symbol}`. Paused, hal
 
 On inverse markets `volume_24h.unit` is `"contract"`, `contract_size` is populated, and `usd_basis.method` is `"contract_size"` (exact conversion via the fixed notional per contract).
 
-**Book Ticker** &nbsp;·&nbsp; `GET /book_ticker/{symbol}` &nbsp;·&nbsp; WS `book_ticker`
+**Book Ticker** &nbsp;•&nbsp; `GET /book_ticker/{symbol}` &nbsp;•&nbsp; WS `book_ticker`
 ```json
 {
   "symbol": "BTCUSDT",
@@ -259,7 +259,7 @@ On inverse markets `volume_24h.unit` is `"contract"`, `contract_size` is populat
 }
 ```
 
-**Orderbook** &nbsp;·&nbsp; `GET /orderbook/{symbol}` &nbsp;·&nbsp; WS `orderbook`
+**Orderbook** &nbsp;•&nbsp; `GET /orderbook/{symbol}` &nbsp;•&nbsp; WS `orderbook`
 ```json
 {
   "symbol": "BTCUSDT",
@@ -272,9 +272,9 @@ On inverse markets `volume_24h.unit` is `"contract"`, `contract_size` is populat
 }
 ```
 
-Per-level qty stays as a flat `[price, qty]` pair. Doubling depth-200 books just to embed per-level USD is a poor cost/benefit trade; consumers compute it as `price × qty` locally.
+Per-level qty stays as a flat `[price, qty]` pair. Doubling depth-200 books just to embed per-level USD is a poor cost/benefit trade; consumers compute it as `price * qty` locally.
 
-**Trade** &nbsp;·&nbsp; `GET /trades/{symbol}` (list) &nbsp;·&nbsp; WS `trades`
+**Trade** &nbsp;•&nbsp; `GET /trades/{symbol}` (list) &nbsp;•&nbsp; WS `trades`
 ```json
 {
   "id": "4851723",
@@ -288,9 +288,9 @@ Per-level qty stays as a flat `[price, qty]` pair. Doubling depth-200 books just
 }
 ```
 
-On inverse markets `qty.unit` is `"contract"`, `contract_size` is populated, and `qty.usd = native × contract_size` (price-independent). Worked example: with `contract_size=100`, a 5-contract trade is exactly `qty.usd = 500` regardless of price. With `contract_size=1`, `qty.native == qty.usd` for the same reason. The actual contract size per instrument comes from `GET /{exchange}/{market_type}/markets/{symbol}` and is reflected on the trade row itself.
+On inverse markets `qty.unit` is `"contract"`, `contract_size` is populated, and `qty.usd = native * contract_size` (price-independent). Worked example: with `contract_size=100`, a 5-contract trade is exactly `qty.usd = 500` regardless of price. With `contract_size=1`, `qty.native == qty.usd` for the same reason. The actual contract size per instrument comes from `GET /{exchange}/{market_type}/markets/{symbol}` and is reflected on the trade row itself.
 
-**Aggregated Trade** &nbsp;·&nbsp; `GET /agg_trades/{symbol}` (list) &nbsp;·&nbsp; WS `agg_trades`
+**Aggregated Trade** &nbsp;•&nbsp; `GET /agg_trades/{symbol}` (list) &nbsp;•&nbsp; WS `agg_trades`
 ```json
 {
   "agg_id": "8192456",
@@ -306,7 +306,7 @@ On inverse markets `qty.unit` is `"contract"`, `contract_size` is populated, and
 }
 ```
 
-**Candle** &nbsp;·&nbsp; `GET /candles/{symbol}` (list)
+**Candle** &nbsp;•&nbsp; `GET /candles/{symbol}` (list)
 ```json
 {
   "symbol": "BTCUSDT",
@@ -328,9 +328,9 @@ On inverse markets `qty.unit` is `"contract"`, `contract_size` is populated, and
 }
 ```
 
-On linear/spot, `volume.usd = native × close` (close-as-VWAP-proxy, approximate). On inverse, `volume.usd = native × contract_size` (exact). The `usd_basis.method` field tells you which.
+On linear/spot, `volume.usd = native * close` (close-as-VWAP-proxy, approximate). On inverse, `volume.usd = native * contract_size` (exact). The `usd_basis.method` field tells you which.
 
-**Mark Price** &nbsp;·&nbsp; `GET /mark_price/{symbol}` &nbsp;·&nbsp; WS `mark_price` &nbsp;·&nbsp; *linear/inverse only*
+**Mark Price** &nbsp;•&nbsp; `GET /mark_price/{symbol}` &nbsp;•&nbsp; WS `mark_price` &nbsp;•&nbsp; *linear/inverse only*
 
 Discrete-funding variant:
 ```json
@@ -370,7 +370,7 @@ Continuous-funding variant:
 
 `funding.kind` is the discriminator. On `discrete`, `per_cycle` is the estimated rate that will be charged at the next settlement (`valid_until_ts`). On `continuous`, `per_cycle` is the instantaneous per-cycle-equivalent accrual sampled at `timestamp`; partial holds pay proportionally. The SDK's `funding_paid()` helper handles both branches correctly.
 
-**Funding Rate** &nbsp;·&nbsp; `GET /funding_rate/{symbol}` (list)
+**Funding Rate** &nbsp;•&nbsp; `GET /funding_rate/{symbol}` (list)
 
 Discrete:
 ```json
@@ -404,7 +404,7 @@ Continuous:
 
 Discrete rows are settlement events; the rate was charged at `timestamp`. Continuous rows are sample observations; no charge happened at `timestamp`, just an observation of the instantaneous rate.
 
-**Open Interest** &nbsp;·&nbsp; `GET /open_interest/{symbol}` (list)
+**Open Interest** &nbsp;•&nbsp; `GET /open_interest/{symbol}` (list)
 
 Linear (USD basis from joined candle close):
 ```json
@@ -442,9 +442,9 @@ Inverse (USD basis from fixed contract_size):
 }
 ```
 
-On linear markets, the route handler fetches matching candles after the OI rows arrive (sequential, not parallel) and joins them by timestamp to populate the row's `usd_basis` block (`method: "candle_close"`, plus the joined `close` and `close_ts`) and derive `usd = native × close`. If the candle fetch itself fails, the route logs an exception and returns the OI rows with `usd` left `null`. If the fetch succeeds but a given OI row has no matching candle, the row passes through silently with `usd` `null` and `usd_basis.close` / `close_ts` both `null`. The raw `native` is always populated.
+On linear markets, the route handler fetches matching candles after the OI rows arrive (sequential, not parallel) and joins them by timestamp to populate the row's `usd_basis` block (`method: "candle_close"`, plus the joined `close` and `close_ts`) and derive `usd = native * close`. If the candle fetch itself fails, the route logs an exception and returns the OI rows with `usd` left `null`. If it returns fewer than two candles, the join is skipped for the whole response with no log line, since the handler needs a second candle to derive the period offset. If the fetch succeeds but a given OI row has no matching candle, the row passes through silently with `usd` `null` and `usd_basis.close` / `close_ts` both `null`. The raw `native` is always populated.
 
-**Liquidation** &nbsp;·&nbsp; `GET /liquidations/{symbol}` (list) &nbsp;·&nbsp; WS `liquidations`
+**Liquidation** &nbsp;•&nbsp; `GET /liquidations/{symbol}` (list) &nbsp;•&nbsp; WS `liquidations`
 ```json
 {
   "symbol": "BTCUSDT",
@@ -457,7 +457,7 @@ On linear markets, the route handler fetches matching candles after the OI rows 
 }
 ```
 
-**Long/Short Ratio** &nbsp;·&nbsp; `GET /long_short_ratio/{symbol}` (list)
+**Long/Short Ratio** &nbsp;•&nbsp; `GET /long_short_ratio/{symbol}` (list)
 ```json
 {
   "symbol": "BTCUSDT",
@@ -493,14 +493,24 @@ No `quote` field; this metric is dimensionless. `account_scope` carries the upst
 All error responses include a `detail` field describing what went wrong:
 
 ```json
-{"detail": "Exchange 'foo' not found or not enabled."}
+{"detail": "Exchange 'foo' not found or not enabled"}
 ```
 
-Parameter validation errors also carry an `error` field set to `"Invalid Request"`:
+Every exception that reaches one of the global handlers, whether an adapter or the route layer raised it, carries an `error` label beside `detail`:
+
+| Status | `error` |
+| :--- | :--- |
+| **400** | `"Invalid Request"` |
+| **500** | `"Internal Server Error"` |
+| **501** | `"Not Implemented"` |
+| **502** | `"Bad Upstream Response"` |
+| **503** | `"Upstream Unavailable"` |
 
 ```json
-{"error": "Invalid Request", "detail": "Interval '2m' is not valid for binance spot candles."}
+{"error": "Invalid Request", "detail": "Interval '2m' is not valid for binance spot candles"}
 ```
+
+The three responses the route layer raises before an adapter is reached carry `detail` alone and no `error`: the 404 for an unregistered exchange, the 400 for a market type the adapter does not declare, and FastAPI's own 422 for a path or query parameter that fails validation. So a 400 arrives in either form; branch on `detail`, not on the presence of `error`.
 
 The router never masks upstream error detail. If the underlying exchange returns a specific message, it is passed through in `detail`.
 
@@ -575,7 +585,7 @@ curl http://localhost:8040/binance/spot/ticker/BTCUSDT
 curl "http://localhost:8040/bybit/linear/candles/ETHUSDT?interval=1h&limit=500"
 ```
 
-The block above hits, in order: service introspection, the active-adapter list, Binance's capability map (check this before building clients), the lite markets list (served entirely from cache, zero upstream calls), the full `SymbolInfo` for one symbol, a spot ticker, and 500 1h candles for a Bybit linear pair.
+The block above hits, in order: service introspection, the active-adapter list, Binance's capability map (check this before building clients), the lite markets list (served from cache once it is warm), the full `SymbolInfo` for one symbol, a spot ticker, and 500 1h candles for a Bybit linear pair.
 
 WebSocket, with `wscat`:
 
@@ -594,7 +604,7 @@ Trade events stream immediately after the payload is sent.
 Default values applied when the caller omits the query parameter. There is no router-side maximum: the cap, where one exists, is per-exchange and lives in the `/capabilities` map.
 
 | Parameter | Min | Max | Default |
-| :--- | ---: | ---: | ---: |
+| :--- | :--- | :--- | :--- |
 | `depth` (orderbook) | 1 | * | 20 |
 | `limit` (trades) | 1 | * | 100 |
 | `limit` (agg_trades) | 1 | * | 500 |
@@ -603,7 +613,12 @@ Default values applied when the caller omits the query parameter. There is no ro
 | `limit` (funding_rate) | 1 | * | 100 |
 | `limit` (liquidations) | 1 | * | 100 |
 | `limit` (long_short_ratio) | 1 | * | 30 |
+| `interval` (candles) | - | - | 1h |
+| `period` (open_interest) | - | - | 1h |
+| `period` (long_short_ratio) | - | - | 5m |
 
 `*` Determined by the capabilities map for each exchange and route. Paginated routes (`candles`, `agg_trades`, `funding_rate`, `open_interest`, `liquidations`, `long_short_ratio`) have no router-side ceiling: the adapter walks back through history bounded by upstream retention. Non-paginated routes (`trades`, `orderbook`) clamp to the per-exchange `max_limit` (`max_depth` for orderbook) declared in capabilities.
+
+`interval` and `period` carry no numeric range. Each is checked against the route's `intervals` list in the capability map when the adapter declares one, and an undeclared value returns `400` before the adapter is called.
 
 Per-venue semantic quirks (funding cycle `valid_until_ts` meaning, ticker timestamp lag on Binance, trade-id formats, 1000-prefix tokens, long/short breakdown availability) live in [Exchange Notes](Exchange_Notes.md).
