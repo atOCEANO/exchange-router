@@ -6,9 +6,9 @@
 # versioned on its own line and installs straight from the tag, so shipping a
 # wheel here would only publish a file whose number disagrees with the release.
 #
-# A v* tag releases. A manual dispatch runs the guard and stops, so the check can
-# be dry-run before committing to a tag:
-#   Actions -> release -> Run workflow
+# A v* tag releases. Both jobs below are gated on that tag, so a manual dispatch
+# runs neither: it is a way to read the workflow from the Actions tab and not a
+# dry run of the guard.
 
 name: release
 
@@ -50,7 +50,7 @@ jobs:
     name: publish the release
     needs: [version]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') # a dispatch checks only, never releases
+    if: startsWith(github.ref, 'refs/tags/') # a dispatch has no tag to match
     permissions:
       contents: write # creating a release writes to the repo
     steps:
