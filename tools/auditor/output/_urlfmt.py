@@ -70,7 +70,7 @@ def compact_evidence(evidence: Dict[str, Any], max_chars: int = 60) -> str:
 
     out = " ".join(pairs)
     if len(out) > max_chars:
-        out = out[:max_chars - 1] + "…"
+        out = out[:max_chars - 3] + "..."
     return out
 
 

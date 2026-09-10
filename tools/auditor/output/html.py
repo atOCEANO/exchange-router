@@ -114,16 +114,16 @@ def _route_caps(caps_by_exchange: Dict[str, Dict[str, Any]], market_type: str, c
 
 def _cap_cell(v: Any) -> str:
     if v is True:
-        return '<span class="cap-yes">✓</span>'
+        return '<span class="cap-yes">yes</span>'
     if v is False:
-        return '<span class="cap-no">✗</span>'
+        return '<span class="cap-no">no</span>'
     if v is None:
         return '<span class="cap-none">-</span>'
     if isinstance(v, list):
         if not v:
             return '<span class="cap-none">[]</span>'
         if len(v) > 6:
-            return _h(", ".join(str(x) for x in v[:6])) + f' <span class="cap-none">… (+{len(v) - 6})</span>'
+            return _h(", ".join(str(x) for x in v[:6])) + f' <span class="cap-none">... (+{len(v) - 6})</span>'
         return _h(", ".join(str(x) for x in v))
     return _h(str(v))
 
@@ -278,7 +278,7 @@ def _render_route_section(
         f'data-has-issue="{1 if has_issue else 0}">'
     )
 
-    title = _h(route) if kind == "rest" else f"ws · {_h(route)}"
+    title = _h(route) if kind == "rest" else f"ws / {_h(route)}"
     parts.append(f'<h4><code>{title}</code></h4>')
 
     if has_real_variants:

@@ -16,8 +16,8 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sa
 .toc a:hover { background: #e8e8ed; color: #0066cc; }
 .toc details { margin: 4px 0; }
 .toc summary { cursor: pointer; padding: 3px 8px; font-weight: 600; color: #1d1d1f; list-style: none; }
-.toc summary::before { content: '▸ '; font-size: 10px; }
-.toc details[open] summary::before { content: '▾ '; }
+.toc summary::before { content: '> '; font-size: 10px; }
+.toc details[open] summary::before { content: 'v '; }
 .toc summary:hover { background: #e8e8ed; }
 .toc .sub { padding-left: 16px; }
 
