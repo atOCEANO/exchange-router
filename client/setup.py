@@ -12,7 +12,7 @@ setup(
     name="exchange-router-client",
     version=version,
     description="Client SDK for the Exchange Router Service",
-    author="OCEANO",
+    author="atOCEANO",
     url="https://github.com/atOCEANO/exchange-router-service",
     license="MIT",
     packages=find_packages(),
