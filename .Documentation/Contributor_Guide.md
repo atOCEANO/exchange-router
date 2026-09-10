@@ -135,7 +135,8 @@ When iterating without `--reload`, set `--port` on the uvicorn command line dire
 docker run --rm --shm-size=1g \
   -v "${PWD}/dev/diagrams:/diagrams" \
   -v "${PWD}/.Documentation/imgs:/out" \
-  --entrypoint sh minlag/mermaid-cli \
+  --entrypoint sh \
+  minlag/mermaid-cli:11.17.1@sha256:062edb08dcc7f95841c15620241b6934af93aa75c27f223ebe2e81fd0b4da4c9 \
   -c 'set -e; for f in /diagrams/*.mmd; do n=$(basename "$f" .mmd); /home/mermaidcli/node_modules/.bin/mmdc -i "$f" -o "/out/$n.png" -c /diagrams/config.json -p /diagrams/puppeteer.json -b transparent -s 3; done'
 ```
 
@@ -143,7 +144,9 @@ The images are numbered rather than named and the descriptive name survives only
 
 **Three things the setup depends on.** The image's bundled headless-shell is broken with an ENOENT, so `puppeteer.json` points `executablePath` at the chromium the image also ships, and its entrypoint is `mmdc` itself, so the command above clears it and calls the binary by full path. The background has to be `transparent` rather than white, or the images invert badly against GitHub's dark mode, which is what the replaced set did. And no `-w`: mermaid's own width keeps the wide diagrams at a consistent 2352 across, which is why the `width=` values in the pages can stay as they are.
 
-**On rerunning.** Layout is deterministic: every image comes back at the identical pixel dimensions every time. The byte stream is not, for the five diagrams that contain a stadium node. Anti-aliasing along a rounded outline lands a handful of edge pixels differently between runs, on the order of 0.013 percent of the image, so a rerun is visually identical but shows as a modified file in git. Do not read that diff as a change; check the dimensions instead.
+**On rerunning.** The renderer is pinned to a digest rather than to `latest`, and that pin is what makes the paragraph below true over time rather than only within an afternoon: `latest` and the version tag are different images today, the tag names the mermaid version rather than the `mmdc` build inside it, and an unpinned rerun is free to relayout every picture at once. At this digest all seven come back at the pixel dimensions committed here.
+
+Layout is deterministic: every image comes back at the identical pixel dimensions every time. The byte stream is not, for the five diagrams that contain a stadium node. Anti-aliasing along a rounded outline lands a handful of edge pixels differently between runs, on the order of 0.013 percent of the image, so a rerun is visually identical but shows as a modified file in git. Do not read that diff as a change; check the dimensions instead. Two consecutive runs at this digest confirm it: 204644 and 204650, the two with no stadium node, come back byte identical, and the other five do not.
 
 **The palette** in `config.json` is the same file emsl uses, so the two repos' diagrams are one visual set: node fill `#16232e`, a teal `#2ee6a6` border for anything the service does itself, a blue `#4d9feb` one for anything a caller or an upstream initiates, `#e6edf3` text, `#8b949e` arrows, trebuchet sans. Two classes are local to this repo, both on the rate-limit and lifecycle flows: `#c98500` for a degraded path that still returns, and `#ff5470` for a terminal one. It also names the cluster and edge-label colours, which look like padding and are not: mermaid derives whatever the palette leaves out, and left to itself it draws cluster frames as opaque brown boxes.
 
