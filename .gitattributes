@@ -1,0 +1,7 @@
+# Normalize all text to LF in the repository and on checkout, so a clone reads the
+# same on every platform rather than however the cloning machine is configured.
+# Every blob here is already LF; this stops that depending on core.autocrlf.
+* text=auto eol=lf
+
+# Binary assets: never touch their bytes (a PNG signature contains 0x0D 0x0A).
+*.png binary
