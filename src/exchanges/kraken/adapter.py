@@ -126,7 +126,7 @@ class KrakenAdapter(BaseExchange):
                         "paginated":    False,
                         "max_limit":    720,
                         "retention_ms": None,
-                        "intervals": ["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"],
+                        "intervals":    ["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"],
                     },
                     "funding_rate": {
                         "rest":         False,
@@ -197,7 +197,7 @@ class KrakenAdapter(BaseExchange):
                         "paginated":    True,
                         "max_limit":    None,
                         "retention_ms": None,
-                        "intervals": ["1m", "5m", "15m", "30m", "1h", "4h", "12h", "1d", "1w"],
+                        "intervals":    ["1m", "5m", "15m", "30m", "1h", "4h", "12h", "1d", "1w"],
                     },
                     "funding_rate": {
                         "rest":         True,
@@ -212,7 +212,7 @@ class KrakenAdapter(BaseExchange):
                         "paginated":    True,
                         "max_limit":    None,
                         "retention_ms": None,
-                        "intervals": ["1m", "5m", "15m", "30m", "1h", "4h", "12h", "1d"],
+                        "intervals":    ["1m", "5m", "15m", "30m", "1h", "4h", "12h", "1d"],
                     },
                     "liquidations": {
                         "rest":         False,
@@ -268,7 +268,7 @@ class KrakenAdapter(BaseExchange):
                         "paginated":    True,
                         "max_limit":    None,
                         "retention_ms": None,
-                        "intervals": ["1m", "5m", "15m", "30m", "1h", "4h", "12h", "1d", "1w"],
+                        "intervals":    ["1m", "5m", "15m", "30m", "1h", "4h", "12h", "1d", "1w"],
                     },
                     "funding_rate": {
                         "rest":         True,
@@ -283,7 +283,7 @@ class KrakenAdapter(BaseExchange):
                         "paginated":    True,
                         "max_limit":    None,
                         "retention_ms": None,
-                        "intervals": ["1m", "5m", "15m", "30m", "1h", "4h", "12h", "1d"],
+                        "intervals":    ["1m", "5m", "15m", "30m", "1h", "4h", "12h", "1d"],
                     },
                     "liquidations": {
                         "rest":         False,

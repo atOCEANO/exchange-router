@@ -224,7 +224,7 @@ class Ticker(BaseModel):
     )
     price: float = Field(
         ...,
-        description="Last traded price in quote. Can lag on thinly-traded inverse markets; consult MarkPrice for current fair value.",
+        description="Last traded price in quote, or the current mid on a venue that publishes no last trade (Hyperliquid's asset context carries none, so price is midPx). Can lag on thinly-traded inverse markets; consult MarkPrice for current fair value.",
     )
     open_24h: float = Field(
         ...,

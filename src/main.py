@@ -14,7 +14,7 @@ from src.stream_manager import StreamManager
 from src.version import SCHEMA_VERSION, SERVICE_VERSION
 
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s:     %(name)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s - %(message)s")
 
 stream_manager = StreamManager()
 
@@ -93,9 +93,9 @@ async def unhandled_exception_handler(_request: Request, exc: Exception):
 def validate_request(exchange: str, market_type: MarketType = None):
     adapter = get_adapter(exchange)
     if not adapter:
-        raise HTTPException(status_code=404, detail=f"Exchange '{exchange}' not found or not enabled.")
+        raise HTTPException(status_code=404, detail=f"Exchange '{exchange}' not found or not enabled")
     if market_type and market_type not in adapter.supported_market_types:
-        raise HTTPException(status_code=400, detail=f"Market type '{market_type.value}' not supported on {exchange}.")
+        raise HTTPException(status_code=400, detail=f"Market type '{market_type.value}' not supported on {exchange}")
     return adapter
 
 
@@ -107,7 +107,7 @@ def validate_interval(adapter, market_type: MarketType, route: str, label: str, 
     intervals     = route_block.get("intervals")
 
     if intervals and value not in intervals:
-        raise ValueError(f"{label} '{value}' is not valid for {adapter.name} {market_type.value} {route}.")
+        raise ValueError(f"{label} '{value}' is not valid for {adapter.name} {market_type.value} {route}")
 
 
 @app.get("/")
