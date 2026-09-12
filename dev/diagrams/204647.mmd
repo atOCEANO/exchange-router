@@ -1,23 +1,22 @@
 flowchart LR
+    E{{"/ws/exchange/market_type"}}
     M["<b>StreamManager</b><br/>key =<br/>exchange:market_type:channel:symbol"]
     H["One StreamHub<br/>per channel and symbol"]
     W[("Upstream WS")]
-    A(["Client A"])
-    B(["Client B"])
-    C(["Client C"])
-    E{{"/ws/exchange/market_type"}}
+    A("Client A")
+    B("Client B")
+    C("Client C")
 
-    M --> H
-    H --> W
+    %% one direction only. the clients were drawn as both sources and sinks, which
+    %% gives them two ranks to satisfy, and mermaid resolved it by throwing the
+    %% subscribe edges back across the whole image. solid is control and dotted is
+    %% data, the same way 204644 reads, so subscribe is the one solid edge here
+    E -- "subscribe" --> M
     W -. "frames" .-> H
-    H -. "fan out" .-> M
-    M -. "frame" .-> A
-    M -. "frame" .-> B
-    M -. "frame" .-> C
-    M --> E
-    A --> E
-    B --> E
-    C --> E
+    H -. "one task per key" .-> M
+    M -.-> A
+    M -.-> B
+    M -.-> C
 
     classDef entry fill:#16232e,stroke:#4d9feb,stroke-width:2px,color:#e6edf3
     classDef stage fill:#16232e,stroke:#2ee6a6,stroke-width:2px,color:#e6edf3

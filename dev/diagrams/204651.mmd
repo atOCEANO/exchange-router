@@ -1,5 +1,5 @@
 flowchart TD
-    R(["<b>Request to host</b>"])
+    R("<b>Request to host</b>")
     %% a diamond grows on its widest line rather than its text, so every label on
     %% one is broken short: left long they draw lozenges that dwarf the stages
     B{"Host inside<br/>backoff<br/>window?"}
@@ -14,11 +14,11 @@ flowchart TD
     N{"Near weight<br/>budget? over 95%<br/>of the host limit"}
     P["Set 2s proactive backoff<br/>before any ban"]
     A{"Response"}
-    OK(["Return data"])
-    CE(["Client error to 400"])
+    OK("Return data")
+    CE("Client error to 400")
     RA["Honor Retry-After,<br/>extend host backoff"]
     RL{"Retries left?"}
-    F(["Upstream unavailable<br/>503 plus Retry-After"])
+    F("Upstream unavailable<br/>503 plus Retry-After")
 
     R --> B
     B -- "yes" --> W
