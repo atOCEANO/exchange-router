@@ -2,6 +2,7 @@
 
 
 <div style="padding-top: 0px;">
+  <a href="https://github.com/atOCEANO/exchange-router-service/releases"><img src="https://img.shields.io/github/v/release/atOCEANO/exchange-router-service?label=release&color=2ea043" alt="Latest release" /></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+" /></a>
   <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-0.123.0-05998b.svg?logo=fastapi&logoColor=white" alt="FastAPI" /></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
