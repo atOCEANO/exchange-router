@@ -104,9 +104,9 @@ async def _warm_one_funding_interval(self, info: SymbolInfo, sem: asyncio.Semaph
             logger.warning(f"funding interval lookup failed for {info.native_symbol}: {e}")
 ```
 
-By convention, `_warm()` (and any `_warm_*` helpers it calls) sits right after `shutdown()` in the adapter file; every existing adapter follows this placement. `_ensure_info_cache` and `_info_for` are provided by `BaseExchange` (see [SymbolInfo cache](#symbolinfo-cache-base-provided) below); the `_ensure_*_map` methods referenced in the examples are adapter-internal lazy caches. Listing either kind in `_warm` simply forces eager warming at startup.
+By convention, `_warm()` (and any `_warm_*` helpers it calls) sits right after `shutdown()` in the adapter file; every existing adapter follows this placement. `_ensure_info_cache` and `_info_for` are provided by `BaseExchange` (see [SymbolInfo cache](#symbolinfo-cache-base-provided) below); the `_ensure_*_map` methods referenced in the examples are adapter-internal lazy caches. Listing either kind in `_warm` forces eager warming at startup.
 
-Do not override `preload()` directly. The base class seals it; the override point is `_warm()`. If your adapter does not need prebuilding (one bulk endpoint covers all metadata), simply don't override `_warm`.
+Do not override `preload()` directly. The base class seals it; the override point is `_warm()`. If your adapter does not need prebuilding (one bulk endpoint covers all metadata), do not override `_warm`.
 
 <br>
 <br>
@@ -305,7 +305,7 @@ If you want a different bound, fork the helper. The cap is not surfaced as a cap
 
 When a route is unsupported on a given exchange (`rest=False, ws=False`), declare every field the route type defines, with `null` for inapplicable values:
 
-```python
+```text
 "agg_trades": {
     "rest":         False,
     "ws":           False,

@@ -51,7 +51,7 @@ Field names, units, funding conventions, and pagination semantics differ from on
 The two modes are functionally identical and operationally different. Local mode can do everything the service can. What it cannot do is coordinate, because coordination needs one process, and that is exactly what the service is.
 
 | | `local` | `service` |
-|:---|:---|:---|
+| :--- | :--- | :--- |
 | weight budget | per process | shared by every caller |
 | symbol cache | per process | shared, 24h, already warm |
 | WebSocket upstreams | one per subscription | one per key, fanned out |

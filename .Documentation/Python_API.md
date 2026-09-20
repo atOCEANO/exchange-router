@@ -68,7 +68,7 @@ For local development, `pip install -e ".[server,test]"` from a checkout. Requir
 
 Two constructors, one per mode. Both require the exchange scope, and bare `Router(...)` raises rather than guessing.
 
-```python
+```text
 Router.local(
     exchanges,                  # required: a list of names, or "all"
     *,
@@ -103,6 +103,8 @@ r.warm("kraken")    # warm one, declared or not
 ```
 
 `warm()` is the blocking form of something that is already happening. Use it to move the cost outside a timed loop rather than into your first measurement. In service mode it runs the schema handshake and the capability fetch instead, so it means the same thing in both: pay the setup cost now.
+
+Both constructors also accept `backend=`, which replaces the one they would have built. It exists so the test suite can drive the FastAPI app in process and stand in a fake service without reaching into a private attribute, and it is the reason the suite needs no knowledge of the transport. Passing your own is supported and undocumented beyond this paragraph: the `Backend` interface is two methods and it is not covered by the schema guarantee.
 
 <br>
 <br>
