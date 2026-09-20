@@ -159,6 +159,11 @@ class FakeExchange(BaseExchange):
 
 
     async def get_exchange_info(self, market_type: MarketType) -> List[SymbolInfo]:
+        cache = await self._ensure_info_cache(market_type)
+        return list(cache.values())
+
+
+    async def _fetch_exchange_info(self, market_type: MarketType) -> List[SymbolInfo]:
         quote   = QUOTES[market_type]
         funding = FUNDING_KIND.get(market_type)
         out     = []

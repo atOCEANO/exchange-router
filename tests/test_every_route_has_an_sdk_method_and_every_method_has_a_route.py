@@ -2,7 +2,7 @@ import inspect
 
 from fastapi.routing import APIRoute, APIWebSocketRoute
 
-from exchange_router.async_router import AsyncExchangeRouterClient
+from exchange_router.async_router import AsyncRouter
 from exchange_router.service import app
 
 
@@ -11,8 +11,8 @@ ROUTE_TO_METHOD = {
     "/status":                                    "get_status",
     "/version":                                   "get_version",
     "/exchanges":                                 "get_exchanges",
-    "/{exchange}":                                None,
-    "/{exchange}/status":                         None,
+    "/{exchange}":                                "get_exchange_overview",
+    "/{exchange}/status":                         "get_exchange_status",
     "/{exchange}/capabilities":                   "get_capabilities",
     "/{exchange}/market_types":                   "get_market_types",
     "/{exchange}/{market_type}/markets":          "get_markets",
@@ -32,16 +32,18 @@ ROUTE_TO_METHOD = {
 }
 
 KNOWN_GAPS = {
-    "/":                  "service metadata, reachable through get_status and get_exchanges",
-    "/{exchange}":        "per-market-type symbol counts, which nothing in the SDK exposes",
-    "/{exchange}/status": "the adapter's own status",
+    "/": "service metadata; get_status and get_exchanges already carry all of it",
 }
 
 COMPOSITES = {
-    "market", "markets", "close", "fetch_many", "subscribe",
+    "market", "markets", "fetch_many", "subscribe",
     "candles_many", "trades_many", "agg_trades_many", "funding_rate_many",
     "open_interest_many", "liquidations_many", "long_short_ratio_many",
 }
+
+LIFECYCLE = {"close", "warm"}
+
+CONSTRUCTORS = ("local", "service")
 
 
 def served_paths():
@@ -55,7 +57,7 @@ def served_paths():
 def sdk_methods():
     return {
         name
-        for name, value in inspect.getmembers(AsyncExchangeRouterClient, inspect.isfunction)
+        for name, value in inspect.getmembers(AsyncRouter, inspect.isfunction)
         if not name.startswith("_")
     }
 
@@ -69,16 +71,33 @@ def test_every_route_with_a_method_names_a_method_that_exists():
     assert named <= sdk_methods()
 
 
-def test_the_only_routes_without_a_method_are_the_three_recorded_gaps():
+def test_the_only_route_without_a_method_is_the_one_recorded_gap():
     gaps = {path for path, method in ROUTE_TO_METHOD.items() if method is None}
     assert gaps == set(KNOWN_GAPS)
 
 
 def test_every_sdk_method_is_a_route_or_a_declared_composite():
     covered = {m for m in ROUTE_TO_METHOD.values() if m is not None}
-    assert sdk_methods() - covered == COMPOSITES
+    assert sdk_methods() - covered == COMPOSITES | LIFECYCLE
 
 
 def test_no_gap_is_recorded_without_a_reason():
     for path, reason in KNOWN_GAPS.items():
         assert reason and isinstance(reason, str)
+
+
+def test_the_two_constructors_are_classmethods_and_not_ordinary_methods():
+    for name in CONSTRUCTORS:
+        assert isinstance(inspect.getattr_static(AsyncRouter, name), classmethod)
+
+    assert name not in sdk_methods()
+
+
+async def test_the_two_routes_that_used_to_be_gaps_now_answer_through_both_backends(router):
+    overview = await router.get_exchange_overview("fake")
+    assert overview["exchange"] == "fake"
+    assert [m["name"] for m in overview["market_types"]] == ["spot", "linear", "inverse"]
+    assert overview["market_types"][0]["symbol_count"] == 2
+
+    status = await router.get_exchange_status("fake")
+    assert status == {"status": "online", "exchange": "fake"}

@@ -2,7 +2,7 @@ import httpx
 import pytest
 import pytest_asyncio
 
-from exchange_router.async_router import AsyncExchangeRouterClient
+from exchange_router.async_router import AsyncRouter
 from exchange_router.backend import LocalBackend, RemoteBackend
 from exchange_router import exchanges as registry
 from exchange_router.service import app
@@ -34,8 +34,10 @@ def service_backend():
 
 @pytest_asyncio.fixture
 async def router(backend):
-    chosen = LocalBackend() if backend == "local" else service_backend()
-    client = AsyncExchangeRouterClient(verbose=False, backend=chosen)
+    if backend == "local":
+        client = AsyncRouter.local([EXCHANGE], verbose=False, backend=LocalBackend())
+    else:
+        client = AsyncRouter.service("http://router.test", [EXCHANGE], verbose=False, backend=service_backend())
 
     yield client
     await client.close()
