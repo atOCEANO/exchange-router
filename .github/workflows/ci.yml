@@ -32,22 +32,26 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10" # the floor the client declares, so the service is held to it too
-      - run: pip install -r requirements.txt
+      # the base install, with no server extra: the adapters must come up
+      # without FastAPI on the machine, which is what makes local mode a real
+      # claim rather than a packaging accident.
+      - run: pip install .
       # load_exchanges() logs and swallows an adapter that fails to import
-      # (src/exchanges/__init__.py), so a broken adapter leaves a service running
-      # with one fewer exchange and nothing anywhere fails. Counting the packages
-      # on disk against the registry is what turns that into a red build. Nothing
-      # here touches the network: an adapter's __init__ is documented as
-      # synchronous and lightweight, and get_capabilities is a static declaration.
+      # (exchange_router/exchanges/__init__.py), so a broken adapter leaves a
+      # service running with one fewer exchange and nothing anywhere fails.
+      # Counting the packages on disk against the registry is what turns that
+      # into a red build. Nothing here touches the network: an adapter's
+      # __init__ is documented as synchronous and lightweight, and
+      # get_capabilities is a static declaration.
       - name: every adapter package registers an adapter
         run: |
           python - <<'PY'
           import pathlib
           import sys
 
-          from src.exchanges import EXCHANGE_REGISTRY, load_exchanges
+          from exchange_router.exchanges import EXCHANGE_REGISTRY, load_exchanges
 
-          root = pathlib.Path("src/exchanges")
+          root = pathlib.Path("exchange_router/exchanges")
           packages = sorted(
               p.name for p in root.iterdir() if p.is_dir() and (p / "__init__.py").exists()
           )
@@ -72,24 +76,52 @@ jobs:
           print(f"{len(loaded)} adapters, each declaring capabilities and market types")
           PY
 
-  client:
-    name: the client SDK installs and imports
+  package:
+    name: the package installs and the base install carries no server
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-      # this is the install the SDK page and the release notes both tell people
-      # to run, just pointed at the checkout instead of at github, so a broken
-      # setup.py or a dependency missing from it fails here rather than in
-      # someone's first pip install. A clean venv, so nothing already on the
-      # runner can satisfy an import the package forgot to declare.
+      # this is the install the docs and the release notes tell people to run,
+      # pointed at the checkout instead of at github, so a broken pyproject or a
+      # dependency missing from it fails here rather than in someone's first pip
+      # install. A clean venv, so nothing already on the runner can satisfy an
+      # import the package forgot to declare.
       - name: install it into a clean interpreter
         run: |
           python -m venv /tmp/fresh
-          /tmp/fresh/bin/pip install ./client
-          /tmp/fresh/bin/python -c "import exchange_router_client as c; print('SDK', c.__version__)"
+          /tmp/fresh/bin/pip install .
+          /tmp/fresh/bin/python -c "import exchange_router as r; print('package', r.__version__)"
+      # the split between the base install and the server extra is the whole
+      # reason a library can exist here, so it is checked rather than asserted.
+      # If FastAPI ever leaks into the base dependency list this goes red.
+      - name: the base install pulls no FastAPI
+        run: |
+          /tmp/fresh/bin/python - <<'PY'
+          import importlib.util
+          import sys
+
+          if importlib.util.find_spec("fastapi") is not None:
+              sys.exit("fastapi reached a base install; it belongs to the server extra")
+          print("no fastapi in the base install")
+          PY
+      # py.typed is what makes the annotations count for anyone type-checking
+      # against this. It ships as package data and package data is easy to drop.
+      - name: the type marker ships
+        run: |
+          /tmp/fresh/bin/python - <<'PY'
+          import pathlib
+          import sys
+
+          import exchange_router
+
+          marker = pathlib.Path(exchange_router.__file__).parent / "py.typed"
+          if not marker.exists():
+              sys.exit(f"py.typed is not in the installed package at {marker}")
+          print("py.typed ships")
+          PY
 
   image:
     name: the image boots and answers

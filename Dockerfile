@@ -7,15 +7,13 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
 COPY . .
+RUN pip install --no-cache-dir ".[server]"
 
 
 FROM base AS test
 
-RUN pip install --no-cache-dir -r requirements-dev.txt
+RUN pip install --no-cache-dir ".[test]"
 
 CMD ["pytest", "-q"]
 
@@ -25,4 +23,4 @@ FROM base AS service
 RUN useradd --create-home --uid 1000 appuser && chown -R appuser /app
 USER appuser
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8040", "--ws-ping-interval", "30", "--ws-ping-timeout", "60"]
+CMD ["uvicorn", "exchange_router.service:app", "--host", "0.0.0.0", "--port", "8040", "--ws-ping-interval", "30", "--ws-ping-timeout", "60"]

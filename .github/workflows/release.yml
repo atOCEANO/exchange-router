@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   # The guard the release hangs off. v2.2.0 was tagged on a commit whose
-  # src/version.py still read 2.1.0, so a running container reported a version
+  # exchange_router/version.py still read 2.1.0, so a running container reported a version
   # that no tag matched and nothing anywhere noticed. Every tag from v2.2.1 on
   # has agreed; this is what keeps it that way.
   version:
@@ -31,18 +31,18 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/') # a dispatch has no tag to match
     steps:
       - uses: actions/checkout@v4
-      - name: compare the tag against src/version.py
+      - name: compare the tag against exchange_router/version.py
         run: |
           tag="${GITHUB_REF_NAME#v}"
-          src=$(sed -n 's/^SERVICE_VERSION *= *"\(.*\)"/\1/p' src/version.py)
+          src=$(sed -n 's/^SERVICE_VERSION *= *"\(.*\)"/\1/p' exchange_router/version.py)
           echo "tag ${GITHUB_REF_NAME} -> ${tag}"
-          echo "src/version.py    -> ${src}"
+          echo "exchange_router/version.py -> ${src}"
           if [ -z "$src" ]; then
-            echo "::error::could not read SERVICE_VERSION out of src/version.py"
+            echo "::error::could not read SERVICE_VERSION out of exchange_router/version.py"
             exit 1
           fi
           if [ "$tag" != "$src" ]; then
-            echo "::error::tag ${GITHUB_REF_NAME} does not match SERVICE_VERSION ${src}; bump src/version.py or move the tag"
+            echo "::error::tag ${GITHUB_REF_NAME} does not match SERVICE_VERSION ${src}; bump exchange_router/version.py or move the tag"
             exit 1
           fi
 
@@ -77,8 +77,8 @@ jobs:
             cd exchange-router-service
             python -m venv .venv
             source .venv/bin/activate
-            pip install -r requirements.txt
-            uvicorn src.main:app --port 8040
+            pip install ".[server]"
+            uvicorn exchange_router.service:app --port 8040
             ```
 
             On Windows, activate with `.venv\Scripts\activate`. Requires Python
@@ -115,7 +115,7 @@ jobs:
             service number, and that is intended:
 
             ```bash
-            pip install "git+https://github.com/atOCEANO/exchange-router-service.git@${{ github.ref_name }}#subdirectory=client"
+            pip install "git+https://github.com/atOCEANO/exchange-router-service.git@${{ github.ref_name }}"
             ```
 
             No `await`, and it runs identically in a script and in a notebook:
@@ -143,7 +143,7 @@ jobs:
               [Supported Exchanges](https://github.com/atOCEANO/exchange-router-service/blob/${{ github.ref_name }}/README.md#supported-exchanges);
               adding one is a new adapter and no change to the routing core.
             - One normalized wire format. Raw upstream dicts never cross the
-              boundary; every response is a Pydantic model from `src/models.py`.
+              boundary; every response is a Pydantic model from `exchange_router/models.py`.
             - Nested value objects on every quantitative record: `qty`, `volume`
               and `open_interest` each come back as
               `{native, unit, contract_size?, usd, usd_basis?}`, so one record
