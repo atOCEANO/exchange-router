@@ -26,7 +26,24 @@
 
 ## Architecture
 
-One FastAPI process, one adapter per exchange behind a routing layer that never branches on which exchange it is calling. REST and WebSocket share the port and the adapter instance.
+One adapter per exchange behind a routing layer that never branches on which exchange it is calling, reachable two ways.
+
+<br>
+
+### One API, two backends
+
+The Python API talks to a backend rather than to a URL. There are two, and they are the only thing that differs between the modes:
+
+```text
+Router  ->  LocalBackend   ->  adapters  ->  exchanges
+Router  ->  RemoteBackend  ->  service   ->  adapters  ->  exchanges
+```
+
+The seam between the router and a backend is semantic, not URL-shaped. It carries a route name and the parts of a request that mean something (`exchange`, `market_type`, `symbol`, and the route's own parameters), so the local path never builds or parses a path string. `LocalBackend` calls adapter methods directly; `RemoteBackend` builds a URL, makes the request, and hands back the parsed body. Everything above the seam, the frame builders, the row builders, the market handle, provenance, warnings, batching and the error tree, is shared and never learns which one answered.
+
+The service is one deployment of the same library. `exchange_router/service/main.py` is a FastAPI app over the same adapters and the same shared logic, and the only thing it adds is HTTP, the exception handlers that turn faults into status codes, and the WebSocket fan-out. REST and WebSocket share the port and the adapter instance.
+
+The two paths are not kept in agreement by discipline. Every test body in the suite runs against both backends and asserts the same frames, dtypes, index, provenance and exception types, which is what [0005](Decisions.md) records and why that suite exists.
 
 <br>
 <br>
@@ -99,7 +116,9 @@ This is also why re-subscribing on the same connection is not supported. Each co
 
 ## Rate Limiting
 
-The backoff and fail-fast flow lives here; user-facing behaviour and per-exchange specifics live in [Exchange Notes](Exchange_Notes.md#rate-limit-and-ban-protection); implementation patterns and header names live in [Contributor Guide](Contributor_Guide.md#rate-limit-headers-and-proactive-backoff).
+The backoff and fail-fast flow lives here; user-facing behaviour and per-exchange specifics live in [Exchange Notes](Exchange_Notes.md#rate-limit-and-ban-protection); implementation patterns and header names live in [Adapter Guide](Adapter_Guide.md#rate-limit-headers-and-proactive-backoff).
+
+**The budget is per process, and in local mode that process is yours.** All of the machinery below lives in the adapter, so it protects one Python process and nothing more. A service coordinates because every caller shares one set of adapters and therefore one budget. Two notebooks in local mode are two budgets, and the exchange sees the sum of both while neither can see the other. That is the entire operational difference between the modes, and it is why [Which mode to use](../README.md#which-mode-to-use) draws the line at more than one of anything rather than at how serious the work is.
 
 Each adapter holds a shared `_backoff_until` timestamp guarded by an `asyncio.Lock` (Binance keys it per upstream host, since api, fapi, and dapi carry independent weight buckets). Requests run in parallel by default, but every request consults the timestamp before issuing and sleeps until it clears if a backoff window is active. The lock only protects writes to the timestamp; reads are racy but harmless because the worst case is one extra request slipping through the boundary of a window. When the remaining backoff is large, some adapters fail fast with an `UpstreamUnavailableError` rather than blocking the caller: Bybit and KuCoin fail at 30s, OKX at 60s. Binance sleeps through the backoff and retries, using the upstream's `Retry-After` header (or 5s default) for rate-limit waits with up to 3 retries; Kraken waits out any deadline the upstream declares (a `Retry-After` header, or a throttle time parsed out of the error body) and otherwise doubles a one-second base per attempt, caps that base at 60s, then scales it by a random 0.5x to 1.5x jitter factor, so a single wait can reach 90s; the budget is 8 attempts on Spot REST and 5 on Futures, after which it fails with `UpstreamUnavailableError`. Per-adapter specifics live in [Exchange Notes](Exchange_Notes.md#rate-limit-and-ban-protection).
 
@@ -139,12 +158,16 @@ The `detail` field in error responses always carries the underlying exception me
 
 ## Versioning Policy
 
-The router carries two version numbers, defined in [exchange_router/version.py](../exchange_router/version.py) and surfaced through separate endpoints.
+The router carries two version numbers, defined in [exchange_router/version.py](../exchange_router/version.py). Only one of them is a compatibility claim.
 
 * **`SERVICE_VERSION`** is the standard semver string (`MAJOR.MINOR.PATCH`). It bumps for any user-visible change: a new route, a new field, a behavioural fix, a capability adjustment, a dependency upgrade. Returned at `GET /version` and `GET /`.
-* **`SCHEMA_VERSION`** is a small integer. It bumps only when the wire format breaks consumer code: renaming a field, flattening a nested object into top-level fields, removing a discriminator value, changing the type of a field. Adding an optional field does not bump. Returned at `GET /` and stamped on every auditor `results.json`; the auditor compares served-vs-pinned and fails the suite on drift.
+* **`SCHEMA_VERSION`** is a small integer. It bumps only when the wire format breaks consumer code: renaming a field, flattening a nested object into top-level fields, removing a discriminator value, changing the type of a field. Adding an optional field does not bump. Returned at `GET /` and stamped on every auditor `results.json` and on every DataFrame's `.attrs`; the auditor compares served-against-pinned and fails the suite on drift.
 
-The two version numbers are decoupled on purpose. A wire-compatible bug fix bumps `SERVICE_VERSION` and leaves `SCHEMA_VERSION` untouched, so clients pinned to a schema number do not need to recompile. A genuine wire break bumps both.
+The two are decoupled on purpose. A wire-compatible bug fix bumps `SERVICE_VERSION` and leaves `SCHEMA_VERSION` untouched, so clients pinned to a schema number do not need to change. A genuine wire break bumps both.
+
+**Compatibility is gated on the schema number and never on the release number.** In service mode the SDK reads `GET /version` once, on the first call that needs capabilities, and raises `SchemaMismatch` if the integers disagree. Gating on `SERVICE_VERSION` instead would mean a patch release of the container breaking every pinned install, and the two could never be deployed independently. The cost of that choice is recorded in [0004](Decisions.md): because additive fields never move the schema, the frame builders must tolerate a column that is not there rather than raising.
+
+The check runs on the first request rather than at construction, because a constructor cannot await a round trip. It costs nothing extra: the SDK already makes a lazy first call to fetch capabilities, and the handshake rides along with it.
 
 <br>
 <br>

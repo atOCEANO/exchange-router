@@ -27,11 +27,42 @@
 
 ## Introduction
 
-The `exchange-router-service` is **a drop-in container that normalizes public crypto exchange market data behind one async API**. REST and WebSocket are served on the same port, and every registered adapter speaks the same schema, so a client written once works across all of them. The currently supported set is listed in [Supported Exchanges](#supported-exchanges) below.
+The `exchange-router` is **one Python API over public crypto exchange market data, running either in your own process or against a service you deploy**. Every registered adapter speaks the same schema, so a client written once works across all of them, and the only thing that differs between the two ways of running it is which constructor you call. The currently supported set is listed in [Supported Exchanges](#supported-exchanges) below.
+
+```python
+from exchange_router import Router
+
+r = Router.local(exchanges=["binance"])                            # this process does the work
+r = Router.service("http://localhost:8040", exchanges=["binance"]) # a running service does
+
+df = r.market("binance", "perp", "BTCUSDT").candles("1h", limit=500)
+```
+
+One line differs. Everything below it is the same object, with the same methods, returning the same types.
 
 Field names, units, funding conventions, and pagination semantics differ from one exchange to the next. The router does that translation in the adapter layer, so callers see the same `Ticker`, `Candle`, `OrderBook`, `MarkPrice`, `FundingRate` shape regardless of which exchange served the request. It also handles the parts every integration needs: pagination for large historical pulls, request-weight throttling to prevent IP bans, and persistent connection management for WebSocket streams. Adding a new exchange means dropping in a new adapter, with no changes to the routing core.
 
-**Stateless and keyless.** The service handles public market data only. It places no orders, holds no API keys, manages no accounts, and persists nothing to disk. If you need authentication or private endpoints, this is not it. See [Scope](#scope) for the full list of non-goals and deployment assumptions before pointing real traffic at it.
+**Stateless and keyless.** The router handles public market data only. It places no orders, holds no API keys, manages no accounts, and persists nothing to disk. If you need authentication or private endpoints, this is not it. See [Scope](#scope) for the full list of non-goals and deployment assumptions before pointing real traffic at it.
+
+<br>
+
+### Which mode to use
+
+The two modes are functionally identical and operationally different. Local mode can do everything the service can. What it cannot do is coordinate, because coordination needs one process, and that is exactly what the service is.
+
+| | `local` | `service` |
+|:---|:---|:---|
+| weight budget | per process | shared by every caller |
+| symbol cache | per process | shared, 24h, already warm |
+| WebSocket upstreams | one per subscription | one per key, fanned out |
+| blast radius | your IP | one service you can restart |
+| what you deploy | nothing | one container |
+
+**Reach for `local`** when there is one person in one process: a notebook or a script, nothing to deploy and nothing to keep running, exploratory work at modest volume. A heavy single-process backfill is a perfectly good reason to stay local.
+
+**Reach for `service`** as soon as there is more than one of anything. More than one caller, anything scheduled or long-running, several notebooks at once. Each local process carries its own rate-limit budget and the exchange sees the sum of all of them, so this is the threshold that matters rather than a question of how serious the work is.
+
+The one sentence version: local mode is for one researcher in one process, and you run the service as soon as there is more than one of anything.
 
 <br>
 
@@ -308,7 +339,27 @@ Designed for localhost or a trusted network: no TLS termination, no authenticati
 
 ## Quick Start
 
-The service runs as a stateless Docker container. Clone the repo, configure the environment, launch, then verify with curl:
+Nothing to deploy. Install it and make a call:
+
+```bash
+pip install "git+https://github.com/atOCEANO/exchange-router-service.git"
+```
+
+```python
+from exchange_router import Router
+
+r = Router.local(exchanges=["binance"])
+print(r.market("binance", "spot", "BTCUSDT").ticker().price)
+print(r.get_candles("binance", "linear", "BTCUSDT", interval="1h", limit=100).tail())
+```
+
+The adapters warm their symbol caches in the background, so construction returns immediately and the first call pays whatever is left. Call `r.warm()` to put that cost somewhere you choose rather than inside your first measurement.
+
+<br>
+
+### Running it as a service
+
+Once there is more than one caller, run it once and point everything at it. The service is a stateless Docker container:
 
 ```bash
 git clone https://github.com/atOCEANO/exchange-router-service.git
@@ -319,7 +370,13 @@ curl http://localhost:8040/status
 curl http://localhost:8040/binance/spot/ticker/BTCUSDT
 ```
 
-If the status check fails, inspect logs with `docker compose logs -f`.
+If the status check fails, inspect logs with `docker compose logs -f`. The `.env` file is required and is not tracked; `.env.example` holds the single variable it needs.
+
+Then the only change on the client side is the constructor:
+
+```python
+r = Router.service("http://localhost:8040", exchanges=["binance"])
+```
 
 <br>
 
@@ -338,16 +395,16 @@ This variable lives in `.env` and is consumed by `docker-compose.yml` in the `po
 
 ## Python API
 
-A synchronous client (`exchange-router-client`) over the router's REST and WebSocket interfaces, with an async client for concurrency. Time-series methods return `pandas.DataFrame` objects indexed by datetime; point-in-time snapshots (ticker, book ticker, mark price) return a flat `Row` with attribute access; the order book returns one tidy `side, price, qty` frame. It is sync by default, so the same code runs in a script and in a Jupyter cell with no `await`. See [Exchange Notes](.Documentation/Exchange_Notes.md) for fields whose units vary across exchanges.
+The same surface in both modes, with `AsyncRouter` alongside it for concurrency. Time-series methods return `pandas.DataFrame` objects indexed by datetime; point-in-time snapshots (ticker, book ticker, mark price) return a flat `Row` with attribute access; the order book returns one tidy `side, price, qty` frame. It is sync by default, so the same code runs in a script and in a Jupyter cell with no `await`. See [Exchange Notes](.Documentation/Exchange_Notes.md) for fields whose units vary across exchanges.
 
 ```bash
-pip install git+https://github.com/atOCEANO/exchange-router-service.git#subdirectory=client
+pip install "git+https://github.com/atOCEANO/exchange-router-service.git"
 ```
 
 ```python
-from exchange_router_client import ExchangeRouterClient
+from exchange_router import Router
 
-with ExchangeRouterClient("http://localhost:8040") as client:
+with Router.service("http://localhost:8040", exchanges=["binance"]) as client:
     df = client.get_candles("binance", "spot", "BTCUSDT", interval="1h", limit=500)
     print(df.tail())
 ```
@@ -355,9 +412,9 @@ with ExchangeRouterClient("http://localhost:8040") as client:
 **Fetch candles for every symbol on an exchange, with an integrity manifest:**
 
 ```python
-from exchange_router_client import ExchangeRouterClient
+from exchange_router import Router
 
-with ExchangeRouterClient("http://localhost:8040") as client:
+with Router.local(exchanges=["binance"]) as client:
     symbols = [m["symbol"] for m in client.get_markets("binance", "spot")["markets"]]
 
     result = client.candles_many("binance", "spot", symbols, interval="1d", limit=1000)
@@ -371,9 +428,9 @@ with ExchangeRouterClient("http://localhost:8040") as client:
 **Managing the client lifecycle explicitly.** The `with` block above constructs the client and closes it for you. When a `with` block does not fit your structure, construct the client, make your calls, and close it yourself, ideally in a `finally` so teardown always runs. This works for every method, including `candles_many`.
 
 ```python
-from exchange_router_client import ExchangeRouterClient
+from exchange_router import Router
 
-client = ExchangeRouterClient("http://localhost:8040")
+client = Router.service("http://localhost:8040", exchanges=["binance"])
 try:
     df = client.get_candles("binance", "spot", "BTCUSDT", interval="1h", limit=500)
     print(df.tail())

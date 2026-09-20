@@ -103,7 +103,7 @@ Every endpoint that takes `start` follows the [backward-walking pagination contr
 
 ### Rate-limit and ban protection
 
-User-facing behaviour lives here; the backoff and fail-fast flow is in [Architecture](Architecture.md#rate-limiting); implementation patterns (header-driven proactive, reactive on rejection, minimum-spacing, per-adapter fail-fast thresholds) live in [Contributor Guide](Contributor_Guide.md#rate-limit-headers-and-proactive-backoff).
+User-facing behaviour lives here; the backoff and fail-fast flow is in [Architecture](Architecture.md#rate-limiting); implementation patterns (header-driven proactive, reactive on rejection, minimum-spacing, per-adapter fail-fast thresholds) live in [Adapter Guide](Adapter_Guide.md#rate-limit-headers-and-proactive-backoff).
 
 Every adapter handles rate-limit and ban behaviour transparently. You can call any route at full speed; a steady stream runs as fast as upstream allows, a burst slows down on its own, and a hard ban window surfaces as an immediate fail-fast error until it clears. No per-call sleep loops or client retry logic needed. Per-exchange retry and ban specifics live in each exchange's section below.
 

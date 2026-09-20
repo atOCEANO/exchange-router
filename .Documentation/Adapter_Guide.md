@@ -39,6 +39,78 @@ every part of it being honoured.
 
 <br>
 
+### Record construction, the short version
+
+Every record (Trade, Candle, MarkPrice, etc.) goes through a `build_*` helper in `exchange_router/exchanges/base.py`. Adapters pass in raw upstream values; the builders construct the nested value objects and compute USD where derivable. The wire-format spec is in [HTTP Reference](HTTP_Reference.md#response-shapes); the builder signatures are below.
+
+An inverse trade, where USD is computed as `native * contract_size` and is price-independent:
+
+```python
+from exchange_router.exchanges.base import (
+    build_qty_value, build_volume_value, build_oi_value,
+    build_funding_current, build_funding_historical, build_funding_convention,
+)
+
+trade = Trade(
+    symbol      = "BTCUSD",
+    market_type = MarketType.INVERSE,
+    quote       = "USD",
+    price       = 50000.0,
+    qty         = build_qty_value(native=5, qty_unit="contract", contract_size=100.0, price=50000.0),
+    side        = "buy",
+    timestamp   = ts,
+)
+```
+
+All adapter sites that construct records pass `quote = info.quote_asset` at the row level. Look up `info = await self._info_for(market_type, model_symbol)` once at the start of each route handler / stream generator and reuse for every record in the response.
+
+Cycle length for funding lives in an adapter-internal `_funding_interval_cache: Dict[MarketType, Dict[str, int]]` keyed by model symbol. SymbolInfo's `funding: Optional[FundingConvention]` block carries only the categorical `kind` (no `cycle_ms`); MarkPrice and FundingRate row constructors read the actual cycle_ms from the internal cache.
+
+<br>
+
+### The `_warm()` hook
+
+`BaseExchange` exposes `async def _warm(self) -> None` (default: no-op) as the override point for adapter prebuilding. Override it to declare what should be warmed at startup. The base class owns everything else: it spawns the warm in a background task during `preload()`, times each step, logs a structured timeline, and contains failures so one adapter's warm cannot block another.
+
+Inside `_warm()`, call `await self._step("label", awaitable)` once per logical warm. Each step's start, duration, and outcome are logged automatically. Steps run sequentially within an adapter (a chronological per-adapter timeline in the log); cross-adapter parallelism is preserved by the background-task wrapping.
+
+```python
+async def _warm(self) -> None:
+    await self._step("spot_info",    self._ensure_info_cache(MarketType.SPOT))
+    await self._step("linear_info",  self._ensure_info_cache(MarketType.LINEAR))
+    await self._step("inverse_info", self._ensure_info_cache(MarketType.INVERSE))
+```
+
+If a warm step has its own bounded-concurrency fan-out (per-symbol lookups with a semaphore, for example), put that logic in a regular adapter method and pass the call to `_step`. The semaphore guard and per-symbol failure handling stay outside `_warm()`, so the orchestration line reads as one intent:
+
+```python
+async def _warm(self) -> None:
+    await self._step("linear_funding", self._warm_funding_intervals(MarketType.LINEAR))
+
+
+async def _warm_funding_intervals(self, market_type: MarketType) -> None:
+    cache = await self._ensure_info_cache(market_type)
+    sem   = asyncio.Semaphore(2)
+    tasks = [self._warm_one_funding_interval(info, sem) for info in cache.values()]
+
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _warm_one_funding_interval(self, info: SymbolInfo, sem: asyncio.Semaphore) -> None:
+    async with sem:
+        try:
+            await self._funding_interval_ms_for(info.native_symbol)
+        except Exception as e:
+            logger.warning(f"funding interval lookup failed for {info.native_symbol}: {e}")
+```
+
+By convention, `_warm()` (and any `_warm_*` helpers it calls) sits right after `shutdown()` in the adapter file; every existing adapter follows this placement. `_ensure_info_cache` and `_info_for` are provided by `BaseExchange` (see [SymbolInfo cache](#symbolinfo-cache-base-provided) below); the `_ensure_*_map` methods referenced in the examples are adapter-internal lazy caches. Listing either kind in `_warm` simply forces eager warming at startup.
+
+Do not override `preload()` directly. The base class seals it; the override point is `_warm()`. If your adapter does not need prebuilding (one bulk endpoint covers all metadata), simply don't override `_warm`.
+
+<br>
+<br>
+
 ## Adapter Implementation
 
 All adapters must inherit from `BaseExchange` in `exchange_router/exchanges/base.py`. The following checklist covers everything a compliant adapter needs to satisfy before it can be merged:

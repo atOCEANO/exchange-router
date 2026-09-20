@@ -30,100 +30,49 @@ The router is extended through isolated exchange adapters. Almost every contribu
 
 <br>
 
-### Record construction, the short version
-
-Every record (Trade, Candle, MarkPrice, etc.) goes through a `build_*` helper in `exchange_router/exchanges/base.py`. Adapters pass in raw upstream values; the builders construct the nested value objects and compute USD where derivable. The wire-format spec is in [HTTP Reference](HTTP_Reference.md#response-shapes); the builder signatures are below.
-
-An inverse trade, where USD is computed as `native * contract_size` and is price-independent:
-
-```python
-from src.exchanges.base import (
-    build_qty_value, build_volume_value, build_oi_value,
-    build_funding_current, build_funding_historical, build_funding_convention,
-)
-
-trade = Trade(
-    symbol      = "BTCUSD",
-    market_type = MarketType.INVERSE,
-    quote       = "USD",
-    price       = 50000.0,
-    qty         = build_qty_value(native=5, qty_unit="contract", contract_size=100.0, price=50000.0),
-    side        = "buy",
-    timestamp   = ts,
-)
-```
-
-All adapter sites that construct records pass `quote = info.quote_asset` at the row level. Look up `info = await self._info_for(market_type, model_symbol)` once at the start of each route handler / stream generator and reuse for every record in the response.
-
-Cycle length for funding lives in an adapter-internal `_funding_interval_cache: Dict[MarketType, Dict[str, int]]` keyed by model symbol. SymbolInfo's `funding: Optional[FundingConvention]` block carries only the categorical `kind` (no `cycle_ms`); MarkPrice and FundingRate row constructors read the actual cycle_ms from the internal cache.
-
-<br>
-
-### The `_warm()` hook
-
-`BaseExchange` exposes `async def _warm(self) -> None` (default: no-op) as the override point for adapter prebuilding. Override it to declare what should be warmed at startup. The base class owns everything else: it spawns the warm in a background task during `preload()`, times each step, logs a structured timeline, and contains failures so one adapter's warm cannot block another.
-
-Inside `_warm()`, call `await self._step("label", awaitable)` once per logical warm. Each step's start, duration, and outcome are logged automatically. Steps run sequentially within an adapter (a chronological per-adapter timeline in the log); cross-adapter parallelism is preserved by the background-task wrapping.
-
-```python
-async def _warm(self) -> None:
-    await self._step("spot_info",    self._ensure_info_cache(MarketType.SPOT))
-    await self._step("linear_info",  self._ensure_info_cache(MarketType.LINEAR))
-    await self._step("inverse_info", self._ensure_info_cache(MarketType.INVERSE))
-```
-
-If a warm step has its own bounded-concurrency fan-out (per-symbol lookups with a semaphore, for example), put that logic in a regular adapter method and pass the call to `_step`. The semaphore guard and per-symbol failure handling stay outside `_warm()`, so the orchestration line reads as one intent:
-
-```python
-async def _warm(self) -> None:
-    await self._step("linear_funding", self._warm_funding_intervals(MarketType.LINEAR))
-
-
-async def _warm_funding_intervals(self, market_type: MarketType) -> None:
-    cache = await self._ensure_info_cache(market_type)
-    sem   = asyncio.Semaphore(2)
-    tasks = [self._warm_one_funding_interval(info, sem) for info in cache.values()]
-
-    await asyncio.gather(*tasks, return_exceptions=True)
-
-
-async def _warm_one_funding_interval(self, info: SymbolInfo, sem: asyncio.Semaphore) -> None:
-    async with sem:
-        try:
-            await self._funding_interval_ms_for(info.native_symbol)
-        except Exception as e:
-            logger.warning(f"funding interval lookup failed for {info.native_symbol}: {e}")
-```
-
-By convention, `_warm()` (and any `_warm_*` helpers it calls) sits right after `shutdown()` in the adapter file; every existing adapter follows this placement. `_ensure_info_cache` and `_info_for` are provided by `BaseExchange` (see [SymbolInfo cache](#symbolinfo-cache-base-provided) below); the `_ensure_*_map` methods referenced in the examples are adapter-internal lazy caches. Listing either kind in `_warm` simply forces eager warming at startup.
-
-Do not override `preload()` directly. The base class seals it; the override point is `_warm()`. If your adapter does not need prebuilding (one bulk endpoint covers all metadata), simply don't override `_warm`.
-
-<br>
-<br>
-
 ## Local Development
 
-The service ships as a Docker container, but iterating on an adapter through `docker compose up --build` on every change is slow. For day-to-day work, run the service directly. Create the venv once, then activate it, install dependencies, and launch with autoreload:
+Most adapter work needs no service at all. Install the package editable and drive the adapter through `Router.local`, which is the same code path the service uses:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn src.main:app --reload --port 8040
+pip install -e ".[server,test,audit]"
 ```
 
-On Windows, activate the venv with `.venv\Scripts\activate`. The `--reload` flag restarts the worker whenever a file under `exchange_router/` changes. Pair it with the test suite running in another terminal for a tight edit-test loop.
+```python
+from exchange_router import Router
+
+r = Router.local(exchanges=["binance"])
+print(r.get_candles("binance", "spot", "BTCUSDT", interval="1h", limit=5))
+```
+
+When you do need the HTTP surface, run it with autoreload rather than rebuilding the image on every change:
+
+```bash
+uvicorn exchange_router.service:app --reload --port 8040
+```
+
+On Windows, activate the venv with `.venv\Scripts\activate`. The `--reload` flag restarts the worker whenever a file under `exchange_router/` changes.
+
+When something breaks, it helps to drop below the router entirely. Instantiate the adapter in a REPL and call its methods directly. The stack trace is cleaner, and you can inspect intermediate state without routing a request end to end.
 
 <br>
 
 ### Dependencies
 
-The repo has a single `requirements.txt` covering everything: the running service (FastAPI, uvicorn, httpx, websockets, orjson) and the local tools (rich, used by the auditor). The Dockerfile installs this file as-is, so the same dependency set is present in the production image and in a contributor's venv. There is no separate dev dependency file.
+`pyproject.toml` is the only dependency source, and it is split so that what ships is smaller than what you develop against.
 
-**Adding a new dependency:** put it in `requirements.txt`. If it is genuinely contributor-only (a profiler, a linter, a heavy debugging library), keep it out of the requirements file and document the install command in this guide instead, so the production image stays lean.
+| Install | Carries | For |
+| :--- | :--- | :--- |
+| `pip install .` | httpx, pandas, websockets, pydantic, orjson | the Python API and local mode |
+| `.[server]` | adds fastapi, uvicorn | running the service |
+| `.[test]` | adds pytest, pytest-asyncio | the offline suite |
+| `.[audit]` | adds rich | the auditor |
 
-When something breaks, it helps to bypass FastAPI entirely. Instantiate the adapter in a Python REPL and call its methods directly. The stack trace is cleaner, and you can inspect intermediate state without routing a request end to end.
+The split is load-bearing rather than tidy. The base install is what makes a library possible: FastAPI is not a dependency of using this, only of serving it, and CI asserts that a base install cannot `import fastapi`. Two dependency lists is how the pandas that the frame builders need went missing from the service image once already, which is why there is now exactly one.
+
+**Adding a new dependency:** put it in the narrowest extra that needs it. A profiler or a debugging library that only you use belongs in neither, and in your own venv.
 
 When iterating without `--reload`, set `--port` on the uvicorn command line directly; the `EXCHANGE_ROUTER_SERVICE_PORT` env var is only consumed by `docker-compose.yml` and is not read by the Python service.
 
@@ -163,26 +112,49 @@ That last property is a property of the shapes as much as of the renderer, and i
 * **No hand-rolled retry logic at the call site.** `_make_request` (or the adapter's equivalent) handles retries and backoff. Per-call retry loops fight the rate limiter.
 * **Logging via `logging.getLogger("<adapter>_adapter")`.** Keep each adapter's logs isolated so they can be filtered independently.
 
-For exchange-specific behaviors (rate limit tiers, symbol translation quirks, API version notes) see [Exchange Notes](Exchange_Notes.md). For internal mechanics that adapter authors need but users do not, see [Adapter Internals](#adapter-internals) below.
+For exchange-specific behaviors (rate limit tiers, symbol translation quirks, API version notes) see [Exchange Notes](Exchange_Notes.md). For internal mechanics that adapter authors need but users do not, see [Adapter Internals](Adapter_Guide.md#adapter-internals) below.
 
 <br>
 <br>
 
 ## Testing
 
+There are two suites and they answer different questions. The offline suite asks whether the two modes agree and whether the code still does what it did; the auditor asks whether an adapter is correct against its exchange. Neither substitutes for the other.
+
+<br>
+
+### The offline suite
+
+`tests/` runs with no network, no container and no service. It swaps the adapter registry for a fake that returns constructed model instances, and drives the FastAPI app in-process over an httpx ASGI transport, so it runs on a blocked CI runner exactly as it runs on a laptop.
+
+```bash
+docker build --target test -t router-test .
+docker run --rm router-test pytest -q
+```
+
+Verification runs in Docker. Run it that way rather than against your venv, so the result does not depend on what your machine happens to have installed.
+
+**Every test body runs twice**, once against `LocalBackend` and once against `RemoteBackend` over the in-process app, and asserts the same frames, columns, dtypes, index, provenance and exception types from both. That parametrisation is the point of the suite. If you add a read method, add it to a body that both legs run; if you add a route, the route-coverage test will fail until the SDK method exists, and the reverse.
+
+The fake adapter lives in `tests/fake_exchange.py` and is deliberately awkward in the ways real venues are: it carries contract-denominated quantities on its inverse market and base on the others, both funding conventions, and an open-interest series whose first row has no candle to join against. Build inputs in the test that uses them, so a reader sees the input and the expected frame side by side.
+
+**What it does not cover.** Streaming, in either direction: an ASGI transport carries HTTP and not websockets, so the served side of a stream cannot be driven here. That gap is known and recorded rather than papered over.
+
+<br>
+
+### The auditor
+
 Adapter compliance is validated via the auditor package at `tools/auditor/` (see [Auditor Guide](Auditor_Guide.md)). The runner reads `/{exchange}/capabilities` and runs only the probes that apply to the features the adapter claims to support, so an honest capabilities map is the difference between a clean test run and noise. All declared endpoints must pass before submitting a Pull Request.
 
-The suite runs locally, not in CI: exchange APIs block the datacenter IPs that hosted runners issue from, so a GitHub Actions run fails on refused connections rather than real defects. See [Auditor Guide](Auditor_Guide.md#why-the-suite-runs-locally-not-in-ci) for the full reasoning.
-
-See [Auditor Guide](Auditor_Guide.md) for the full probe catalogue, env knobs, concurrency model, run output, and CLI examples.
+It runs locally, not in CI: exchange APIs block the datacenter IPs that hosted runners issue from, so a GitHub Actions run fails on refused connections rather than real defects. See [Auditor Guide](Auditor_Guide.md#why-the-suite-runs-locally-not-in-ci) for the full reasoning, and that guide for the probe catalogue, env knobs, concurrency model, run output and CLI examples.
 
 <br>
 
 ### What CI does check
 
-`.github/workflows/ci.yml` runs on every push to `main` and every pull request. It cannot run the auditor, so it checks only what needs no upstream, and the list is deliberately short: every adapter package registers an adapter and declares a non-empty capabilities map and at least one market type, the client SDK installs into a clean interpreter and imports, and the image builds, boots, and answers on `/status`, `/version` and `/exchanges`.
+`.github/workflows/ci.yml` runs on every push to `main` and every pull request. It cannot run the auditor, so it checks only what needs no upstream, in four jobs: every adapter package registers an adapter and declares a non-empty capabilities map and at least one market type; the package installs into a clean interpreter, imports, ships `py.typed`, and pulls no FastAPI on a base install; the image builds, boots, and answers on `/status`, `/version` and `/exchanges`; and the offline suite passes.
 
-The first of those is the one worth knowing about. `load_exchanges()` catches and logs an adapter that fails to import, so a broken adapter does not stop the service, it just leaves it running with one exchange fewer and nothing anywhere fails. Counting the packages on disk against the registry is what turns that into a red build. Treat a green CI run as saying the service is assembled, never as saying an adapter is correct against its exchange; only an auditor run says that.
+The first of those is the one worth knowing about. `load_exchanges()` catches and logs an adapter that fails to import, so a broken adapter does not stop the service, it just leaves it running with one exchange fewer and nothing anywhere fails. Counting the packages on disk against the registry is what turns that into a red build. Treat a green CI run as saying the package is assembled and the two modes still agree, never as saying an adapter is correct against its exchange; only an auditor run says that.
 
 <br>
 <br>
@@ -193,16 +165,18 @@ The first of those is the one worth knowing about. `load_exchanges()` catches an
 
 To cut a release, bump `exchange_router/version.py` in its own commit (the history keeps these separate, `chore(version): bump service to X.Y.Z`), then tag `vX.Y.Z` and push the tag. `.github/workflows/release.yml` checks the tag against `exchange_router/version.py` and publishes a GitHub Release with generated notes. Both jobs in that workflow are gated on the tag ref, so a manual dispatch from the Actions tab runs neither of them; there is no way to dry-run the guard short of pushing a tag.
 
-The release builds and attaches nothing, which is deliberate. A library has to arrive as a file, so emsl ships wheels; this is a service you run, and the artifact is the repository at the tag, which GitHub attaches by itself. The release body carries the three things a reader actually needs instead: running it from a checkout without Docker, building the image from the same checkout, and installing the client. The client SDK carries its own version in `exchange_router/version.py` and installs straight from the tag, so publishing a wheel here would only produce a file whose number disagrees with the release it is attached to.
+The release used to build and attach nothing, on the reasoning that a library has to arrive as a file while this was a service you run, so the artifact was the repository at the tag. Both halves of that stopped being true at 3.0.0. This is a library now, and the client no longer carries a separate number that a wheel could disagree with, so the release builds one `py3-none-any` wheel plus an sdist and attaches them. There is no platform matrix: it is pure Python, so one wheel covers every target.
 
 <br>
 <br>
 
 ## Service Lifecycle
 
-For reference, the router uses a FastAPI lifespan manager (`@asynccontextmanager`) to handle startup and shutdown. On startup, the auto-loader walks `exchange_router/exchanges/`, instantiates every `BaseExchange` subclass it finds, and registers it in `EXCHANGE_REGISTRY`. On shutdown, the manager closes all active WebSocket tasks cleanly and calls `shutdown()` on each adapter to release connection pools and any other resources the adapter holds.
+The full startup, request and WebSocket lifecycles live in [Architecture](Architecture.md#startup-lifecycle), including the background warm and the log timeline it emits. What matters to an adapter author is short.
 
-Contributors rarely need to touch this layer. The adapter owes the lifecycle a correct `shutdown()` that closes every client it opened in `__init__`, and optionally a `_warm()` (see [The `_warm()` hook](#the-_warm-hook) above) if startup prebuilding is needed.
+An adapter is started and stopped the same way in both modes, and it cannot tell which one it is in. In the service, the FastAPI lifespan manager walks the registry on startup and tears it down on shutdown. In local mode, `Router.local` warms the scope in the background and `close()` releases the adapters. The adapter sees `preload()` then `shutdown()` either way.
+
+So the adapter owes the lifecycle exactly two things: a correct `shutdown()` that closes every client it opened in `__init__`, and optionally a `_warm()` (see [The `_warm()` hook](Adapter_Guide.md#the-_warm-hook)) if startup prebuilding is worth it. An adapter that leaks on `shutdown()` used to leak only in a container that was about to exit; in local mode it leaks inside somebody's notebook.
 
 Once `shutdown()` is correct and `python -m tools.auditor` passes cleanly, the adapter is ready for review.
 

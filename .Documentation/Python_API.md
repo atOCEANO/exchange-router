@@ -26,7 +26,9 @@
 
 ## Python API
 
-The SDK (`exchange-router-client`) is a translation layer over the router's REST and WebSocket interfaces. It is synchronous by default: methods return their data directly, with no `await`. The sync client runs the async machinery on a private background event loop, so the same code works in a plain script and in a Jupyter cell without `asyncio.run` or top-level `await`. An `AsyncExchangeRouterClient` with the same surface is available when you want concurrency.
+`Router` is the whole API. It is synchronous by default: methods return their data directly, with no `await`. The sync class runs the async machinery on a private background event loop, so the same code works in a plain script and in a Jupyter cell without `asyncio.run` or top-level `await`. An `AsyncRouter` with the identical surface is available when you want concurrency.
+
+The one decision you make is which constructor to call. `Router.local` runs the exchange adapters inside your own process. `Router.service` translates the same calls into HTTP against a service you are running. Nothing else about your code changes, and [Which mode to use](../README.md#which-mode-to-use) covers when each is the right answer.
 
 The return surface follows one rule, so you never have to remember what a call hands back:
 
@@ -40,7 +42,7 @@ The return surface follows one rule, so you never have to remember what a call h
 | Batch (`*_many`) | `BatchResult`, behaves like a dict over the symbols that returned |
 | Discovery (exchanges, market_types, capabilities, markets) | `dict` / `list` |
 
-If you are coming from 4.x, see [Migrating from 4.x](#migrating-from-4x); from 3.x, take [Migrating from 3.x](#migrating-from-3x) first and then the 4.x hop. The wire schema is unchanged across both, only the client's return shapes and the index dtype moved.
+Upgrading from the `exchange-router-client` package, or from an older client major, is covered in [Migration](Migration.md). The wire schema has not changed across any of those hops; only the Python surface moved.
 
 <br>
 <br>
@@ -48,17 +50,59 @@ If you are coming from 4.x, see [Migrating from 4.x](#migrating-from-4x); from 3
 ## Installation
 
 ```bash
-pip install git+https://github.com/atOCEANO/exchange-router-service.git#subdirectory=client
+pip install "git+https://github.com/atOCEANO/exchange-router-service.git"
 ```
 
-For local development:
+That is everything `Router.local` and `Router.service` need. To run the service yourself, add the extra that carries FastAPI and uvicorn:
 
 ```bash
-cd client
-pip install -e .
+pip install "exchange-router[server] @ git+https://github.com/atOCEANO/exchange-router-service.git"
 ```
 
-Requires Python 3.10+.
+For local development, `pip install -e ".[server,test]"` from a checkout. Requires Python 3.10+.
+
+<br>
+<br>
+
+## Construction
+
+Two constructors, one per mode. Both require the exchange scope, and bare `Router(...)` raises rather than guessing.
+
+```python
+Router.local(
+    exchanges,                  # required: a list of names, or "all"
+    *,
+    verbose = True,
+)
+
+Router.service(
+    url,                        # required
+    exchanges,                  # required: a list of names, or "all"
+    *,
+    fallback    = None,         # "local" to degrade on an unreachable service, off by default
+    timeout     = 30,
+    max_retries = 3,
+    verbose     = True,
+)
+```
+
+Nothing is inferred. In particular the mode is never chosen from a missing URL, because an unset config variable arriving as `None` would silently hand you a private per-process rate budget when you asked for the shared one. Config-driven code branches explicitly, and the branch is the point:
+
+```python
+r = Router.service(url, exchanges=E) if url else Router.local(exchanges=E)
+```
+
+Naming the scope is what makes the warm attributable. Whatever you declare is warmed in the background; nothing else is. The scope is not a fence, so a call to an exchange you did not declare still works and warms lazily.
+
+```python
+r.mode              # "local" | "service"
+r.scope             # the exchange names you declared
+r.schema_version    # 3, the wire contract this SDK speaks
+r.warm()            # block until the declared scope is ready
+r.warm("kraken")    # warm one, declared or not
+```
+
+`warm()` is the blocking form of something that is already happening. Use it to move the cost outside a timed loop rather than into your first measurement. In service mode it runs the schema handshake and the capability fetch instead, so it means the same thing in both: pay the setup cost now.
 
 <br>
 <br>
@@ -68,14 +112,21 @@ Requires Python 3.10+.
 No `await`. This runs identically in a script and in a notebook.
 
 ```python
-from exchange_router_client import ExchangeRouterClient
+from exchange_router import Router
 
-with ExchangeRouterClient("http://localhost:8040") as client:
+with Router.local(exchanges=["binance"]) as client:
     df = client.get_candles("binance", "spot", "BTCUSDT", interval="1h", limit=100)
     print(df.tail())
 ```
 
-The client holds persistent connections, so release it when done. The `with` block above guarantees cleanup; outside one, call `client.close()`.
+Against a running service, one line changes:
+
+```python
+with Router.service("http://localhost:8040", exchanges=["binance"]) as client:
+    df = client.get_candles("binance", "spot", "BTCUSDT", interval="1h", limit=100)
+```
+
+The router holds persistent connections and, in local mode, live adapters. Release it when done. The `with` block above guarantees cleanup; outside one, call `client.close()`.
 
 The `start` parameter, where applicable, follows the [router's pagination contract](HTTP_Reference.md#pagination-semantics): pass the oldest timestamp you already have to walk further back.
 
@@ -224,7 +275,7 @@ ob.attrs["qty_unit"]    # "base"
 `df.attrs` does not survive `pd.concat`. When you stitch frames from several venues and need per-row provenance, `with_provenance` promotes the constants to columns first:
 
 ```python
-from exchange_router_client import with_provenance
+from exchange_router import with_provenance
 
 frames = [
     with_provenance(client.get_candles("binance", "linear",  "BTCUSDT", interval="1h", limit=500)),
@@ -242,7 +293,7 @@ both.groupby("exchange")["volume_usd"].sum()   # exchange, symbol, quote, unit r
 The SDK tells you when a result is missing data, approximate, or degraded, so you do not analyze it by accident. `verbose=True` is the default.
 
 ```python
-client = ExchangeRouterClient("http://localhost:8040", verbose=True)
+client = Router.local(exchanges=["binance"], verbose=True)
 ```
 
 Set `verbose=False` once for a quiet client, or override per call:
@@ -299,10 +350,10 @@ A symbol is `degraded` when the result carries warnings (in `df.attrs["warnings"
 ## Helpers for funding math
 
 ```python
-from exchange_router_client import ExchangeRouterClient
-from exchange_router_client.funding import funding_paid, per_hour_view
+from exchange_router import Router
+from exchange_router.funding import funding_paid, per_hour_view
 
-with ExchangeRouterClient("http://localhost:8040") as client:
+with Router.local(exchanges=["binance"]) as client:
     df = client.get_funding_rate("binance", "linear", "BTCUSDT", limit=100)
 
     print(per_hour_view(df.iloc[-1]))
@@ -322,20 +373,28 @@ These are plain functions, not coroutines, so they are never awaited. `funding_p
 
 ## Errors
 
-The client raises a small typed tree, so failures are programmable without parsing message strings. Every error carries `.status` (the HTTP status, where applicable) and `.detail`.
+The router raises a small typed tree, so failures are programmable without parsing message strings. Every error carries `.status` (the HTTP status, where applicable) and `.detail`. **The same failure raises the same type in both modes**, which is asserted by the test suite rather than promised here: local mode maps adapter faults straight into this tree instead of round-tripping them through a status code.
 
-| Exception | When |
-| :--- | :--- |
-| `BadRequest` | `400`, including an interval or period the route does not declare |
-| `NotFound` | `404`, an unknown exchange |
-| `RateLimited` | `429` |
-| `UpstreamUnavailable` | `503`, carries `.retry_after` |
-| `NotSupported` | the route is not exposed on this exchange and market, caught before the request, or a server `501` |
-| `RouterUnreachable` | transport failure, or retries exhausted |
-| `RouterError` | any other status the server returns (for example `500` or a `502` upstream-shape failure), carrying `.status` |
+| Exception | When | Modes |
+| :--- | :--- | :--- |
+| `BadRequest` | `400`, including an interval or period the route does not declare | both |
+| `NotFound` | `404`, an unknown exchange | both |
+| `RateLimited` | `429` | both |
+| `UpstreamUnavailable` | `503`, carries `.retry_after` | both |
+| `NotSupported` | the route is not exposed on this exchange and market, caught before the request, or a server `501` | both |
+| `RouterUnreachable` | transport failure, or retries exhausted | `service` only |
+| `SchemaMismatch` | the SDK and the service disagree on the wire contract; carries `.sdk_schema` and `.service_schema` | `service` only |
+| `RouterError` | any other status the server returns (for example `500` or a `502` upstream-shape failure), carrying `.status` | both |
+
+`SchemaMismatch` is raised on the first call, not at construction, because the check needs a round trip and a constructor cannot await one. It is fatal and deliberately has no compatibility range: `schema_version` only moves on a breaking wire change, so a mismatch means one side genuinely cannot read the other.
+
+```text
+SchemaMismatch: this SDK speaks schema 3, http://localhost:8040 speaks schema 4
+(sdk 3.0.0, service 3.2.0); upgrade the SDK or pin the service to a schema 3 release
+```
 
 ```python
-from exchange_router_client import NotSupported, UpstreamUnavailable
+from exchange_router import NotSupported, UpstreamUnavailable
 
 try:
     df = client.get_funding_rate("binance", "spot", "BTCUSDT")
@@ -352,16 +411,16 @@ Symbol validity is left to the server, which normalizes case and separators. A b
 <br>
 <br>
 
-## Asynchronous client
+## Asynchronous router
 
-For real concurrency, use `AsyncExchangeRouterClient`. It exposes the same methods and the same handle, with `await`. The async handle carries the route methods and `await m.info()`, but not the cached `m.quote` and `m.funding_kind` properties: those are defined on the sync handle only, so on an async handle they raise `AttributeError`. Read `quote_asset` and `funding_kind` off the awaited `info()` Row instead.
+For real concurrency, use `AsyncRouter`. It exposes the same methods and the same handle, with `await`. The async handle carries the route methods and `await m.info()`, but not the cached `m.quote` and `m.funding_kind` properties: those are defined on the sync handle only, so on an async handle they raise `AttributeError`. Read `quote_asset` and `funding_kind` off the awaited `info()` Row instead.
 
 ```python
 import asyncio
-from exchange_router_client import AsyncExchangeRouterClient
+from exchange_router import AsyncRouter
 
 async def main():
-    async with AsyncExchangeRouterClient("http://localhost:8040") as client:
+    async with AsyncRouter.service("http://localhost:8040", exchanges=["binance"]) as client:
         df = await client.get_candles("binance", "spot", "BTCUSDT", "1m", 10000)
 
         m = client.market("binance", "linear", "BTCUSDT")
@@ -372,7 +431,7 @@ async def main():
 asyncio.run(main())
 ```
 
-The batch methods on the sync client already run their fetches concurrently, so reach for the async client only when you are driving your own event loop.
+The batch methods on the sync router already run their fetches concurrently, so reach for the async router only when you are driving your own event loop.
 
 <br>
 <br>
@@ -386,7 +445,7 @@ for msg in client.stream("binance", "spot", "ticker", "BTCUSDT"):
     print(msg["symbol"], msg["price"])
 ```
 
-Stream messages are the raw wire dicts (the same shapes as the REST response bodies), not `Row` objects; to get the flat Row shape on a ticker, book_ticker, or mark_price message, pass it through the matching builder, for example `from exchange_router_client.rows import ticker_row; ticker_row(msg)`. Pass `reconnect=False` to have the iterator raise `websockets.ConnectionClosed` on a drop instead. `subscribe` is the same without reconnect. One subscription per connection: to change channel or symbol, leave the loop and start a new one. On the async client these are `async for`.
+Stream messages are the raw wire dicts (the same shapes as the REST response bodies), not `Row` objects; to get the flat Row shape on a ticker, book_ticker, or mark_price message, pass it through the matching builder, for example `from exchange_router.rows import ticker_row; ticker_row(msg)`. Pass `reconnect=False` to have the iterator raise `websockets.ConnectionClosed` on a drop instead. `subscribe` is the same without reconnect. One subscription per connection: to change channel or symbol, leave the loop and start a new one. On the async router these are `async for`.
 
 <br>
 <br>
@@ -400,9 +459,11 @@ The router exposes routing-facing symbols: the exchange-native symbol with any c
 
 ## Method reference
 
-Signatures are for the sync client. The async client is identical with `await`, and `markets()`, `stream()`, and `subscribe()` become `async`.
+Signatures are for the sync `Router`. `AsyncRouter` is identical with `await`, and `markets()`, `stream()`, and `subscribe()` become `async`. Everything here is available in both modes.
 
-**Discovery.** `get_status()`, `get_version()`, `get_exchanges()`, `get_market_types(exchange)`, `get_capabilities(exchange)`, `get_markets(exchange, market_type)`. `get_version()` returns a version string; the others return `dict` or `list`.
+**Lifecycle.** `warm(exchange=None)`, `close()`, and the read-only `mode`, `scope`, `schema_version` and `verbose` attributes.
+
+**Discovery.** `get_status()`, `get_version()`, `get_exchanges()`, `get_exchange_overview(exchange)`, `get_exchange_status(exchange)`, `get_market_types(exchange)`, `get_capabilities(exchange)`, `get_markets(exchange, market_type)`. `get_version()` returns a version string; the others return `dict` or `list`. `get_exchange_overview` carries per-market-type symbol counts alongside the capability block.
 
 **Snapshots (return `Row`).** `get_ticker(exchange, market_type, symbol)`, `get_book_ticker(...)`, `get_mark_price(...)`, `get_symbol_info(exchange, market_type, symbol)`.
 
@@ -428,7 +489,7 @@ get_long_short_ratio(exchange, market_type, symbol, period="5m", limit=30, start
 
 **Provenance helper.** `with_provenance(df)` returns a copy with `exchange`, `symbol`, `quote`, and `unit` promoted to columns.
 
-`verbose` overrides the client default for that call on every series method, on `get_ticker`, `get_book_ticker`, `get_mark_price` and `get_orderbook`, and on every `*_many` method; `get_symbol_info` does not take it. On `get_ticker` and `get_book_ticker` it changes nothing visible today, since their only warning path is the preflight and the sole preflight warning is the orderbook depth snap.
+`verbose` overrides the router default for that call on every series method, on `get_ticker`, `get_book_ticker`, `get_mark_price` and `get_orderbook`, and on every `*_many` method; `get_symbol_info` does not take it. On `get_ticker` and `get_book_ticker` it changes nothing visible today, since their only warning path is the preflight and the sole preflight warning is the orderbook depth snap.
 
 <br>
 <br>

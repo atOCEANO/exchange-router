@@ -26,7 +26,11 @@
 
 ## HTTP Reference
 
-The router exposes two interfaces on the same port. REST is request/response; WebSocket is real-time streaming.
+This is the wire format of the service, which is what `Router.service` speaks and what any non-Python client would use. It is not the API most readers want: [Python API](Python_API.md) is, and it covers both modes. Read this page when you are writing a client in another language, debugging a response by hand, or checking exactly what a field means on the wire.
+
+The same shapes come back in local mode, because the local backend serves the same records; it just never puts them on a socket. The schema is pinned by `schema_version`, which is `3` and moves only on a breaking change.
+
+The service exposes two interfaces on the same port. REST is request/response; WebSocket is real-time streaming.
 
 *   **REST Base URI:** `http://localhost:8040`
 *   **WebSocket Base URI:** `ws://localhost:8040/ws/{exchange}/{market_type}`

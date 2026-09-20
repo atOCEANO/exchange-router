@@ -197,7 +197,7 @@ The auditor runs hundreds of REST probes per exchange in a few minutes. Real cli
 
 The check sits inside the auditor's `fetch` helper and derives the exchange name from the endpoint path (`/<exchange>/<market_type>/...`). Default 250ms is conservative against accidental concurrent bursts when `MAX_CONCURRENT_REST_PER_EXCHANGE > 1`. Set `MIN_REST_INTERVAL_MS=1000` (or higher) for an extra-safe run at high concurrency, or `0` to disable entirely. Endpoints without an exchange prefix (`/`, `/status`, `/version`, `/exchanges`) are not throttled. WS probes are not affected.
 
-Production rate-limit safety lives in the adapters, not in this knob (see [Rate limit headers and proactive backoff](Contributor_Guide.md#rate-limit-headers-and-proactive-backoff) in the Contributor Guide). The two layers are independent: when both apply, the slower spacing wins.
+Production rate-limit safety lives in the adapters, not in this knob (see [Rate limit headers and proactive backoff](Adapter_Guide.md#rate-limit-headers-and-proactive-backoff) in the Adapter Guide). The two layers are independent: when both apply, the slower spacing wins.
 
 <br>
 <br>
@@ -221,11 +221,29 @@ The dated subdirs under `tools/auditor/runs/` are local-only; the directory itse
 
 ## Running the suite
 
+The auditor needs `rich`, which is not a dependency of the service and is not in its image. It has its own extra:
+
+```bash
+pip install -e ".[audit]"
+```
+
+It is a developer tool that talks to the router over HTTP, so it runs beside the service rather than inside it. Exec-ing into the service container used to work, because one requirements file served both; it does not any more, and that is deliberate ([0008](Decisions.md)).
+
 Point at the running router (defaults to `http://localhost:8040`) and invoke:
 
 ```bash
 export API_URL=http://localhost:8040
 python -m tools.auditor
+```
+
+To run it in Docker, which is where verification belongs, build the test stage and give the container the service's network:
+
+```bash
+docker build --target test -t router-dev .
+docker run --rm --network container:exchange-router-service \
+    -e API_URL=http://127.0.0.1:8040 \
+    -v "$PWD/tools/auditor/runs:/app/tools/auditor/runs" \
+    router-dev python -m tools.auditor
 ```
 
 Targeting a single adapter, or a subset:

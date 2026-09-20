@@ -45,9 +45,9 @@ continues the service's line rather than the client's, because the repository, t
 releases and the tags have always been numbered that way. A 5.1.1 install and a 3.0.0
 install are not comparable by version; they are different packages.
 
-**The package name changed.** `pip install exchange-router-client` and
-`from exchange_router_client import ...` become `pip install exchange-router` and
-`from exchange_router import ...`. The base install carries the SDK and local mode;
+**The package name changed.** What was `pip install exchange-router-client`, imported
+as `exchange_router_client`, is now `pip install exchange-router`, imported as
+`exchange_router`. The base install carries the Python API and local mode;
 `exchange-router[server]` adds FastAPI and uvicorn for running the service.
 
 **Nothing you call has changed its name, signature or return type.** Every read method,
