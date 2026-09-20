@@ -2,7 +2,7 @@ import pandas as pd
 import pytest
 
 from fake_exchange import BASE_TS, CONTRACT_SIZE, FUNDING_CYCLE_MS, INTERVAL_MS
-from src.models import MarketType
+from exchange_router.models import MarketType
 
 
 EX = "fake"

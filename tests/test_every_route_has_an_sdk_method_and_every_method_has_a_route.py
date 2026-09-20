@@ -2,8 +2,8 @@ import inspect
 
 from fastapi.routing import APIRoute, APIWebSocketRoute
 
-from exchange_router_client.async_client import AsyncExchangeRouterClient
-from src.main import app
+from exchange_router.async_router import AsyncExchangeRouterClient
+from exchange_router.service import app
 
 
 ROUTE_TO_METHOD = {

@@ -12,7 +12,7 @@ from . import rows
 from ._warnings import emit
 from .batch import BatchResult
 from .errors import BadRequest, NotSupported, RouterError, RouterUnreachable, error_for_status
-from ._version import __version__
+from .version import __version__
 
 
 MAX_SLEEP_S = 60.0

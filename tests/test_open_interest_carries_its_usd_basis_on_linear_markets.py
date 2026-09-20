@@ -3,7 +3,7 @@ import pytest
 import pytest_asyncio
 
 from fake_exchange import BASE_TS, CONTRACT_SIZE, INTERVAL_MS
-from src.main import app
+from exchange_router.service import app
 
 
 EX     = "fake"

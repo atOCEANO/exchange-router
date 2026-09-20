@@ -1,7 +1,7 @@
 import time
 from typing import List
 
-from src.models import OrderBook
+from exchange_router.models import OrderBook
 from tools.auditor.config import SNAPSHOT_FRESHNESS_MS
 from tools.auditor.aggregator import ErrorType, ProbeResult
 

@@ -3,7 +3,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
-from src.version import SCHEMA_VERSION
+from exchange_router.version import SCHEMA_VERSION
 from tools.auditor.aggregator import Aggregator
 from tools.auditor.config import API_URL, MAX_CONCURRENT_EXCHANGES
 

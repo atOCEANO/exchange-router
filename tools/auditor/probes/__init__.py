@@ -1,6 +1,6 @@
 from typing import Any, Dict, List
 
-from src.models import (
+from exchange_router.models import (
     AggTrade, BookTicker, Candle, FundingRate, Liquidation, LongShortRatio,
     MarkPrice, OpenInterest, Ticker,
 )

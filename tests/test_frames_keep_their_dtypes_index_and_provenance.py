@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from exchange_router_client import with_provenance
+from exchange_router import with_provenance
 
 
 EX = "fake"

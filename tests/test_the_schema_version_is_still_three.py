@@ -1,9 +1,9 @@
 import httpx
 import pytest_asyncio
 
-from exchange_router_client import __version__ as client_version
-from src.main import app
-from src.version import SCHEMA_VERSION, SERVICE_VERSION
+from exchange_router import __version__ as client_version
+from exchange_router.service import app
+from exchange_router.version import SCHEMA_VERSION, SERVICE_VERSION
 
 
 @pytest_asyncio.fixture

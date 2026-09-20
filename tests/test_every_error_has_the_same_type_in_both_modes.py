@@ -1,6 +1,6 @@
 import pytest
 
-from exchange_router_client.errors import BadRequest, NotFound, NotSupported, RouterError
+from exchange_router.errors import BadRequest, NotFound, NotSupported, RouterError
 
 
 EX = "fake"

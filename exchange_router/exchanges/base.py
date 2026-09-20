@@ -6,7 +6,7 @@ import orjson
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any, Set, Union, AsyncGenerator, Callable, Awaitable, Iterable
 from datetime import datetime
-from src.models import (
+from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
     MarketType, SymbolInfo, FundingRate, OpenInterest, Liquidation, LongShortRatio,
     QtyValue, VolumeValue, OiValue, UsdBasis,

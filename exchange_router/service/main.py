@@ -7,11 +7,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 from contextlib import asynccontextmanager
 from typing import Optional
-from src.exchanges import EXCHANGE_REGISTRY, get_adapter, shutdown_exchanges, startup_exchanges
-from src.exchanges.base import UpstreamUnavailableError, build_oi_value
-from src.models import MarketType
-from src.stream_manager import StreamManager
-from src.version import SCHEMA_VERSION, SERVICE_VERSION
+from exchange_router.exchanges import EXCHANGE_REGISTRY, get_adapter, shutdown_exchanges, startup_exchanges
+from exchange_router.exchanges.base import UpstreamUnavailableError, build_oi_value
+from exchange_router.models import MarketType
+from exchange_router.service.stream_manager import StreamManager
+from exchange_router.version import SCHEMA_VERSION, SERVICE_VERSION
 
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s - %(message)s")

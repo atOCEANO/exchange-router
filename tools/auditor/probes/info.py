@@ -1,7 +1,7 @@
 import time
 from typing import List
 
-from src.models import SymbolInfo
+from exchange_router.models import SymbolInfo
 from tools.auditor.aggregator import ErrorType, ProbeResult
 
 from tools.auditor.probes.base import Probe, ProbeContext, fetch, validate_one

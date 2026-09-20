@@ -1,6 +1,6 @@
-from ._version import __version__
-from .client import ExchangeRouterClient
-from .async_client import AsyncExchangeRouterClient
+from .version import __version__
+from .router import ExchangeRouterClient
+from .async_router import AsyncExchangeRouterClient
 from .batch import BatchResult
 from .frames import with_provenance
 from .funding import funding_paid, per_hour_view

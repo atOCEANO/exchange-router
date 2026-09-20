@@ -1,6 +1,6 @@
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from src.exchanges.base import (
+from exchange_router.exchanges.base import (
     BaseExchange,
     build_funding_convention,
     build_funding_current,
@@ -9,7 +9,7 @@ from src.exchanges.base import (
     build_qty_value,
     build_volume_value,
 )
-from src.models import (
+from exchange_router.models import (
     AggTrade,
     BookTicker,
     Candle,

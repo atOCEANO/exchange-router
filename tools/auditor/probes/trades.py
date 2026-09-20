@@ -1,7 +1,7 @@
 import time
 from typing import List
 
-from src.models import Trade
+from exchange_router.models import Trade
 from tools.auditor.aggregator import ErrorType, ProbeResult
 from tools.auditor.config import SAMPLE_MAX_ITEMS
 

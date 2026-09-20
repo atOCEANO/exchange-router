@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Type
 import websockets
 from pydantic import BaseModel
 
-from src.models import (
+from exchange_router.models import (
     AggTrade, BookTicker, Liquidation, MarkPrice, OrderBook, Ticker, Trade,
 )
 from tools.auditor.config import API_URL, SAMPLE_MAX_ITEMS, WS_MIN_FRAMES, WS_OPEN_TIMEOUT, WS_TEST_DURATION

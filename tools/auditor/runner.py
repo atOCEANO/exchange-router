@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import httpx
 
-from src.version import SCHEMA_VERSION
+from exchange_router.version import SCHEMA_VERSION
 from tools.auditor.config import (
     API_URL, MAX_CONCURRENT_EXCHANGES, MAX_CONCURRENT_REST_PER_EXCHANGE,
     MAX_CONCURRENT_WS_PER_EXCHANGE, TIMEOUT, pick_symbol,

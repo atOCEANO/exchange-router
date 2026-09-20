@@ -5,12 +5,12 @@ import time
 import websockets
 import logging
 from typing import List, AsyncGenerator, Dict, Any, Optional, Set
-from src.exchanges.base import (
+from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
 )
-from src.models import (
+from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
     MarketType, SymbolInfo, OpenInterest, FundingRate,
 )
