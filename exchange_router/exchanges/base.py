@@ -6,6 +6,7 @@ import orjson
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any, Set, Union, AsyncGenerator, Callable, Awaitable, Iterable
 from datetime import datetime
+from exchange_router.capabilities import route_block
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
     MarketType, SymbolInfo, FundingRate, OpenInterest, Liquidation, LongShortRatio,
@@ -111,6 +112,89 @@ def build_funding_historical(kind: str, per_cycle: float, cycle_ms: int) -> Fund
 
 def build_funding_convention(kind: str) -> FundingConvention:
     return FundingConvention(kind=kind)
+
+
+def validate_interval(adapter, market_type: MarketType, route: str, label: str, value: str) -> None:
+    intervals = route_block(adapter.get_capabilities(), market_type, route).get("intervals")
+
+    if intervals and value not in intervals:
+        raise ValueError(f"{label} '{value}' is not valid for {adapter.name} {market_type.value} {route}")
+
+
+def symbol_info_to_lite(info: SymbolInfo) -> Dict[str, Any]:
+    funding = None
+    if info.funding is not None:
+        funding = {"kind": info.funding.kind}
+
+    return {
+        "symbol":        info.symbol,
+        "base_asset":    info.base_asset,
+        "quote_asset":   info.quote_asset,
+        "qty_unit":      info.qty_unit,
+        "contract_size": info.contract_size,
+        "funding":       funding,
+    }
+
+
+_PERIOD_MS = {
+    "m": 60_000,
+    "h": 3_600_000,
+    "d": 86_400_000,
+    "w": 604_800_000,
+}
+
+
+def _period_to_ms(period: str) -> Optional[int]:
+    if not period or len(period) < 2:
+        return None
+    scale = _PERIOD_MS.get(period[-1])
+    if scale is None:
+        return None
+    try:
+        count = int(period[:-1])
+    except ValueError:
+        return None
+    return count * scale
+
+
+async def join_open_interest_basis(adapter, market_type: MarketType, symbol: str, period: str,
+                                   start_time: Optional[int], limit: int,
+                                   oi_rows: List[OpenInterest]) -> List[OpenInterest]:
+    if market_type != MarketType.LINEAR or not oi_rows:
+        return oi_rows
+
+    try:
+        candles = await adapter.get_candles(market_type, symbol, period, start_time, limit + 1)
+    except Exception:
+        logger.exception(f"OI candle-join: candle fetch failed for {adapter.name}/{market_type.value}/{symbol}")
+        return oi_rows
+
+    if len(candles) < 2:
+        return oi_rows
+
+    period_ms = _period_to_ms(period)
+    if period_ms is None:
+        period_ms = candles[1].timestamp - candles[0].timestamp
+    close_by_close_ts = {c.timestamp + period_ms: c.close for c in candles[:-1]}
+
+    joined = []
+    for oi_row in oi_rows:
+        matching_close = close_by_close_ts.get(oi_row.timestamp)
+        if matching_close is None:
+            joined.append(oi_row)
+            continue
+
+        oi_obj = oi_row.open_interest
+        new_oi_value = build_oi_value(
+            native          = oi_obj.native,
+            oi_unit         = oi_obj.unit,
+            contract_size   = oi_obj.contract_size,
+            candle_close    = matching_close,
+            candle_close_ts = oi_row.timestamp,
+        )
+        joined.append(oi_row.model_copy(update={"open_interest": new_oi_value}))
+
+    return joined
 
 
 class StreamHub:

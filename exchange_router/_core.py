@@ -9,6 +9,7 @@ import websockets
 
 from . import frames
 from . import rows
+from .capabilities import route_block
 from ._warnings import emit
 from .batch import BatchResult
 from .errors import BadRequest, NotSupported, RouterError, RouterUnreachable, error_for_status
@@ -127,10 +128,7 @@ class AsyncCore:
 
 
     def _route_block(self, exchange: str, market_type: str, route: str) -> Dict:
-        caps    = self._capabilities.get(exchange) or {}
-        markets = caps.get("markets", {}) or {}
-        mt      = markets.get(market_type) or {}
-        return mt.get(route) or {}
+        return route_block(self._capabilities.get(exchange), market_type, route)
 
 
     async def _preflight(self, exchange: str, market_type: str, route: str, symbol: Optional[str] = None,

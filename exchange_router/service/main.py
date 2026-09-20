@@ -7,8 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 from contextlib import asynccontextmanager
 from typing import Optional
+from exchange_router.capabilities import market_block, route_block
 from exchange_router.exchanges import EXCHANGE_REGISTRY, get_adapter, shutdown_exchanges, startup_exchanges
-from exchange_router.exchanges.base import UpstreamUnavailableError, build_oi_value
+from exchange_router.exchanges.base import UpstreamUnavailableError, join_open_interest_basis, symbol_info_to_lite, validate_interval
 from exchange_router.models import MarketType
 from exchange_router.service.stream_manager import StreamManager
 from exchange_router.version import SCHEMA_VERSION, SERVICE_VERSION
@@ -99,17 +100,6 @@ def validate_request(exchange: str, market_type: MarketType = None):
     return adapter
 
 
-def validate_interval(adapter, market_type: MarketType, route: str, label: str, value: str):
-    capabilities  = adapter.get_capabilities() or {}
-    markets_block = capabilities.get("markets", {}) or {}
-    mt_block      = markets_block.get(market_type) or markets_block.get(market_type.value) or {}
-    route_block   = mt_block.get(route) or {}
-    intervals     = route_block.get("intervals")
-
-    if intervals and value not in intervals:
-        raise ValueError(f"{label} '{value}' is not valid for {adapter.name} {market_type.value} {route}")
-
-
 @app.get("/")
 async def service_root():
     return {
@@ -145,8 +135,7 @@ def list_exchanges():
 @app.get("/{exchange}")
 async def exchange_overview(exchange: str):
     adapter      = validate_request(exchange)
-    capabilities = adapter.get_capabilities() or {}
-    caps_markets = capabilities.get("markets", {}) or {}
+    capabilities = adapter.get_capabilities()
 
     async def _symbol_count(mt):
         try:
@@ -163,7 +152,7 @@ async def exchange_overview(exchange: str):
         {
             "name":         mt.value,
             "symbol_count": count,
-            "capabilities": caps_markets.get(mt, caps_markets.get(mt.value, {})),
+            "capabilities": market_block(capabilities, mt),
         }
         for mt, count in zip(market_types, counts)
     ]
@@ -193,20 +182,6 @@ def list_market_types(exchange: str):
     return {"market_types": adapter.supported_market_types}
 
 
-def _symbol_info_to_lite(info) -> dict:
-    funding = None
-    if info.funding is not None:
-        funding = {"kind": info.funding.kind}
-    return {
-        "symbol":        info.symbol,
-        "base_asset":    info.base_asset,
-        "quote_asset":   info.quote_asset,
-        "qty_unit":      info.qty_unit,
-        "contract_size": info.contract_size,
-        "funding":       funding,
-    }
-
-
 @app.get("/{exchange}/{market_type}/markets")
 async def get_markets(exchange: str, market_type: MarketType):
     adapter   = validate_request(exchange, market_type)
@@ -215,7 +190,7 @@ async def get_markets(exchange: str, market_type: MarketType):
         "exchange":    exchange,
         "market_type": market_type.value,
         "count":       len(info_list),
-        "markets":     [_symbol_info_to_lite(info) for info in info_list],
+        "markets":     [symbol_info_to_lite(info) for info in info_list],
     }
 
 
@@ -268,68 +243,13 @@ async def get_candles(exchange: str, market_type: MarketType, symbol: str, inter
     return await adapter.get_candles(market_type, symbol, interval, start, limit)
 
 
-_PERIOD_MS = {
-    "m": 60_000,
-    "h": 3_600_000,
-    "d": 86_400_000,
-    "w": 604_800_000,
-}
-
-
-def _period_to_ms(period: str) -> Optional[int]:
-    if not period or len(period) < 2:
-        return None
-    scale = _PERIOD_MS.get(period[-1])
-    if scale is None:
-        return None
-    try:
-        count = int(period[:-1])
-    except ValueError:
-        return None
-    return count * scale
-
-
 @app.get("/{exchange}/{market_type}/open_interest/{symbol}")
 async def get_open_interest(exchange: str, market_type: MarketType, symbol: str, period: str = Query("1h"), start: Optional[int] = None, limit: int = Query(30, ge=1)):
-    adapter  = validate_request(exchange, market_type)
+    adapter = validate_request(exchange, market_type)
     validate_interval(adapter, market_type, "open_interest", "Period", period)
-    oi_rows  = await adapter.get_open_interest(market_type, symbol, period, start, limit)
+    oi_rows = await adapter.get_open_interest(market_type, symbol, period, start, limit)
 
-    if market_type != MarketType.LINEAR or not oi_rows:
-        return oi_rows
-
-    try:
-        candles = await adapter.get_candles(market_type, symbol, period, start, limit + 1)
-    except Exception:
-        logging.exception(f"OI candle-join: candle fetch failed for {exchange}/{market_type.value}/{symbol}")
-        return oi_rows
-
-    if len(candles) < 2:
-        return oi_rows
-
-    period_ms = _period_to_ms(period)
-    if period_ms is None:
-        period_ms = candles[1].timestamp - candles[0].timestamp
-    close_by_close_ts = {c.timestamp + period_ms: c.close for c in candles[:-1]}
-
-    joined = []
-    for oi_row in oi_rows:
-        matching_close = close_by_close_ts.get(oi_row.timestamp)
-        if matching_close is None:
-            joined.append(oi_row)
-            continue
-
-        oi_obj = oi_row.open_interest
-        new_oi_value = build_oi_value(
-            native          = oi_obj.native,
-            oi_unit         = oi_obj.unit,
-            contract_size   = oi_obj.contract_size,
-            candle_close    = matching_close,
-            candle_close_ts = oi_row.timestamp,
-        )
-        joined.append(oi_row.model_copy(update={"open_interest": new_oi_value}))
-
-    return joined
+    return await join_open_interest_basis(adapter, market_type, symbol, period, start, limit, oi_rows)
 
 
 @app.get("/{exchange}/{market_type}/funding_rate/{symbol}")
@@ -373,11 +293,7 @@ async def websocket_endpoint(websocket: WebSocket, exchange: str, market_type: M
             await websocket.close(code=1003)
             return
 
-        caps = adapter.get_capabilities() or {}
-        markets_block = caps.get("markets", {}) or {}
-        mt_block = markets_block.get(market_type) or markets_block.get(market_type.value) or {}
-        ch_block = mt_block.get(channel) or {}
-        if not ch_block.get("ws"):
+        if not route_block(adapter.get_capabilities(), market_type, channel).get("ws"):
             await websocket.close(code=1003, reason=f"channel {channel!r} not supported on {exchange}/{market_type.value}")
             return
 
