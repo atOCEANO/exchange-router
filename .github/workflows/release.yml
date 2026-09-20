@@ -1,14 +1,28 @@
-# Release: check the tag against the service version, then publish a GitHub
-# Release with notes. Same shape as emsl's release, minus the build matrix,
-# because there is nothing here to build for anyone. emsl ships wheels because a
-# library has to arrive as a file; this is a service you run, so the artifact is
-# the repository at the tag, which GitHub attaches on its own. The client SDK is
-# versioned on its own line and installs straight from the tag, so shipping a
-# wheel here would only publish a file whose number disagrees with the release.
+# Release: check the tag against the version, build the distributions, then
+# publish a GitHub Release with notes and attach them.
 #
-# A v* tag releases. Both jobs below are gated on that tag, so a manual dispatch
-# runs neither: it is a way to read the workflow from the Actions tab and not a
-# dry run of the guard.
+# This workflow used to build nothing, on two arguments that were both true at
+# the time and are both false now. The first was that a library has to arrive as
+# a file while this is a service you run, so the artifact is the repository at
+# the tag. It is a library now: `Router.local` runs the adapters in the caller's
+# own process and FastAPI is an optional extra. The second was that the client
+# SDK carried its own version, so a wheel built here would publish a file whose
+# number disagreed with the release it was attached to. There is one number now.
+# Both premises died at 3.0.0, and the comment is kept rather than deleted so
+# nobody re-derives the old conclusion from the old reasoning.
+#
+# One wheel, no matrix. Pure Python means a single py3-none-any file covers every
+# platform, which is the whole difference from emsl, where four legs exist only
+# because it compiles Rust.
+#
+# Nothing is published to an index. Installing is `pip install git+...@tag`, and
+# the wheel on the release page is for anyone who would rather have the file.
+# Publishing to PyPI is a one-job addition and a token; not doing it is the
+# reversible direction, since a name taken there cannot be given back.
+#
+# A v* tag releases. All three jobs below are gated on that tag, so a manual
+# dispatch runs none of them: it is a way to read the workflow from the Actions
+# tab and not a dry run of the guard.
 
 name: release
 
@@ -26,7 +40,7 @@ jobs:
   # that no tag matched and nothing anywhere noticed. Every tag from v2.2.1 on
   # has agreed; this is what keeps it that way.
   version:
-    name: the tag matches the service version
+    name: the tag matches the version
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/') # a dispatch has no tag to match
     steps:
@@ -34,43 +48,108 @@ jobs:
       - name: compare the tag against exchange_router/version.py
         run: |
           tag="${GITHUB_REF_NAME#v}"
-          src=$(sed -n 's/^SERVICE_VERSION *= *"\(.*\)"/\1/p' exchange_router/version.py)
+          src=$(sed -n 's/^VERSION *= *"\(.*\)"/\1/p' exchange_router/version.py)
           echo "tag ${GITHUB_REF_NAME} -> ${tag}"
           echo "exchange_router/version.py -> ${src}"
           if [ -z "$src" ]; then
-            echo "::error::could not read SERVICE_VERSION out of exchange_router/version.py"
+            echo "::error::could not read VERSION out of exchange_router/version.py"
             exit 1
           fi
           if [ "$tag" != "$src" ]; then
-            echo "::error::tag ${GITHUB_REF_NAME} does not match SERVICE_VERSION ${src}; bump exchange_router/version.py or move the tag"
+            echo "::error::tag ${GITHUB_REF_NAME} does not match VERSION ${src}; bump exchange_router/version.py or move the tag"
             exit 1
           fi
 
+  build:
+    name: the wheel and the sdist build
+    needs: [version]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') # a dispatch has no tag to match
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10" # the floor the package declares
+      - run: pip install build
+      - run: python -m build
+      # the version guard above reads the module; this reads the metadata the
+      # build actually wrote. They come from the same assignment, and checking
+      # both is what catches a pyproject that stopped pointing at it.
+      - name: the built version matches the tag
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          ls -l dist/
+          test -f "dist/exchange_router-${tag}-py3-none-any.whl" || {
+            echo "::error::no wheel named for ${tag} in dist/"; exit 1; }
+          test -f "dist/exchange_router-${tag}.tar.gz" || {
+            echo "::error::no sdist named for ${tag} in dist/"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
   release:
     name: publish the release
-    needs: [version]
+    needs: [version, build]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/') # a dispatch has no tag to match
     permissions:
       contents: write # creating a release writes to the repo
     steps:
-      # no `files:`, so the assets are the source archives GitHub attaches
-      # itself. That is the thing you actually download to run this.
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          files: dist/*
           body: |
-            `exchange-router-service` is a stateless, keyless router over public
-            crypto market data. One endpoint, one schema, and every registered
-            adapter speaks it. REST and WebSocket sit on the same port and the
-            same adapter instance serves both, so a client written against one
-            exchange and market type works against another with a single path
-            change.
+            `exchange-router` is a stateless, keyless router over public crypto
+            market data. One schema, every registered adapter speaking it, and
+            one Python API that runs either in your own process or against a
+            service you deploy. A caller written against one exchange and market
+            type works against another by changing the arguments.
 
-            There is nothing to install from this page. Take the source below, or
-            clone at the tag, and run it either of the two ways.
+            ## Install it
 
-            ## Run it without Docker
+            ```bash
+            pip install "git+https://github.com/atOCEANO/exchange-router-service.git@${{ github.ref_name }}"
+            ```
+
+            The wheel and the sdist are attached below if you would rather have
+            the file. Requires Python 3.10 or newer.
+
+            ```python
+            from exchange_router import Router
+
+            r = Router.local(exchanges=["binance"])
+            print(r.market("binance", "spot", "BTCUSDT").ticker().price)
+
+            df = r.get_candles("binance", "linear", "BTCUSDT", interval="1h", limit=100)
+            print(df.tail())
+            ```
+
+            No `await`, and it runs identically in a script and in a notebook.
+            The router holds live adapters, so release it when done: the `with`
+            form guarantees cleanup, and outside one call `r.close()`.
+
+            ## Point it at a service instead
+
+            One line changes. Everything below it is the same object with the
+            same methods returning the same types.
+
+            ```python
+            r = Router.service("http://localhost:8040", exchanges=["binance"])
+            ```
+
+            Both constructors require the exchange scope, and bare `Router(...)`
+            raises rather than guessing. Local mode is for one researcher in one
+            process; run the service as soon as there is more than one of
+            anything, because each local process carries its own rate-limit
+            budget and the exchange sees the sum.
+
+            ## Run the service without Docker
 
             ```bash
             git clone --branch ${{ github.ref_name }} https://github.com/atOCEANO/exchange-router-service.git
@@ -81,8 +160,9 @@ jobs:
             uvicorn exchange_router.service:app --port 8040
             ```
 
-            On Windows, activate with `.venv\Scripts\activate`. Requires Python
-            3.10 or newer. Add `--reload` while working on an adapter.
+            On Windows, activate with `.venv\Scripts\activate`. The `[server]`
+            extra is what adds FastAPI and uvicorn; the base install above has
+            neither, on purpose.
 
             ## Run it with Docker
 
@@ -108,33 +188,22 @@ jobs:
             curl http://localhost:8040/exchanges
             ```
 
-            ## The Python client
+            ## Upgrading
 
-            A typed client lives in `client/` and installs straight from this tag.
-            It is versioned on its own line, so its number will not match the
-            service number, and that is intended:
+            The package was `exchange-router-client` and is now `exchange-router`;
+            the import is `exchange_router`. Every read method keeps its name,
+            signature and return type, so a search and replace on the import line
+            is the whole migration for code that already worked. The old
+            `ExchangeRouterClient()` still exists, still defaults to localhost, and
+            warns. The version appears to go backwards from client 5.1.1 because
+            the service and the client used to be numbered separately and now are
+            not; the number continues the service line, which is the one the tags
+            and releases have always used.
 
-            ```bash
-            pip install "git+https://github.com/atOCEANO/exchange-router-service.git@${{ github.ref_name }}"
-            ```
-
-            No `await`, and it runs identically in a script and in a notebook:
-
-            ```python
-            from exchange_router_client import ExchangeRouterClient
-
-            with ExchangeRouterClient("http://localhost:8040") as client:
-                print(client.get_version())
-                print(client.get_exchanges())
-
-                df = client.get_candles("binance", "spot", "BTCUSDT", interval="1h", limit=100)
-                print(df.tail())
-            ```
-
-            The client holds persistent connections, so release it when done. The
-            `with` block guarantees cleanup; outside one, call `client.close()`.
-            See [Python SDK](https://github.com/atOCEANO/exchange-router-service/blob/${{ github.ref_name }}/.Documentation/Python_SDK.md)
-            for the full surface.
+            [Migration](https://github.com/atOCEANO/exchange-router-service/blob/${{ github.ref_name }}/.Documentation/Migration.md)
+            has the detail, and
+            [Python API](https://github.com/atOCEANO/exchange-router-service/blob/${{ github.ref_name }}/.Documentation/Python_API.md)
+            is the full surface.
 
             ## What is in it
 
@@ -172,7 +241,8 @@ jobs:
             IPs that several of these exchanges block. CI therefore checks only
             what needs no upstream: every adapter package registers an adapter and
             declares a non-empty capabilities map and at least one market type, the
-            client SDK installs into a clean interpreter and imports, the image
-            builds and boots, and this tag matches `SERVICE_VERSION`. Treat the
+            package installs into a clean interpreter with no FastAPI in it, the
+            image builds and boots, the offline suite runs every call against
+            both backends and asserts they agree, and this tag matches `VERSION`. Treat the
             auditor run, not this release, as the evidence that a given adapter is
             correct against its exchange.
