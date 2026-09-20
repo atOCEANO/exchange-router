@@ -43,6 +43,11 @@ The seam between the router and a backend is semantic, not URL-shaped. It carrie
 
 The service is one deployment of the same library. `exchange_router/service/main.py` is a FastAPI app over the same adapters and the same shared logic, and the only thing it adds is HTTP, the exception handlers that turn faults into status codes, and the WebSocket fan-out. REST and WebSocket share the port and the adapter instance.
 
+<div align="center">
+  <img src="imgs/204652.png" alt="One API, two backends, rejoining at the adapters" width="46%" />
+  <p style="margin: 0;"><i>One path above the seam, two through it, one below. Everything down to the seam is shared and is never told which backend answered; everything below it is the same adapters reached from a different process</i></p>
+</div>
+
 The two paths are not kept in agreement by discipline. Every test body in the suite runs against both backends and asserts the same frames, dtypes, index, provenance and exception types, which is what [0005](Decisions.md) records and why that suite exists.
 
 <br>

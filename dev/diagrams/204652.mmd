@@ -1,0 +1,28 @@
+flowchart TD
+    U("<b>your code</b>")
+    R["<b>Router</b> / AsyncRouter"]
+    F["frames, rows, handles,<br/>batching, provenance,<br/>the error tree"]
+    %% 204646 records why this is not a diamond: a lozenge grows on its widest
+    %% line rather than on its text, and the two signatures drew one a third of
+    %% the image tall. the branch is carried by the two outgoing edges instead
+    S["<b>the seam</b><br/>fetch(route, exchange,<br/>market_type, symbol)"]
+    LB["<b>LocalBackend</b><br/>calls the adapter method"]
+    RB["<b>RemoteBackend</b><br/>builds a URL, parses the body"]
+    SV["<b>the service</b><br/>FastAPI over the same adapters"]
+    AD["adapters"]
+    X[("exchanges")]
+
+    U --> R
+    R --> F
+    F --> S
+    S -- "local" --> LB
+    S -- "service" --> RB
+    LB --> AD
+    RB -- "HTTP" --> SV
+    SV --> AD
+    AD --> X
+
+    classDef entry fill:#16232e,stroke:#4d9feb,stroke-width:2px,color:#e6edf3
+    classDef stage fill:#16232e,stroke:#2ee6a6,stroke-width:2px,color:#e6edf3
+    class U entry
+    class R,F,S,LB,RB,SV,AD,X stage

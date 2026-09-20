@@ -67,8 +67,8 @@ The one sentence version: local mode is for one researcher in one process, and y
 <br>
 
 <div align="center">
-  <img src=".Documentation/imgs/204644.png" alt="Exchange Router Architecture" width="90%" />
-  <p style="margin: 0;"><i>Architecture: Client -> Router -> Multiple Exchanges</i></p>
+  <img src=".Documentation/imgs/204644.png" alt="One API, two ways to run it" width="90%" />
+  <p style="margin: 0;"><i>One API, two ways to run it: the adapters either live in your process or behind a container you deploy, and the schema is the same either way</i></p>
 </div>
 
 <br>
