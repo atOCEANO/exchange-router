@@ -12,7 +12,7 @@ from exchange_router.exchanges import EXCHANGE_REGISTRY, get_adapter, shutdown_e
 from exchange_router.exchanges.base import UpstreamUnavailableError, join_open_interest_basis, symbol_info_to_lite, validate_interval
 from exchange_router.models import MarketType
 from exchange_router.service.stream_manager import StreamManager
-from exchange_router.version import SCHEMA_VERSION, SERVICE_VERSION
+from exchange_router.version import SCHEMA_VERSION, VERSION
 
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s - %(message)s")
@@ -34,7 +34,7 @@ async def lifespan(_app: FastAPI):
     await shutdown_exchanges()
 
 
-app = FastAPI(title="Exchange Router Service", version=SERVICE_VERSION, lifespan=lifespan)
+app = FastAPI(title="Exchange Router Service", version=VERSION, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -104,7 +104,7 @@ def validate_request(exchange: str, market_type: MarketType = None):
 async def service_root():
     return {
         "service":        "exchange-router-service",
-        "version":        SERVICE_VERSION,
+        "version":        VERSION,
         "status":         "ok",
         "schema_version": SCHEMA_VERSION,
         "exchanges": [
@@ -124,7 +124,7 @@ def service_status():
 
 @app.get("/version")
 def service_version():
-    return {"version": SERVICE_VERSION, "schema_version": SCHEMA_VERSION}
+    return {"version": VERSION, "schema_version": SCHEMA_VERSION}
 
 
 @app.get("/exchanges")

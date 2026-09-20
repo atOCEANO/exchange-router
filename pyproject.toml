@@ -1,18 +1,18 @@
 [build-system]
-requires      = ["setuptools>=68"]
+requires      = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name            = "exchange-router"
 description     = "One API over public crypto market data, in this process or against a running service"
 readme          = "README.md"
-license         = { text = "MIT" }
+license         = "MIT"
+license-files   = ["LICENSE"]
 requires-python = ">=3.10"
 dynamic         = ["version"]
 authors         = [{ name = "atOCEANO" }]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
 
@@ -41,7 +41,7 @@ audit = [
 Homepage = "https://github.com/atOCEANO/exchange-router-service"
 
 [tool.setuptools.dynamic]
-version = { attr = "exchange_router.version.SERVICE_VERSION" }
+version = { attr = "exchange_router.version.VERSION" }
 
 [tool.setuptools.packages.find]
 include = ["exchange_router*"]

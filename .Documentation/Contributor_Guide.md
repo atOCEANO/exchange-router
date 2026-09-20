@@ -161,7 +161,7 @@ The first of those is the one worth knowing about. `load_exchanges()` catches an
 
 ## Releasing
 
-`SERVICE_VERSION` in `exchange_router/version.py` is the single source of the version, and **the tag must equal it**. CI enforces this rather than generating it: a workflow that wrote the version would leave a running container reporting a number that is in no commit. `v2.2.0` was tagged on a commit still reading `2.1.0` before the rule existed; every tag from `v2.2.1` on agrees, and the guard job is what keeps it that way.
+`VERSION` in `exchange_router/version.py` is the single source of the version, and **the tag must equal it**. CI enforces this rather than generating it: a workflow that wrote the version would leave a running container reporting a number that is in no commit. `v2.2.0` was tagged on a commit still reading `2.1.0` before the rule existed; every tag from `v2.2.1` on agrees, and the guard job is what keeps it that way.
 
 To cut a release, bump `exchange_router/version.py` in its own commit (the history keeps these separate, `chore(version): bump service to X.Y.Z`), then tag `vX.Y.Z` and push the tag. `.github/workflows/release.yml` checks the tag against `exchange_router/version.py` and publishes a GitHub Release with generated notes. Both jobs in that workflow are gated on the tag ref, so a manual dispatch from the Actions tab runs neither of them; there is no way to dry-run the guard short of pushing a tag.
 

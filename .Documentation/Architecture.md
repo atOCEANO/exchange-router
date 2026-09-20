@@ -160,12 +160,12 @@ The `detail` field in error responses always carries the underlying exception me
 
 The router carries two version numbers, defined in [exchange_router/version.py](../exchange_router/version.py). Only one of them is a compatibility claim.
 
-* **`SERVICE_VERSION`** is the standard semver string (`MAJOR.MINOR.PATCH`). It bumps for any user-visible change: a new route, a new field, a behavioural fix, a capability adjustment, a dependency upgrade. Returned at `GET /version` and `GET /`.
+* **`VERSION`** is the standard semver string (`MAJOR.MINOR.PATCH`). It bumps for any user-visible change: a new route, a new field, a behavioural fix, a capability adjustment, a dependency upgrade. Returned at `GET /version` and `GET /`.
 * **`SCHEMA_VERSION`** is a small integer. It bumps only when the wire format breaks consumer code: renaming a field, flattening a nested object into top-level fields, removing a discriminator value, changing the type of a field. Adding an optional field does not bump. Returned at `GET /` and stamped on every auditor `results.json` and on every DataFrame's `.attrs`; the auditor compares served-against-pinned and fails the suite on drift.
 
-The two are decoupled on purpose. A wire-compatible bug fix bumps `SERVICE_VERSION` and leaves `SCHEMA_VERSION` untouched, so clients pinned to a schema number do not need to change. A genuine wire break bumps both.
+The two are decoupled on purpose. A wire-compatible bug fix bumps `VERSION` and leaves `SCHEMA_VERSION` untouched, so clients pinned to a schema number do not need to change. A genuine wire break bumps both.
 
-**Compatibility is gated on the schema number and never on the release number.** In service mode the SDK reads `GET /version` once, on the first call that needs capabilities, and raises `SchemaMismatch` if the integers disagree. Gating on `SERVICE_VERSION` instead would mean a patch release of the container breaking every pinned install, and the two could never be deployed independently. The cost of that choice is recorded in [0004](Decisions.md): because additive fields never move the schema, the frame builders must tolerate a column that is not there rather than raising.
+**Compatibility is gated on the schema number and never on the release number.** In service mode the SDK reads `GET /version` once, on the first call that needs capabilities, and raises `SchemaMismatch` if the integers disagree. Gating on `VERSION` instead would mean a patch release of the container breaking every pinned install, and the two could never be deployed independently. The cost of that choice is recorded in [0004](Decisions.md): because additive fields never move the schema, the frame builders must tolerate a column that is not there rather than raising.
 
 The check runs on the first request rather than at construction, because a constructor cannot await a round trip. It costs nothing extra: the SDK already makes a lazy first call to fetch capabilities, and the handshake rides along with it.
 

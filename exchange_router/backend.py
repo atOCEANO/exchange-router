@@ -27,7 +27,7 @@ from .exchanges.base import (
     validate_interval,
 )
 from .models import MarketType
-from .version import SCHEMA_VERSION, SERVICE_VERSION
+from .version import SCHEMA_VERSION, VERSION
 
 
 logger = logging.getLogger(__name__)
@@ -180,7 +180,7 @@ class RemoteBackend(Backend):
 
             self._http = httpx.AsyncClient(
                 timeout = self.timeout,
-                headers = {"User-Agent": f"exchange-router-client/{__version__}"},
+                headers = {"User-Agent": f"exchange-router/{__version__}"},
             )
 
         return self._http
@@ -350,7 +350,7 @@ class LocalBackend(Backend):
             return {"status": "ok", "service": "exchange-router-service"}
 
         if route == "version":
-            return {"version": SERVICE_VERSION, "schema_version": SCHEMA_VERSION}
+            return {"version": VERSION, "schema_version": SCHEMA_VERSION}
 
         if route == "exchanges":
             if not EXCHANGE_REGISTRY:
