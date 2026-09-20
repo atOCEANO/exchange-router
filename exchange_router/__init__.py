@@ -1,6 +1,6 @@
 from .version import __version__
-from .router import ExchangeRouterClient
-from .async_router import AsyncExchangeRouterClient
+from .router import ExchangeRouterClient, Router
+from .async_router import AsyncExchangeRouterClient, AsyncRouter
 from .batch import BatchResult
 from .frames import with_provenance
 from .funding import funding_paid, per_hour_view
@@ -14,10 +14,13 @@ from .errors import (
     UpstreamUnavailable,
     NotSupported,
     RouterUnreachable,
+    SchemaMismatch,
 )
 
 __all__ = [
     "__version__",
+    "Router",
+    "AsyncRouter",
     "ExchangeRouterClient",
     "AsyncExchangeRouterClient",
     "BatchResult",
@@ -33,4 +36,5 @@ __all__ = [
     "UpstreamUnavailable",
     "NotSupported",
     "RouterUnreachable",
+    "SchemaMismatch",
 ]

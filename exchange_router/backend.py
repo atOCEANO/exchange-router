@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import random
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -8,6 +9,7 @@ import websockets
 from pydantic import ValidationError
 from pydantic_core import to_jsonable_python
 
+from .capabilities import market_block
 from .errors import (
     BadRequest,
     NotFound,
@@ -27,6 +29,8 @@ from .exchanges.base import (
 from .models import MarketType
 from .version import SCHEMA_VERSION, SERVICE_VERSION
 
+
+logger = logging.getLogger(__name__)
 
 MAX_SLEEP_S = 60.0
 
@@ -119,6 +123,12 @@ def _endpoint(route: str, exchange: Optional[str], market_type: Optional[str], s
     if route in SERVICE_ROUTES:
         return route
 
+    if route == "overview":
+        return f"{exchange}"
+
+    if route == "exchange_status":
+        return f"{exchange}/status"
+
     if route in EXCHANGE_ROUTES:
         return f"{exchange}/{route}"
 
@@ -141,6 +151,14 @@ class Backend:
     async def stream(self, exchange: str, market_type: str, channel: str, symbol: str) -> AsyncGenerator[Dict, None]:
         raise NotImplementedError
         yield
+
+
+    def known_exchanges(self) -> Optional[List[str]]:
+        return None
+
+
+    async def warm(self, names: List[str]) -> None:
+        return None
 
 
     async def close(self) -> None:
@@ -220,7 +238,75 @@ class RemoteBackend(Backend):
                 yield json.loads(message)
 
 
+class FallbackBackend(Backend):
+
+    def __init__(self, primary: Backend, secondary: Backend):
+        self._primary   = primary
+        self._secondary = secondary
+        self.degraded   = False
+
+
+    def _pick(self) -> Backend:
+        return self._secondary if self.degraded else self._primary
+
+
+    async def fetch(self, route: str, exchange: Optional[str] = None, market_type: Optional[str] = None,
+                    symbol: Optional[str] = None, **params: Any) -> Any:
+        try:
+            return await self._pick().fetch(route, exchange, market_type, symbol, **params)
+
+        except RouterUnreachable:
+            if self.degraded:
+                raise
+            self.degraded = True
+            return await self._secondary.fetch(route, exchange, market_type, symbol, **params)
+
+
+    async def stream(self, exchange: str, market_type: str, channel: str, symbol: str) -> AsyncGenerator[Dict, None]:
+        async for message in self._pick().stream(exchange, market_type, channel, symbol):
+            yield message
+
+
+    def known_exchanges(self) -> Optional[List[str]]:
+        return None
+
+
+    async def warm(self, names: List[str]) -> None:
+        await self._pick().warm(names)
+
+
+    async def close(self) -> None:
+        await self._primary.close()
+        await self._secondary.close()
+
+
 class LocalBackend(Backend):
+
+    def known_exchanges(self) -> List[str]:
+        if not EXCHANGE_REGISTRY:
+            load_exchanges()
+
+        return list(EXCHANGE_REGISTRY)
+
+
+    async def warm(self, names: List[str]) -> None:
+        problems: List[BaseException] = []
+
+        for name in names:
+            adapter = self._adapter(name)
+            results = await asyncio.gather(
+                *[adapter._ensure_info_cache(mt) for mt in adapter.supported_market_types],
+                return_exceptions = True,
+            )
+            problems += [r for r in results if isinstance(r, BaseException)]
+
+        for problem in problems:
+            if isinstance(problem, asyncio.CancelledError):
+                raise problem
+
+        if problems:
+            raise problems[0]
+
 
     def _adapter(self, exchange: Optional[str], market_type: Optional[MarketType] = None):
         if not EXCHANGE_REGISTRY:
@@ -271,6 +357,12 @@ class LocalBackend(Backend):
                 load_exchanges()
             return {"count": len(EXCHANGE_REGISTRY), "exchanges": list(EXCHANGE_REGISTRY.keys())}
 
+        if route == "exchange_status":
+            return to_jsonable_python(await self._adapter(exchange).get_status())
+
+        if route == "overview":
+            return await self._overview(exchange)
+
         if route == "capabilities":
             return to_jsonable_python(self._adapter(exchange).get_capabilities())
 
@@ -308,6 +400,34 @@ class LocalBackend(Backend):
             return to_jsonable_python(rows)
 
         raise NotSupported(f"route '{route}' is not served in local mode", 501)
+
+
+    async def _symbol_count(self, adapter, market_type: MarketType) -> int:
+        try:
+            return len(await adapter.get_exchange_info(market_type))
+        except Exception:
+            logger.exception(f"symbol_count fetch failed for {adapter.name}/{market_type.value}")
+            return 0
+
+
+    async def _overview(self, exchange: str) -> Dict[str, Any]:
+        adapter      = self._adapter(exchange)
+        capabilities = adapter.get_capabilities()
+        market_types = adapter.supported_market_types
+        counts       = await asyncio.gather(*[self._symbol_count(adapter, mt) for mt in market_types])
+
+        return {
+            "exchange":     exchange,
+            "status":       "ok",
+            "market_types": [
+                {
+                    "name":         mt.value,
+                    "symbol_count": count,
+                    "capabilities": to_jsonable_python(market_block(capabilities, mt)),
+                }
+                for mt, count in zip(market_types, counts)
+            ],
+        }
 
 
     async def _series(self, adapter, route: str, market_type: MarketType, symbol: str,

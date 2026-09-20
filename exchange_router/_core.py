@@ -9,7 +9,8 @@ from .backend import Backend, RemoteBackend, is_retryable_stream_error
 from .capabilities import route_block
 from ._warnings import emit
 from .batch import BatchResult
-from .errors import BadRequest, NotSupported, RouterError
+from .errors import BadRequest, NotFound, NotSupported, RouterError, SchemaMismatch
+from .version import SCHEMA_VERSION, __version__
 
 
 SERIES_ROUTES = ("candles", "trades", "agg_trades", "funding_rate", "open_interest", "liquidations", "long_short_ratio")
@@ -18,20 +19,115 @@ SERIES_ROUTES = ("candles", "trades", "agg_trades", "funding_rate", "open_intere
 class AsyncCore:
 
     def __init__(self, base_url: str = "http://localhost:8040", timeout: int = 30, max_retries: int = 3,
-                 verbose: bool = True, backend: Optional[Backend] = None):
+                 verbose: bool = True, backend: Optional[Backend] = None,
+                 mode: str = "service", scope: Optional[List[str]] = None):
         self.base_url    = base_url.rstrip("/")
         self.timeout     = timeout
         self.max_retries = max_retries
         self.verbose     = verbose
         self._backend    = backend if backend is not None else RemoteBackend(self.base_url, timeout, max_retries)
+        self._mode       = mode
+        self._scope      = list(scope) if scope else []
         self._capabilities: Dict[str, Dict] = {}
+        self._handshake_done  = False
+        self._handshake_error: Optional[RouterError] = None
+        self._warm_task: Optional[asyncio.Task] = None
+
+
+    @property
+    def mode(self) -> str:
+        return self._mode
+
+
+    @property
+    def schema_version(self) -> int:
+        return SCHEMA_VERSION
+
+
+    @property
+    def scope(self) -> List[str]:
+        return list(self._scope)
 
 
     async def close(self) -> None:
+        task = self._warm_task
+        self._warm_task = None
+        if task is not None and not task.done():
+            task.cancel()
+
         await self._backend.close()
 
 
+    def _start_warm(self) -> None:
+        if self._warm_task is not None or not self._scope:
+            return
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        self._warm_task = loop.create_task(self._warm_quietly())
+
+
+    async def _warm_quietly(self) -> None:
+        try:
+            await self.warm()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            emit([f"warm: {type(error).__name__}: {error}; the first call pays the cost instead"], self.verbose)
+
+
+    async def warm(self, exchange: Optional[str] = None) -> None:
+        names = [exchange] if exchange is not None else list(self._scope)
+
+        if self._mode == "service":
+            await self._ensure_handshake()
+            for name in names:
+                await self._ensure_capabilities(name)
+            return
+
+        await self._backend.warm(names)
+
+
+    async def _ensure_handshake(self) -> None:
+        if self._handshake_error is not None:
+            raise self._handshake_error
+
+        if self._handshake_done or self._mode != "service":
+            self._handshake_done = True
+            return
+
+        data   = await self._backend.fetch("version")
+        theirs = data.get("schema_version")
+
+        if theirs is not None and theirs != SCHEMA_VERSION:
+            self._handshake_error = SchemaMismatch(
+                f"this SDK speaks schema {SCHEMA_VERSION}, {self.base_url} speaks schema {theirs} "
+                f"(sdk {__version__}, service {data.get('version')}); upgrade the SDK or pin the "
+                f"service to a schema {SCHEMA_VERSION} release",
+                SCHEMA_VERSION,
+                theirs,
+            )
+            raise self._handshake_error
+
+        if self._scope:
+            served  = set((await self._backend.fetch("exchanges")).get("exchanges", []))
+            missing = [name for name in self._scope if name not in served]
+            if missing:
+                self._handshake_error = NotFound(
+                    f"exchanges {missing} are not served by {self.base_url}; it carries {sorted(served)}",
+                    404,
+                )
+                raise self._handshake_error
+
+        self._handshake_done = True
+
+
     async def _ensure_capabilities(self, exchange: str) -> Dict:
+        await self._ensure_handshake()
+
         if exchange not in self._capabilities:
             try:
                 self._capabilities[exchange] = await self._backend.fetch("capabilities", exchange) or {}
@@ -107,6 +203,14 @@ class AsyncCore:
     async def get_market_types(self, exchange: str) -> List[str]:
         data = await self._backend.fetch("market_types", exchange)
         return [str(mt) for mt in data.get("market_types", [])]
+
+
+    async def get_exchange_overview(self, exchange: str) -> Dict:
+        return await self._backend.fetch("overview", exchange)
+
+
+    async def get_exchange_status(self, exchange: str) -> Dict:
+        return await self._backend.fetch("exchange_status", exchange)
 
 
     async def get_capabilities(self, exchange: str) -> Dict:

@@ -42,6 +42,14 @@ class RouterUnreachable(RouterError):
     pass
 
 
+class SchemaMismatch(RouterError):
+
+    def __init__(self, detail: str, sdk_schema: Optional[int] = None, service_schema: Optional[int] = None):
+        super().__init__(detail)
+        self.sdk_schema     = sdk_schema
+        self.service_schema = service_schema
+
+
 def error_for_status(status: int, detail: str, retry_after: Optional[float] = None) -> RouterError:
     if status == 400:
         return BadRequest(detail, status)

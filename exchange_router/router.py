@@ -1,17 +1,28 @@
 import asyncio
 import queue
 import threading
+import warnings
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
 from ._core import AsyncCore
+from .async_router import AsyncRouter
 from .batch import BatchResult
 from .handle import SyncMarket
 from .rows import Row
 
 
 STREAM_BUFFER_MAX = 1024
+
+DEPRECATION = (
+    "ExchangeRouterClient is the 5.x name and keeps its localhost default; "
+    "use Router.service(url, exchanges=...) or Router.local(exchanges=...)"
+)
+
+
+async def _kick_warm(core: AsyncCore) -> None:
+    core._start_warm()
 
 
 class _LoopThread:
@@ -80,12 +91,62 @@ class _LoopThread:
         self._thread.join(timeout=5)
 
 
-class ExchangeRouterClient:
+class Router:
 
-    def __init__(self, base_url: str = "http://localhost:8040", timeout: int = 30, max_retries: int = 3,
-                 verbose: bool = True, backend=None):
-        self._loop = _LoopThread()
-        self._core = AsyncCore(base_url=base_url, timeout=timeout, max_retries=max_retries, verbose=verbose, backend=backend)
+    def __init__(self, *_args, **_kwargs):
+        raise TypeError(
+            "Router cannot be constructed directly; call Router.local(exchanges=[...]) to run "
+            "the adapters in this process, or Router.service(url, exchanges=[...]) to use a "
+            "running service"
+        )
+
+
+    @classmethod
+    def _wrap(cls, core: AsyncCore) -> "Router":
+        router       = object.__new__(cls)
+        router._loop = _LoopThread()
+        router._core = core
+        router._loop.run(_kick_warm(core))
+
+        return router
+
+
+    @classmethod
+    def local(cls, exchanges, *, verbose: bool = True, backend=None) -> "Router":
+        return cls._wrap(AsyncRouter.local(exchanges, verbose=verbose, backend=backend))
+
+
+    @classmethod
+    def service(cls, url: str, exchanges, *, fallback=None, timeout: int = 30, max_retries: int = 3,
+                verbose: bool = True, backend=None) -> "Router":
+        return cls._wrap(AsyncRouter.service(
+            url,
+            exchanges,
+            fallback    = fallback,
+            timeout     = timeout,
+            max_retries = max_retries,
+            verbose     = verbose,
+            backend     = backend,
+        ))
+
+
+    @property
+    def mode(self) -> str:
+        return self._core.mode
+
+
+    @property
+    def schema_version(self) -> int:
+        return self._core.schema_version
+
+
+    @property
+    def scope(self):
+        return self._core.scope
+
+
+    def warm(self, exchange=None) -> None:
+        self._loop.run(self._core.warm(exchange))
 
 
     @property
@@ -103,7 +164,7 @@ class ExchangeRouterClient:
         self._loop.stop()
 
 
-    def __enter__(self) -> "ExchangeRouterClient":
+    def __enter__(self) -> "Router":
         return self
 
 
@@ -125,6 +186,14 @@ class ExchangeRouterClient:
 
     def get_market_types(self, exchange: str) -> List[str]:
         return self._loop.run(self._core.get_market_types(exchange))
+
+
+    def get_exchange_overview(self, exchange: str) -> Dict:
+        return self._loop.run(self._core.get_exchange_overview(exchange))
+
+
+    def get_exchange_status(self, exchange: str) -> Dict:
+        return self._loop.run(self._core.get_exchange_status(exchange))
 
 
     def get_capabilities(self, exchange: str) -> Dict:
@@ -226,3 +295,12 @@ class ExchangeRouterClient:
 
     def subscribe(self, exchange: str, market_type: str, channel: str, symbol: str):
         return self._loop.iterate(self._core.subscribe(exchange, market_type, channel, symbol))
+
+
+class ExchangeRouterClient(Router):
+
+    def __init__(self, base_url: str = "http://localhost:8040", timeout: int = 30, max_retries: int = 3,
+                 verbose: bool = True, backend=None):
+        warnings.warn(DEPRECATION, DeprecationWarning, stacklevel=2)
+        self._loop = _LoopThread()
+        self._core = AsyncCore(base_url=base_url, timeout=timeout, max_retries=max_retries, verbose=verbose, backend=backend)
