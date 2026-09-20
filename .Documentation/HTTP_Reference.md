@@ -9,12 +9,14 @@
 
 <sub>
   <a href="../README.md">Introduction</a> &nbsp;•&nbsp;
-  <b>API Reference</b> &nbsp;•&nbsp;
-  <a href="Python_SDK.md">Python SDK</a> &nbsp;•&nbsp;
+  <a href="Python_API.md">Python API</a> &nbsp;•&nbsp;
+  <b>HTTP Reference</b> &nbsp;•&nbsp;
   <a href="Exchange_Notes.md">Exchange Notes</a> &nbsp;•&nbsp;
-  <a href="System_Architecture.md">System Architecture</a> &nbsp;•&nbsp;
-  <a href="Auditor_Guide.md">Auditor Guide</a> &nbsp;•&nbsp;
-  <a href="Contributor_Guide.md">Contributor Guide</a>
+  <a href="Architecture.md">Architecture</a> &nbsp;•&nbsp;
+  <a href="Decisions.md">Decisions</a> &nbsp;•&nbsp;
+  <a href="Adapter_Guide.md">Adapter Guide</a> &nbsp;•&nbsp;
+  <a href="Contributor_Guide.md">Contributor Guide</a> &nbsp;•&nbsp;
+  <a href="Auditor_Guide.md">Auditor Guide</a>
 </sub>
 
 <br>
@@ -22,7 +24,7 @@
 <br>
 <br>
 
-## API Reference
+## HTTP Reference
 
 The router exposes two interfaces on the same port. REST is request/response; WebSocket is real-time streaming.
 

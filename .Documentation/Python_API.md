@@ -9,12 +9,14 @@
 
 <sub>
   <a href="../README.md">Introduction</a> &nbsp;•&nbsp;
-  <a href="API_Reference.md">API Reference</a> &nbsp;•&nbsp;
-  <b>Python SDK</b> &nbsp;•&nbsp;
+  <b>Python API</b> &nbsp;•&nbsp;
+  <a href="HTTP_Reference.md">HTTP Reference</a> &nbsp;•&nbsp;
   <a href="Exchange_Notes.md">Exchange Notes</a> &nbsp;•&nbsp;
-  <a href="System_Architecture.md">System Architecture</a> &nbsp;•&nbsp;
-  <a href="Auditor_Guide.md">Auditor Guide</a> &nbsp;•&nbsp;
-  <a href="Contributor_Guide.md">Contributor Guide</a>
+  <a href="Architecture.md">Architecture</a> &nbsp;•&nbsp;
+  <a href="Decisions.md">Decisions</a> &nbsp;•&nbsp;
+  <a href="Adapter_Guide.md">Adapter Guide</a> &nbsp;•&nbsp;
+  <a href="Contributor_Guide.md">Contributor Guide</a> &nbsp;•&nbsp;
+  <a href="Auditor_Guide.md">Auditor Guide</a>
 </sub>
 
 <br>
@@ -22,7 +24,7 @@
 <br>
 <br>
 
-## Python SDK
+## Python API
 
 The SDK (`exchange-router-client`) is a translation layer over the router's REST and WebSocket interfaces. It is synchronous by default: methods return their data directly, with no `await`. The sync client runs the async machinery on a private background event loop, so the same code works in a plain script and in a Jupyter cell without `asyncio.run` or top-level `await`. An `AsyncExchangeRouterClient` with the same surface is available when you want concurrency.
 
@@ -75,7 +77,7 @@ with ExchangeRouterClient("http://localhost:8040") as client:
 
 The client holds persistent connections, so release it when done. The `with` block above guarantees cleanup; outside one, call `client.close()`.
 
-The `start` parameter, where applicable, follows the [router's pagination contract](API_Reference.md#pagination-semantics): pass the oldest timestamp you already have to walk further back.
+The `start` parameter, where applicable, follows the [router's pagination contract](HTTP_Reference.md#pagination-semantics): pass the oldest timestamp you already have to walk further back.
 
 <br>
 <br>
@@ -431,24 +433,3 @@ get_long_short_ratio(exchange, market_type, symbol, period="5m", limit=30, start
 <br>
 <br>
 
-## Migrating from 4.x
-
-The wire schema is unchanged. Three client-side changes can break 4.x code:
-
-* **The DataFrame index is timezone-aware UTC now.** Comparing it against a naive `Timestamp` raises; localize your bound with `tz="UTC"`, or call `.tz_localize(None)` on the index.
-* **`fetch_multi_candles` was removed.** Use `candles_many`, which returns a `BatchResult`.
-* **Python 3.10 or newer is required.**
-
-<br>
-<br>
-
-## Migrating from 3.x
-
-The wire schema is unchanged, so any code reading the raw response bodies (or stream messages) is unaffected. The client return shapes changed:
-
-* **Snapshots are now a flat `Row`, not a nested dict.** `t["volume_24h"]["native"]` becomes `t.volume_24h` (or `t["volume_24h"]`); the nested object is on `t.raw`. Funding on `get_mark_price` is flat: `mp.funding_per_cycle`, `mp.funding_kind`, plus the derived `mp.funding_per_hour`.
-* **`get_orderbook` returns one DataFrame, not `(bids, asks)`.** Split with `ob[ob.side == "bid"]` and `ob[ob.side == "ask"]`.
-* **Series columns are stable.** `cycle_ms` is always a column on funding, and `long_account` / `short_account` are always columns on long/short ratio (NaN when opaque). Code that did `KeyError`-prone column access now works.
-* **`df.attrs` keys are unchanged in spirit** but the conversion provenance stays in `attrs`; for per-row provenance across a `concat`, use `with_provenance`.
-* **`get_symbol_info` returns a `Row`** with `funding_kind` instead of a nested `funding` block.
-* **4xx errors** still raise the typed `RouterError` tree from 3.x.

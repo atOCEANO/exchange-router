@@ -10,12 +10,14 @@
 
 <sub>
   <b>Introduction</b> &nbsp;•&nbsp;
-  <a href=".Documentation/API_Reference.md">API Reference</a> &nbsp;•&nbsp;
-  <a href=".Documentation/Python_SDK.md">Python SDK</a> &nbsp;•&nbsp;
+  <a href=".Documentation/Python_API.md">Python API</a> &nbsp;•&nbsp;
+  <a href=".Documentation/HTTP_Reference.md">HTTP Reference</a> &nbsp;•&nbsp;
   <a href=".Documentation/Exchange_Notes.md">Exchange Notes</a> &nbsp;•&nbsp;
-  <a href=".Documentation/System_Architecture.md">System Architecture</a> &nbsp;•&nbsp;
-  <a href=".Documentation/Auditor_Guide.md">Auditor Guide</a> &nbsp;•&nbsp;
-  <a href=".Documentation/Contributor_Guide.md">Contributor Guide</a>
+  <a href=".Documentation/Architecture.md">Architecture</a> &nbsp;•&nbsp;
+  <a href=".Documentation/Decisions.md">Decisions</a> &nbsp;•&nbsp;
+  <a href=".Documentation/Adapter_Guide.md">Adapter Guide</a> &nbsp;•&nbsp;
+  <a href=".Documentation/Contributor_Guide.md">Contributor Guide</a> &nbsp;•&nbsp;
+  <a href=".Documentation/Auditor_Guide.md">Auditor Guide</a>
 </sub>
 
 <br>
@@ -42,7 +44,7 @@ Field names, units, funding conventions, and pagination semantics differ from on
 
 Clients talk to one endpoint, the router routes requests to the right exchange adapter, and the adapter normalizes the response into a schema that is identical across exchanges. REST and WebSocket both sit on the same port, and the same adapter instance serves both, so a client written against Binance spot works against Bybit linear with a single path change.
 
-The wire format carries nested value objects on every quantitative record: each `qty`, `volume`, or `open_interest` field comes back as `{native, unit, contract_size?, usd, usd_basis?}` so a single record contains both the raw upstream value and a quote-currency notional with the conversion basis spelled out. Funding uses a `kind: "discrete" | "continuous"` discriminator so a position-PnL calculation branches on the funding model itself, with no exchange-specific code. See [API Reference](.Documentation/API_Reference.md) for the wire-format spec with worked response examples, and [Exchange Notes](.Documentation/Exchange_Notes.md) for per-exchange semantic quirks.
+The wire format carries nested value objects on every quantitative record: each `qty`, `volume`, or `open_interest` field comes back as `{native, unit, contract_size?, usd, usd_basis?}` so a single record contains both the raw upstream value and a quote-currency notional with the conversion basis spelled out. Funding uses a `kind: "discrete" | "continuous"` discriminator so a position-PnL calculation branches on the funding model itself, with no exchange-specific code. See [HTTP Reference](.Documentation/HTTP_Reference.md) for the wire-format spec with worked response examples, and [Exchange Notes](.Documentation/Exchange_Notes.md) for per-exchange semantic quirks.
 
 <br>
 <br>
@@ -63,7 +65,7 @@ Public market data from every registered exchange adapter, normalized to one sch
 
 ### Deployment posture
 
-Designed for localhost or a trusted network: no TLS termination, no authentication, no inbound rate limiting, and `allow_origins=["*"]` so any local client works during development. Run one instance per upstream IP, since rate-limit state is in-memory per adapter. For external exposure, put the router behind a reverse proxy that adds TLS, an origin allowlist, and an inbound rate limit. The full operator detail is in [System Architecture](.Documentation/System_Architecture.md#deployment-notes).
+Designed for localhost or a trusted network: no TLS termination, no authentication, no inbound rate limiting, and `allow_origins=["*"]` so any local client works during development. Run one instance per upstream IP, since rate-limit state is in-memory per adapter. For external exposure, put the router behind a reverse proxy that adds TLS, an origin allowlist, and an inbound rate limit. The full operator detail is in [Architecture](.Documentation/Architecture.md#deployment-notes).
 
 ### When this is not the right fit
 
@@ -299,7 +301,7 @@ Designed for localhost or a trusted network: no TLS termination, no authenticati
   </tbody>
 </table>
 
-<small><i>*WebSocket streams provide real-time updates for the listed channels. See the <a href=".Documentation/API_Reference.md#channels">API Reference</a> for full channel specs and subscription payloads. Per-venue semantic quirks (symbol formats, retention windows, funding shape, rate-limit behaviour) are in <a href=".Documentation/Exchange_Notes.md">Exchange Notes</a>.</i></small>
+<small><i>*WebSocket streams provide real-time updates for the listed channels. See the <a href=".Documentation/HTTP_Reference.md#channels">HTTP Reference</a> for full channel specs and subscription payloads. Per-venue semantic quirks (symbol formats, retention windows, funding shape, rate-limit behaviour) are in <a href=".Documentation/Exchange_Notes.md">Exchange Notes</a>.</i></small>
 
 <br>
 <br>
@@ -334,7 +336,7 @@ This variable lives in `.env` and is consumed by `docker-compose.yml` in the `po
 <br>
 <br>
 
-## Python SDK
+## Python API
 
 A synchronous client (`exchange-router-client`) over the router's REST and WebSocket interfaces, with an async client for concurrency. Time-series methods return `pandas.DataFrame` objects indexed by datetime; point-in-time snapshots (ticker, book ticker, mark price) return a flat `Row` with attribute access; the order book returns one tidy `side, price, qty` frame. It is sync by default, so the same code runs in a script and in a Jupyter cell with no `await`. See [Exchange Notes](.Documentation/Exchange_Notes.md) for fields whose units vary across exchanges.
 
@@ -379,7 +381,7 @@ finally:
     client.close()
 ```
 
-**Full method reference, DataFrame column layout, warnings, and end-to-end recipes are in the [Python SDK](.Documentation/Python_SDK.md) docs.**
+**Full method reference, DataFrame column layout, warnings, and end-to-end recipes are in the [Python API](.Documentation/Python_API.md) docs.**
 
 <br>
 

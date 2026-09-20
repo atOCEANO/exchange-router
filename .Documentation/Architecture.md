@@ -9,12 +9,14 @@
 
 <sub>
   <a href="../README.md">Introduction</a> &nbsp;•&nbsp;
-  <a href="API_Reference.md">API Reference</a> &nbsp;•&nbsp;
-  <a href="Python_SDK.md">Python SDK</a> &nbsp;•&nbsp;
+  <a href="Python_API.md">Python API</a> &nbsp;•&nbsp;
+  <a href="HTTP_Reference.md">HTTP Reference</a> &nbsp;•&nbsp;
   <a href="Exchange_Notes.md">Exchange Notes</a> &nbsp;•&nbsp;
-  <b>System Architecture</b> &nbsp;•&nbsp;
-  <a href="Auditor_Guide.md">Auditor Guide</a> &nbsp;•&nbsp;
-  <a href="Contributor_Guide.md">Contributor Guide</a>
+  <b>Architecture</b> &nbsp;•&nbsp;
+  <a href="Decisions.md">Decisions</a> &nbsp;•&nbsp;
+  <a href="Adapter_Guide.md">Adapter Guide</a> &nbsp;•&nbsp;
+  <a href="Contributor_Guide.md">Contributor Guide</a> &nbsp;•&nbsp;
+  <a href="Auditor_Guide.md">Auditor Guide</a>
 </sub>
 
 <br>
@@ -22,7 +24,7 @@
 <br>
 <br>
 
-## System Architecture
+## Architecture
 
 One FastAPI process, one adapter per exchange behind a routing layer that never branches on which exchange it is calling. REST and WebSocket share the port and the adapter instance.
 
@@ -31,9 +33,9 @@ One FastAPI process, one adapter per exchange behind a routing layer that never 
 
 ## Core Design
 
-The router uses an abstract base contract (`BaseExchange`). Each exchange is an isolated adapter that implements it; the routing core never needs to know which exchange it is talking to. The loader in `src/exchanges/__init__.py` scans the directory at startup, instantiates every `BaseExchange` subclass it finds, and registers them in `EXCHANGE_REGISTRY`. Adding a new exchange is a matter of dropping a compliant adapter into that directory and restarting.
+The router uses an abstract base contract (`BaseExchange`). Each exchange is an isolated adapter that implements it; the routing core never needs to know which exchange it is talking to. The loader in `exchange_router/exchanges/__init__.py` scans the directory at startup, instantiates every `BaseExchange` subclass it finds, and registers them in `EXCHANGE_REGISTRY`. Adding a new exchange is a matter of dropping a compliant adapter into that directory and restarting.
 
-The wire contract is pinned to an integer `schema_version` field returned at `GET /`; the full record shapes live in [API Reference](API_Reference.md#response-shapes). Adapters never construct nested value objects by hand: they call shared `build_*` helpers in `src/exchanges/base.py` (`build_qty_value`, `build_volume_value`, `build_oi_value`, `build_funding_current`, `build_funding_historical`, `build_funding_convention`). This keeps the conversion logic in one place and the adapter authoring cost low.
+The wire contract is pinned to an integer `schema_version` field returned at `GET /`; the full record shapes live in [HTTP Reference](HTTP_Reference.md#response-shapes). Adapters never construct nested value objects by hand: they call shared `build_*` helpers in `exchange_router/exchanges/base.py` (`build_qty_value`, `build_volume_value`, `build_oi_value`, `build_funding_current`, `build_funding_historical`, `build_funding_convention`). This keeps the conversion logic in one place and the adapter authoring cost low.
 
 Before deploying outside localhost, see [Security and Exposure](#security-and-exposure).
 
@@ -42,9 +44,9 @@ Before deploying outside localhost, see [Security and Exposure](#security-and-ex
 
 ## Startup Lifecycle
 
-The FastAPI `lifespan` handler in `src/main.py` awaits `startup_exchanges()` from `src/exchanges/__init__.py`, which runs the first two of three phases:
+The FastAPI `lifespan` handler in `exchange_router/service/main.py` awaits `startup_exchanges()` from `exchange_router/exchanges/__init__.py`, which runs the first two of three phases:
 
-1. **Adapter loading.** `load_exchanges()` scans `src/exchanges/` and instantiates every `BaseExchange` subclass. Each adapter's `__init__` is synchronous and lightweight; it does not hit the network.
+1. **Adapter loading.** `load_exchanges()` scans `exchange_router/exchanges/` and instantiates every `BaseExchange` subclass. Each adapter's `__init__` is synchronous and lightweight; it does not hit the network.
 2. **Preload.** `startup_exchanges()` then walks `EXCHANGE_REGISTRY` and calls `await adapter.preload()` on each entry, each call wrapped in a `try`/`except` that logs the traceback and moves to the next adapter, so one adapter failing to warm does not stop the others or the boot. `preload()` is a sealed template on `BaseExchange`: if the adapter overrides `_warm()`, the base class spawns it as a background task and returns immediately. Startup does not block on the warm; the router accepts traffic right away. Inside `_warm()`, adapters call `await self._step("label", awaitable)` once per logical warm; the base class times each step and emits a structured log timeline (`[adapter] preload: warming X...`, `[adapter] preload: X ready in Ts`, `[adapter] preload: done in Ts`). Cross-adapter parallelism is preserved (each adapter's warm chain runs in its own background task); within an adapter, steps run sequentially so the log reads as a chronological per-adapter timeline. During the warm window any route that depends on a cache being primed triggers the same fetch the warm step would have performed (the first request to need it does the work under the cache lock, and the warm step finds it already filled); OKX funding intervals additionally fall back to a per-symbol on-demand lookup. Correctness is preserved either way at the cost of a few extra upstream calls until the warm catches up. SymbolInfo caches are owned by `BaseExchange` and refresh at most once per 24 hours after the initial fill; a failed refresh serves the cached copy and retries after an hour.
 3. **Yield.** The service is now serving. Shutdown reverses this: stream-manager teardown first, then, per adapter, the preload warm task is cancelled and `adapter.shutdown()` closes the HTTP client and WS connections. Cancelling first is what stops a warm still in flight from calling a client that has just been closed.
 
@@ -67,14 +69,14 @@ Every REST request follows the same path:
 
 <br>
 
-The route resolves the exchange name to its registered adapter, the adapter makes an async upstream call, and the raw JSON is mapped to a Pydantic model from `src/models.py` before returning. Raw dicts never cross the boundary.
+The route resolves the exchange name to its registered adapter, the adapter makes an async upstream call, and the raw JSON is mapped to a Pydantic model from `exchange_router/models.py` before returning. Raw dicts never cross the boundary.
 
 <br>
 <br>
 
 ## WebSocket Lifecycle
 
-WebSocket streams do not follow the same path as REST. The `StreamManager` in `src/stream_manager.py` sits between clients and the adapter's streaming methods.
+WebSocket streams do not follow the same path as REST. The `StreamManager` in `exchange_router/service/stream_manager.py` sits between clients and the adapter's streaming methods.
 
 When a client subscribes to a `(channel, symbol)` tuple on an exchange, the manager builds a key of the form `{exchange}:{market_type}:{channel}:{symbol}` and checks whether an upstream task already exists for it.
 
@@ -116,7 +118,7 @@ The router normalizes failures into a small set of HTTP responses. It helps to s
 Adapters raise four exception types:
 
 * **`ValueError`** for bad input or upstream validation failures (unknown symbol, out-of-range limit, an interval or period not declared in the capability map, adapter-side parameter rejections). A global exception handler in `main.py` converts these into `400 Bad Request`, preserving the message in `detail`. The route layer itself raises `ValueError` for undeclared `interval` / `period` values before the adapter is called, validated against the capability map.
-* **`UpstreamUnavailableError`** (defined in `src/exchanges/base.py`, a subclass of `AdapterError`, not `ValueError`) when the upstream is throttling or has banned the IP: active backoff windows past the adapter's fail-fast threshold (30s on Bybit and KuCoin, 60s on OKX), Bybit 403 bans, an upstream 5xx that survives the retry budget, and any adapter's exhausted retry budget (message `"Max retries exceeded for {url}"`). The handler in `main.py` converts these into `503 Service Unavailable` with a `Retry-After` header when the adapter knows the wait.
+* **`UpstreamUnavailableError`** (defined in `exchange_router/exchanges/base.py`, a subclass of `AdapterError`, not `ValueError`) when the upstream is throttling or has banned the IP: active backoff windows past the adapter's fail-fast threshold (30s on Bybit and KuCoin, 60s on OKX), Bybit 403 bans, an upstream 5xx that survives the retry budget, and any adapter's exhausted retry budget (message `"Max retries exceeded for {url}"`). The handler in `main.py` converts these into `503 Service Unavailable` with a `Retry-After` header when the adapter knows the wait.
 * **`NotImplementedError`** when the adapter does not implement a method for a given market type. The base class raises this by default, and the route layer catches it and returns `501 Not Implemented`.
 * **`pydantic.ValidationError`** when an upstream response cannot be normalized into the schema. A `ValidationError` is not a `ValueError` in pydantic v2, and its own handler in `main.py` returns `502 Bad Upstream Response`. Any other uncaught exception falls through to a generic handler that returns `500 Internal Server Error`.
 
@@ -137,7 +139,7 @@ The `detail` field in error responses always carries the underlying exception me
 
 ## Versioning Policy
 
-The router carries two version numbers, defined in [src/version.py](../src/version.py) and surfaced through separate endpoints.
+The router carries two version numbers, defined in [exchange_router/version.py](../exchange_router/version.py) and surfaced through separate endpoints.
 
 * **`SERVICE_VERSION`** is the standard semver string (`MAJOR.MINOR.PATCH`). It bumps for any user-visible change: a new route, a new field, a behavioural fix, a capability adjustment, a dependency upgrade. Returned at `GET /version` and `GET /`.
 * **`SCHEMA_VERSION`** is a small integer. It bumps only when the wire format breaks consumer code: renaming a field, flattening a nested object into top-level fields, removing a discriminator value, changing the type of a field. Adding an optional field does not bump. Returned at `GET /` and stamped on every auditor `results.json`; the auditor compares served-vs-pinned and fails the suite on drift.

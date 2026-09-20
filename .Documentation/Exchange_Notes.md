@@ -9,12 +9,14 @@
 
 <sub>
   <a href="../README.md">Introduction</a> &nbsp;•&nbsp;
-  <a href="API_Reference.md">API Reference</a> &nbsp;•&nbsp;
-  <a href="Python_SDK.md">Python SDK</a> &nbsp;•&nbsp;
+  <a href="Python_API.md">Python API</a> &nbsp;•&nbsp;
+  <a href="HTTP_Reference.md">HTTP Reference</a> &nbsp;•&nbsp;
   <b>Exchange Notes</b> &nbsp;•&nbsp;
-  <a href="System_Architecture.md">System Architecture</a> &nbsp;•&nbsp;
-  <a href="Auditor_Guide.md">Auditor Guide</a> &nbsp;•&nbsp;
-  <a href="Contributor_Guide.md">Contributor Guide</a>
+  <a href="Architecture.md">Architecture</a> &nbsp;•&nbsp;
+  <a href="Decisions.md">Decisions</a> &nbsp;•&nbsp;
+  <a href="Adapter_Guide.md">Adapter Guide</a> &nbsp;•&nbsp;
+  <a href="Contributor_Guide.md">Contributor Guide</a> &nbsp;•&nbsp;
+  <a href="Auditor_Guide.md">Auditor Guide</a>
 </sub>
 
 <br>
@@ -95,13 +97,13 @@ Each open-interest row carries a `usd` nominal in its `open_interest` value obje
 
 ### Pagination is always backward-walking
 
-Every endpoint that takes `start` follows the [backward-walking pagination contract](API_Reference.md#pagination-semantics); per-venue upstream mechanics differ but the user-visible behavior is identical. Where the upstream walks forward only, the adapter computes a synthetic forward start, fetches a window, and truncates. Backward-anchored requests on forward-walking upstreams are slightly slower than on natively-backward ones.
+Every endpoint that takes `start` follows the [backward-walking pagination contract](HTTP_Reference.md#pagination-semantics); per-venue upstream mechanics differ but the user-visible behavior is identical. Where the upstream walks forward only, the adapter computes a synthetic forward start, fetches a window, and truncates. Backward-anchored requests on forward-walking upstreams are slightly slower than on natively-backward ones.
 
 <br>
 
 ### Rate-limit and ban protection
 
-User-facing behaviour lives here; the backoff and fail-fast flow is in [System Architecture](System_Architecture.md#rate-limiting); implementation patterns (header-driven proactive, reactive on rejection, minimum-spacing, per-adapter fail-fast thresholds) live in [Contributor Guide](Contributor_Guide.md#rate-limit-headers-and-proactive-backoff).
+User-facing behaviour lives here; the backoff and fail-fast flow is in [Architecture](Architecture.md#rate-limiting); implementation patterns (header-driven proactive, reactive on rejection, minimum-spacing, per-adapter fail-fast thresholds) live in [Contributor Guide](Contributor_Guide.md#rate-limit-headers-and-proactive-backoff).
 
 Every adapter handles rate-limit and ban behaviour transparently. You can call any route at full speed; a steady stream runs as fast as upstream allows, a burst slows down on its own, and a hard ban window surfaces as an immediate fail-fast error until it clears. No per-call sleep loops or client retry logic needed. Per-exchange retry and ban specifics live in each exchange's section below.
 
@@ -143,7 +145,7 @@ Consumers parsing `id` as integer will fail on Bybit and Kraken futures. Always 
 
 ### Funding cycle and `valid_until_ts`
 
-For the `kind` discriminator semantics see [Interpretation Fields](API_Reference.md#interpretation-fields) in the API Reference. `FundingCurrent.valid_until_ts` is the timestamp after which the current `per_cycle` rate is no longer the "current" rate, but the precise meaning differs per upstream:
+For the `kind` discriminator semantics see [Interpretation Fields](HTTP_Reference.md#interpretation-fields) in the HTTP Reference. `FundingCurrent.valid_until_ts` is the timestamp after which the current `per_cycle` rate is no longer the "current" rate, but the precise meaning differs per upstream:
 
 | Exchange | typical `cycle_ms` | Meaning of `valid_until_ts` |
 | :--- | :--- | :--- |
@@ -334,7 +336,7 @@ For Kraken inverse perpetuals (`PI_*`), the upstream returns `vol24h` as the **c
 
 ### Funding shape and rate conversion
 
-Kraken Futures uses [continuous funding](API_Reference.md#interpretation-fields); every Kraken futures `MarkPrice.funding` and `FundingRate.rate` carries `kind: "continuous"`, `cycle_ms: 3_600_000` (hourly sampling window, not a settlement schedule).
+Kraken Futures uses [continuous funding](HTTP_Reference.md#interpretation-fields); every Kraken futures `MarkPrice.funding` and `FundingRate.rate` carries `kind: "continuous"`, `cycle_ms: 3_600_000` (hourly sampling window, not a settlement schedule).
 
 <div align="center">
   <img src="imgs/204649.png" alt="Discrete vs continuous funding timelines" width="90%" />
@@ -345,7 +347,7 @@ Kraken Futures uses [continuous funding](API_Reference.md#interpretation-fields)
 
 Kraken's upstream exposes funding rates as an **absolute** value (`fundingRate`, in counter-currency per contract per period) on `/tickers`, not the dimensionless per-period rate that discrete-funding venues typically report. The historical-funding-rates endpoint exposes a `relativeFundingRate` field that **is** dimensionless and per-period. The adapter uses `relativeFundingRate` directly in `get_funding_rate`, and in `get_mark_price` converts the absolute `fundingRate` via `relative = fundingRate / markPrice` (linear `PF_*`) or `relative = fundingRate * markPrice` (inverse `PI_*`). After conversion, Kraken funding rates land in the same `~10^-5` to `10^-4` per-hour-equivalent range as discrete venues' per-cycle figures.
 
-For cross-exchange comparison without branching on `kind`, use the SDK's `per_hour_view(row)` helper (see [Python SDK -> Helpers](Python_SDK.md#helpers-for-funding-math)). For computing funding paid by a position over a window, use `funding_paid(rows, t_open, t_close, notional)`.
+For cross-exchange comparison without branching on `kind`, use the SDK's `per_hour_view(row)` helper (see [Python API -> Helpers](Python_API.md#helpers-for-funding-math)). For computing funding paid by a position over a window, use `funding_paid(rows, t_open, t_close, notional)`.
 
 <br>
 <br>
@@ -423,7 +425,7 @@ OKX reports `minSz`, `lotSz`, and `maxLmtSz` in contracts on SWAP instruments, a
 
 OKX's upstream OI history endpoint returns rows of the form `[ts, contracts, oi_in_base_coin, oi_in_usd]`. The adapter picks different columns per market type:
 
-- **Linear (`BTC-USDT-SWAP`)**: reads `oi_in_base_coin` (the 3rd column) directly. `open_interest.unit = "base"`, `contract_size = null`. Because `native` is already a base-coin count, the route handler joins matching candles to fill the `usd_basis` block (`method: "candle_close"`, `close`, `close_ts`) and derive `usd`; if the join misses, `usd` stays `null` while `native` is always populated. See [API Reference](API_Reference.md#response-shapes) for the join behavior.
+- **Linear (`BTC-USDT-SWAP`)**: reads `oi_in_base_coin` (the 3rd column) directly. `open_interest.unit = "base"`, `contract_size = null`. Because `native` is already a base-coin count, the route handler joins matching candles to fill the `usd_basis` block (`method: "candle_close"`, `close`, `close_ts`) and derive `usd`; if the join misses, `usd` stays `null` while `native` is always populated. See [HTTP Reference](HTTP_Reference.md#response-shapes) for the join behavior.
 - **Inverse (`BTC-USD-SWAP`)**: reads `contracts` (the 2nd column). `open_interest.unit = "contract"`, `contract_size` is populated from the instrument's `ctVal` (e.g. `100` for BTC-USD-SWAP). `usd = native * contract_size` directly, `usd_basis.method = "contract_size"`; no candle join needed.
 
 Supported periods: `5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d`. **`8h` is not supported** by the upstream and is excluded from the capability map; sending it returns an OKX error.

@@ -1,0 +1,506 @@
+<h1>OCEΛNO <small><code>exchange-router-service</code></small></h1>
+
+
+<div style="padding-top: 0px;">
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+" /></a>
+  <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-0.123.0-05998b.svg?logo=fastapi&logoColor=white" alt="FastAPI" /></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
+</div>
+
+<sub>
+  <a href="../README.md">Introduction</a> &nbsp;•&nbsp;
+  <a href="Python_API.md">Python API</a> &nbsp;•&nbsp;
+  <a href="HTTP_Reference.md">HTTP Reference</a> &nbsp;•&nbsp;
+  <a href="Exchange_Notes.md">Exchange Notes</a> &nbsp;•&nbsp;
+  <a href="Architecture.md">Architecture</a> &nbsp;•&nbsp;
+  <a href="Decisions.md">Decisions</a> &nbsp;•&nbsp;
+  <b>Adapter Guide</b> &nbsp;•&nbsp;
+  <a href="Contributor_Guide.md">Contributor Guide</a> &nbsp;•&nbsp;
+  <a href="Auditor_Guide.md">Auditor Guide</a>
+</sub>
+
+<br>
+<br>
+<br>
+<br>
+
+## Adapter Guide
+
+An exchange is added by writing one adapter and changing nothing else. The registry
+discovers it by walking the subpackages of `exchange_router/exchanges/`, so a new venue
+is a directory, an `adapter.py`, and a one-line `__init__.py`. No routing code, no
+registry entry, no import list.
+
+Nobody outside this package imports an adapter. Users reach them through
+`Router.local(...)`, which is the local backend calling the same methods the service
+calls, so an adapter only ever has to satisfy the contract below. That is also why the
+contract is worth reading closely: it is the entire interface, and both modes depend on
+every part of it being honoured.
+
+<br>
+
+## Adapter Implementation
+
+All adapters must inherit from `BaseExchange` in `exchange_router/exchanges/base.py`. The following checklist covers everything a compliant adapter needs to satisfy before it can be merged:
+
+- [ ] **Capability Mapping:** Implement `get_capabilities()` returning the full list of supported REST routes and WebSocket channels.
+- [ ] **`_fetch_exchange_info`:** Implement `async def _fetch_exchange_info(market_type) -> List[SymbolInfo]`. The base class owns the cache around it (`_ensure_info_cache`, `_info_for`, the 24h refresh); the adapter only supplies the fetch. Do not declare your own `_info_cache` fields.
+- [ ] **Data Normalization:** Map all raw upstream JSON payloads to the Pydantic models in `exchange_router/models.py`.
+- [ ] **Market Routing:** Handle `spot`, `linear`, and `inverse` market types, including any subdomain or parameter differences between them.
+- [ ] **Symbol Normalization:** Implement `get_model_symbol(api_symbol, market_type)` to translate raw exchange symbols to normalized form (e.g. `BTCUSD_PERP` -> `BTCUSD`), and `get_api_symbol(symbol, market_type)` to reverse the translation when constructing upstream requests. Normalized symbols must be bare pairs with no suffixes.
+- [ ] **Perpetuals Filter:** For `linear` and `inverse` markets, `_fetch_exchange_info` must exclude dated and quarterly contracts. Only perpetual instruments should appear in `/markets` and `/markets/{symbol}`.
+- [ ] **`native_symbol` Field:** Populate `native_symbol` on every `SymbolInfo` object with the raw exchange symbol before normalization.
+- [ ] **`funding` Field:** Set `SymbolInfo.funding = None` on spot, `build_funding_convention("discrete")` on discrete-funding perps, and `build_funding_convention("continuous")` on continuous-funding perps.
+- [ ] **`build_*` constructors:** Every record-construction site (Trade, AggTrade, Liquidation, BookTicker, Ticker, Candle, MarkPrice, OpenInterest, FundingRate) must go through the matching `base.build_*` helper. Do not construct nested value objects (`QtyValue`, `VolumeValue`, `OiValue`, `FundingCurrent`, `FundingHistorical`) by hand.
+- [ ] **`quote` field at row level:** Every record that carries quote-currency values reads `quote = info.quote_asset` from the adapter's SymbolInfo cache and passes it at the row level. Look up once per route handler / WS stream and reuse.
+- [ ] **Internal `_funding_interval_cache`:** Discrete-funding adapters maintain a per-symbol `cycle_ms` cache. Shape varies: Binance, Bybit, KuCoin use `Dict[MarketType, Dict[str, int]]` keyed by model symbol; OKX uses `Dict[str, int]` keyed by upstream `inst_id`. Populate it during `_fetch_exchange_info` (or as a warm step in `_warm()` for adapters that need per-symbol upstream calls); read it from MarkPrice and FundingRate constructors. SymbolInfo's `funding` block carries only the categorical `kind`, never `cycle_ms`.
+- [ ] **Internal `_contract_multiplier_cache` (contract-denominated upstreams only):** When the upstream sizes linear markets in contracts (KuCoin `multiplier`, OKX `ctVal`), keep the per-symbol multiplier in an adapter-internal `_contract_multiplier_cache: Dict[MarketType, Dict[str, float]]` populated during `_fetch_exchange_info`, and convert every contract-denominated linear surface to base units with it: data rows and `SymbolInfo.min_qty` / `max_qty` / `quantity_precision`. `SymbolInfo.contract_size` stays `null` on linear per the schema; it carries the quote notional per contract on inverse only.
+- [ ] **`_warm()` (optional):** Override when the adapter benefits from prebuilding caches at startup (info caches, symbol maps, per-symbol metadata fetches). Inside `_warm()`, call `await self._step("label", awaitable)` once per logical step; the base class handles background-task wrapping, timing, and structured logging. Adapters with one bulk endpoint that covers all metadata don't need to override.
+- [ ] **Backward-anchored pagination:** Every method that takes `start_time` must treat it as an inclusive backward-walking upper bound. Route the call through `_paginate_backwards` (or equivalent) seeded with `start_time` on the first iteration, so the result contains records with `ts <= start_time`. This is the universal contract; do not introduce forward-walking from `start_time`.
+- [ ] **Registry Registration:** Add an `__init__.py` that imports the adapter class (e.g., `from .adapter import KrakenAdapter`). The auto-loader relies on this import to discover subclasses of `BaseExchange`.
+
+<br>
+<br>
+
+## Capabilities Contract
+
+Every adapter must implement `get_capabilities()`, which returns a dict describing what the adapter supports for each route. The router exposes this at `GET /{exchange}/capabilities`. Clients call it to know what they can ask for. The verification harness reads it to calibrate every probe (which depths to test, what limits the router serves, whether the route is paginated, what retention window applies). The capabilities dict is the single source of truth for what each route supports: route methods read from it, the verify harness reads from it, external clients read it.
+
+<br>
+
+### Per-route-type uniform schema
+
+Each route type has its own fixed schema. **Within a route type, every adapter declares the same fields, in the same order, with `null` for values that don't apply.** Different route types have different field sets (`ticker` doesn't declare `max_depth`, `orderbook` doesn't declare `intervals`), but every exchange's `ticker` looks the same shape and every exchange's `orderbook` looks the same shape.
+
+There are no factored-out variables inside `_build_capabilities`. Every market block is written out fully at its point of use, and the duplication across `SPOT`/`LINEAR`/`INVERSE` (e.g. the candle interval list) is intentional. The block reads top to bottom without indirection.
+
+```python
+def _build_capabilities(self) -> Dict[str, Any]:
+    return {
+        "name": self.name,
+        "markets": {
+            MarketType.SPOT: {
+                "ticker": {
+                    "rest": True,
+                    "ws":   True,
+                },
+                "book_ticker": {
+                    "rest": True,
+                    "ws":   True,
+                },
+                "mark_price": {
+                    "rest": False,
+                    "ws":   False,
+                },
+                "orderbook": {
+                    "rest":      True,
+                    "ws":        True,
+                    "depths":    [5, 10, 20, 50, 100, 500, 1000],
+                    "max_depth": 1000,
+                },
+                "trades": {
+                    "rest":      True,
+                    "ws":        True,
+                    "max_limit": 1000,
+                },
+                "agg_trades": {
+                    "rest":         True,
+                    "ws":           True,
+                    "paginated":    True,
+                    "max_limit":    None,
+                    "retention_ms": None,
+                },
+                "candles": {
+                    "rest":         True,
+                    "ws":           False,
+                    "paginated":    True,
+                    "max_limit":    None,
+                    "retention_ms": None,
+                    "intervals":    ["1m", "5m", "15m", ...],
+                },
+                "funding_rate": {
+                    "rest":         False,
+                    "ws":           False,
+                    "paginated":    False,
+                    "max_limit":    None,
+                    "retention_ms": None,
+                },
+                "open_interest": {
+                    "rest":         False,
+                    "ws":           False,
+                    "paginated":    False,
+                    "max_limit":    None,
+                    "retention_ms": None,
+                    "intervals":    None,
+                },
+                "liquidations": {
+                    "rest":         False,
+                    "ws":           False,
+                    "paginated":    False,
+                    "max_limit":    None,
+                    "retention_ms": None,
+                    "completeness": None,
+                },
+                "long_short_ratio": {
+                    "rest":         False,
+                    "ws":           False,
+                    "paginated":    False,
+                    "max_limit":    None,
+                    "retention_ms": None,
+                    "intervals":    None,
+                },
+            },
+            MarketType.LINEAR: { ... },   # full block, no factored variables
+            MarketType.INVERSE: { ... },  # full block, no factored variables
+        },
+    }
+```
+
+The canonical route order across every adapter is `ticker, book_ticker, mark_price, orderbook, trades, agg_trades, candles, funding_rate, open_interest, liquidations, long_short_ratio`.
+
+<br>
+
+### Per-route-type schemas
+
+Each route type defines its own field set. Declare every field for every adapter, even when the route is unsupported on this exchange (use `null` for inapplicable values).
+
+| Route type | Fields |
+| :--- | :--- |
+| `ticker`, `book_ticker`, `mark_price` (snapshots) | `rest`, `ws` |
+| `orderbook` | `rest`, `ws`, `depths`, `max_depth` |
+| `trades` | `rest`, `ws`, `max_limit` |
+| `agg_trades` | `rest`, `ws`, `paginated`, `max_limit`, `retention_ms` |
+| `candles` | `rest`, `ws`, `paginated`, `max_limit`, `retention_ms`, `intervals` |
+| `funding_rate` | `rest`, `ws`, `paginated`, `max_limit`, `retention_ms` |
+| `open_interest` | `rest`, `ws`, `paginated`, `max_limit`, `retention_ms`, `intervals` |
+| `liquidations` | `rest`, `ws`, `paginated`, `max_limit`, `retention_ms`, `completeness` |
+| `long_short_ratio` | `rest`, `ws`, `paginated`, `max_limit`, `retention_ms`, `intervals` |
+
+<br>
+
+### Field reference
+
+| Field | Type | Meaning |
+| :--- | :--- | :--- |
+| `rest` | bool | REST endpoint is exposed by the router. `False` means the route returns 501. |
+| `ws` | bool | WebSocket stream is exposed by the router. |
+| `paginated` | bool | Caller can pass a time anchor via the `start=` query parameter; router walks back through history. `False` means the route returns whatever the upstream's most-recent page offers and no historical anchor is honoured (some account-ratio endpoints are an example). |
+| `max_limit` | int \| null | The upstream's hard ceiling for routes that **cannot** paginate (`paginated: False`). The caller cannot get more than this from the route; the adapter clamps `limit=` to it. `null` for paginated routes (the adapter walks back through history; no router-side cap), for snapshots that take no `limit=` parameter (ticker, mark_price), and for unsupported routes. Per-page upstream caps used inside the adapter's pagination loop are inline literals; they are network mechanics, not part of the contract. |
+| `retention_ms` | int \| null | Upstream's documented historical window in milliseconds. `null` means "asset-bounded" (data goes back as far as the asset has existed, like candles). Always written as a multiplication expression for readability: `30 * 24 * 60 * 60 * 1000` for 30 days, `7 * 24 * 60 * 60 * 1000` for 7 days. Python folds the constant at parse time. |
+| `intervals` | list[str] \| null | Period strings the route accepts. `null` only on routes that have no period parameter (e.g. funding rate, where the cadence is upstream-dictated). |
+| `depths` | list[int] \| null | Discrete depth buckets the upstream supports (e.g. `[5, 10, 20, 50, 100, 500, 1000]`). `null` means continuous range, any integer up to `max_depth` is accepted. |
+| `max_depth` | int \| null | Depth ceiling for orderbook. `null` only when the orderbook route is unsupported on this market. |
+| `completeness` | `"partial"` \| `"full"` \| null | Liquidations-only. Declares whether the feed covers every liquidation (`"full"`) or a filtered subset (`"partial"`, typical for venues that throttle the public feed). `null` when liquidations are unsupported on this market. Every public liquidations feed observed so far is `"partial"`. |
+
+<br>
+
+### How `paginated`, `max_limit`, and `retention_ms` interact
+
+Four meaningful semantic states for routes that serve historical data:
+
+| `paginated` | `max_limit` | meaning |
+| :--- | :--- | :--- |
+| `False` | `null` | Snapshot route (ticker, mark_price). No `limit=` parameter. |
+| `False` | int | Single-page route (some L/S and trades endpoints). Caller gets the most recent N; no further history reachable. The adapter clamps any `limit=` the caller passes to this ceiling. |
+| `True` | `null` | Paginated route (candles, OI, funding). Caller can pass a time anchor; the adapter walks back through history, paginating internally as far as upstream serves data. **No router-side ceiling.** Effective ceiling is upstream retention (`retention_ms`), the asset's age, or, defensively, the per-adapter pagination safety cap (typically 100 pages; see [Pagination safety caps](#pagination-safety-caps) below). |
+| `True` | int | Paginated route where the upstream documents a hard total cap on retrievable history (rare; OKX is the only adapter currently using this combination, on `funding_rate` with `max_limit: 300` and on `liquidations` with `max_limit: 100`). The adapter paginates normally; `max_limit` is metadata describing the upstream's ceiling rather than a router-side clamp. The auditor uses it to size the recent-probe ask so the probe does not WARN against an upstream-imposed cap. |
+
+The harness uses `min(big_limit, retention_ms / period_ms, market_age_ms / period_ms)` to compute the realistic ceiling on the recent-summary probe so a 1-week candle ask for 3000 records does not WARN; the ceiling is whichever is smallest of `big_limit`, `retention_ms // period_ms`, and the crypto-market age (since 2010-01-01).
+
+<br>
+
+### Pagination safety caps
+
+Most adapters use the shared `_paginate_backwards` helper, bounded by an internal `max_requests = 100` page count. When that cap fires before the requested `limit` is reached, the helper logs a `WARNING` and returns whatever it managed to collect. Natural termination ("no more new data") handles every correctly-paginating case; the 100-page cap only fires for genuinely pathological asks (e.g. `?limit=1_000_000` on 1m candles, which would need roughly 1,000 pages).
+
+Some adapters use custom loops with different bounds: Kraken futures candles iterates at most 20 times (logs a WARNING on exhaustion) because the upstream chart endpoint returns large batches and 20 rounds cover the supported retention; OKX candles combines a "recent" fetch with `_paginate_backwards`-driven "history" walks, both bounded by 100 pages. These are defense-in-depth knobs, not part of the capability contract; consumers should not rely on a specific cap.
+
+If you want a different bound, fork the helper. The cap is not surfaced as a capability field.
+
+<br>
+
+### Where to source values from
+
+- **`depths`**: orderbook docs almost always list supported depths. Read the upstream's `/depth` (or equivalent) endpoint documentation and copy the discrete set verbatim. Continuous-range upstreams that accept any integer up to a cap declare `depths: None` and only declare `max_depth`. Per-exchange examples live in [Exchange Notes](Exchange_Notes.md).
+- **`max_limit`**: the upstream's hard ceiling for non-paginated routes only. For paginated routes set `null`. The adapter walks back through history with no router-side cap, bounded only by retention or the asset's age. Per-page upstream caps that the pagination loop uses internally (the per-call limit on each upstream's history endpoint) are inline literals in the route method, not declared in the capability map.
+- **`retention_ms`**: read upstream docs for the route. Common patterns: OI and long/short history retain 30 days on some venues, 7 days on others; funding rate is typically asset-bounded so `None` is correct. When you cannot find an explicit retention statement, `None` is the safe choice; the harness falls back to the crypto-market-age ceiling.
+- **`paginated`**: read the request schema. If there is no `start` / `endTime` / `begin` / `after` field, declare `False`. Some upstream endpoints (notably some account-ratio endpoints) ship with no time anchor and are honest single-page routes.
+- **`intervals`**: copy from the route's documented interval list, in ascending order. The adapter is responsible for mapping these to whatever the upstream expects (e.g. `"1d"` -> `"D"`).
+
+<br>
+
+### Unsupported routes
+
+When a route is unsupported on a given exchange (`rest=False, ws=False`), declare every field the route type defines, with `null` for inapplicable values:
+
+```python
+"agg_trades": {
+    "rest":         False,
+    "ws":           False,
+    "paginated":    False,
+    "max_limit":    None,
+    "retention_ms": None,
+},
+```
+
+This keeps the per-route-type schema uniform across exchanges. A consumer reading `caps["markets"][mt]["agg_trades"]["max_limit"]` always finds the key. No missing-key handling, no special cases per exchange.
+
+<br>
+
+### Single source of truth
+
+`_build_capabilities` runs once in `__init__` and the result is cached on `self._capabilities`. `get_capabilities()` returns the cached dict. Route methods read what they need via `self.get_capabilities()`. For example, `get_trades` clamps the caller's `limit` to the declared `max_limit`:
+
+```python
+limit = min(limit, self.get_capabilities()["markets"][market_type]["trades"]["max_limit"])
+```
+
+Per-page upstream caps (the per-call ceiling on each upstream's history endpoint) are **not** part of the capabilities dict; they are inline literals inside the route method, used only when paginating. They are network mechanics, not a contract with the consumer. Only the consumer-facing ceiling (`max_limit`) appears in the capabilities map.
+
+When adding a new adapter, copy `_build_capabilities` from an existing adapter under `exchange_router/exchanges/` as a starting point rather than reconstructing the schema by hand.
+
+<br>
+<br>
+
+## Data Normalization
+
+All data returned by an adapter must go through the Pydantic models in `exchange_router/models.py` before reaching the routing layer. Raw dictionaries are not accepted.
+
+- **Validation:** Unmapped or malformed fields cause an immediate validation error.
+- **Schema stability:** The router and downstream clients depend on these models being consistent across adapters.
+- **Type safety:** This keeps price, volume, and quantity precision consistent between exchanges.
+
+Before integrating with the router, validate normalization locally by instantiating your adapter directly in a Python REPL and confirming that all network responses parse through the relevant models without errors.
+
+<br>
+
+### When the Models Don't Fit
+
+If an upstream response carries a field that no existing model captures, you have three options, in order of preference:
+
+1. **Drop the field.** Most of the time the extra data is not relevant to the router's contract. If it is noise, leave it out of the normalized output.
+2. **Add an optional field to an existing model.** If the field is conceptually shared across exchanges and just happens to be missing from yours, extend the model with an `Optional[...]` field and default it to `None`. Other adapters can start populating it later without breaking the schema.
+3. **Add a new model.** If the data type is genuinely new (new market type, new derivative), propose a new Pydantic model in `exchange_router/models.py` as part of the PR.
+
+Do not add adapter-specific fields under a generic name, and do not return raw dicts as an escape hatch. The normalization contract is the whole point of the router.
+
+<br>
+<br>
+
+## Adapter Internals
+
+These are conventions adapter authors follow that are not visible from the user-facing schema. They live here, not in Exchange Notes, because callers do not need them.
+
+<br>
+
+### SymbolInfo cache (base-provided)
+
+`BaseExchange` owns the per-market SymbolInfo cache: `_ensure_info_cache(market_type)` and `_info_for(market_type, model_symbol)` live on the base class, backed by a single lock and a refresh policy (`INFO_REFRESH_S = 24h`). A cache older than the refresh window is re-fetched on the next request; if the refresh fetch fails while a cached copy exists, the stale copy is served and the next attempt is deferred by `INFO_RETRY_S = 1h`. The adapter's only obligation is `_fetch_exchange_info(market_type)`, which the base calls both on first use and on refresh, so anything the adapter populates inside it (such as `_funding_interval_cache`) refreshes on the same cadence. Adapters must not declare their own `_info_cache` fields.
+
+<br>
+
+### `_paginate_backwards` helper
+
+Every method that accepts `start_time` should route through `_paginate_backwards`, which lives on `BaseExchange` (or its equivalent in the adapter, like the Kraken forward walk), seeded with `start_time` on the first iteration. The helper collects forward-sorted batches, walks the response back by re-anchoring the upstream end-anchored parameter on the oldest record's timestamp itself, and drops the boundary row that repeats as a result by keying every record on its `model_dump_json()` in a `seen` set. It stops when a batch carries no new records, when the next anchor fails to move backwards, or when `max_requests` is reached. The plus-one and minus-one adjustments belong to the adapters whose upstream parameter is exclusive, in the table below. The user-facing contract is "inclusive backward-walking upper bound"; this is how that contract is implemented.
+
+<br>
+
+### Upstream pagination parameters
+
+| Exchange | Native param | Inclusive? | Adapter handling |
+| :--- | :--- | :--- | :--- |
+| Binance | `endTime` | yes | direct passthrough |
+| Bybit | `endTime` (`end` on klines) | yes | direct passthrough |
+| KuCoin | `endAt` (spot, seconds), `to` (futures klines, ms), `to` (funding `from`/`to` ms), `endAt` (OI, ms) | exclusive on the spot/futures endpoints | send `start + 1`; for spot klines convert ms to seconds |
+| OKX | `after` (REST), `end` (rubik) | `after` is exclusive, `end` is inclusive | for `after`, send `start + 1` to make it inclusive |
+| Kraken | `since`, `from` | forward-only | compute `synthetic_since = start - limit * interval`, fetch forward, truncate to `ts <= start`, tail to `limit` |
+
+<br>
+
+### Perpetuals filter
+
+| Exchange | Mechanism |
+| :--- | :--- |
+| Binance | filter `contractType == "PERPETUAL"` on `/dapi/v1/exchangeInfo` and `/fapi/v1/exchangeInfo` |
+| Bybit | pass `contractType=LinearPerpetual` or `InversePerpetual`; also re-check on the response |
+| Kraken | check `type` plus instrument prefix: `PI_*` and `PF_*` are perpetuals, `FI_*` and `FF_*` are dated |
+| KuCoin | `/api/v1/contracts/active` returns only perpetuals; split linear vs inverse by `isInverse` and filter `status == "Open"` |
+| OKX | filter `ctType == "linear"` or `"inverse"` plus `state == "live"` on `instType=SWAP` |
+
+<br>
+
+### Symbol round-trip
+
+Adapters implement `get_api_symbol(symbol, market_type)` and `get_model_symbol(api_symbol, market_type)`. The two must compose: `get_model_symbol(get_api_symbol(s, m), m) == s` for every supported `(s, m)`. `get_api_symbol` reattaches whatever suffix or separator the upstream needs (Binance `_PERP`, Kraken `PI_`/`PF_`, OKX `-` and `-SWAP`).
+
+<br>
+
+### Spot symbol cache (`_resolve_symbol`)
+
+For exchanges whose REST API expects a separator-bearing native id (KuCoin `BTC-USDT`, OKX `BTC-USDT`, Kraken `XBT/USD`), splitting a normalized flat symbol like `BTCUSDT` into base/quote requires knowing which suffixes are valid quote currencies. A hardcoded list (`SPOT_QUOTES`) goes stale as exchanges add new stablecoins. Use the upstream's own symbol metadata instead.
+
+The pattern (mirrors `KrakenAdapter._ensure_spot_ws_map` and `KuCoinAdapter._ensure_spot_symbol_map`):
+
+```python
+self._spot_symbol_map: Dict[str, str] = {}     # "BTCUSDT" -> "BTC-USDT"
+self._spot_symbol_map_lock = asyncio.Lock()
+
+async def _ensure_spot_symbol_map(self) -> None:
+    if self._spot_symbol_map:
+        return
+    async with self._spot_symbol_map_lock:
+        if self._spot_symbol_map:
+            return
+        data = await self._make_request(...)
+        built: Dict[str, str] = {}
+        for s in data or []:
+            if not active(s):
+                continue
+            built[f"{s['base']}{s['quote']}".upper()] = s["native_id"]
+        self._spot_symbol_map = built
+
+async def _resolve_symbol(self, symbol: str, market_type: MarketType) -> str:
+    if market_type != MarketType.SPOT:
+        return self.get_api_symbol(symbol, market_type)
+    flat = symbol.upper().replace("/", "").replace("-", "")
+    try:
+        await self._ensure_spot_symbol_map()
+    except Exception:
+        return self.get_api_symbol(symbol, market_type)
+    native = self._spot_symbol_map.get(flat)
+    if native:
+        return native
+    raise ValueError(f"Symbol {symbol} not listed on <exchange> spot")
+```
+
+Route methods call `await self._resolve_symbol(symbol, market_type)` instead of the sync `self.get_api_symbol(...)`. The cache is lazy-loaded on first spot use, double-checked-locked for concurrency, and survives a fetch failure by falling back to the static heuristic.
+
+When the cache loads successfully and the requested symbol is missing, raise `ValueError` (which the router maps to HTTP 400). Some exchanges return a stub object for unknown symbols rather than a clean error, so trusting upstream is unsafe. The cache is the source of truth. Newly listed symbols become resolvable on the next service restart. KuCoin does this; OKX is a known deviation, its `_resolve_symbol` logs a WARNING and returns a `SPOT_QUOTES`-derived native id instead, so an unknown OKX spot symbol reaches upstream fabricated rather than failing with a 400.
+
+`get_api_symbol` and `SPOT_QUOTES` are the fallback path for the rare case where the live `/symbols` fetch fails, not the primary mechanism.
+
+KuCoin uses `/api/v1/symbols` (fields: `symbol`, `baseCurrency`, `quoteCurrency`, `enableTrading`). OKX uses `/api/v5/public/instruments?instType=SPOT` (fields: `instId`, `baseCcy`, `quoteCcy`, `state == "live"`). Kraken's WS-name cache reads `/AssetPairs` for a different reason, its REST API accepts altname directly.
+
+<br>
+
+### Rate limit headers and proactive backoff
+
+Implementation patterns live here; user-facing behaviour lives in [Exchange Notes](Exchange_Notes.md#rate-limit-and-ban-protection); the backoff and fail-fast flow lives in [Architecture](Architecture.md#rate-limiting).
+
+When adding a new adapter, read the upstream's rate-limit policy and pick the right pattern; do not assume every exchange looks like Binance's weight model. The validator's `MIN_REST_INTERVAL_MS` knob is independent and only protects the test suite from itself.
+
+Per-exchange implementation specifics:
+
+| Exchange | Header(s) | Trigger |
+| :--- | :--- | :--- |
+| Binance | `x-mbx-used-weight-1m` | back off 2s when used weight climbs above 95 percent of the per-host budget (5700/6000 on api, 2280/2400 on fapi and dapi; the 1200 in the code is only the fallback for a host missing from `_WEIGHT_LIMITS`); tracked per upstream host (api / fapi / dapi have independent weight buckets) |
+| Bybit | `X-Bapi-Limit-Status`, `X-Bapi-Limit-Reset-Timestamp` | back off until reset if remaining < 10 |
+| KuCoin | none (30s rolling window, no per-response remaining-weight header) | reactive only on HTTP 429 |
+| OKX | none | reactive only on HTTP 429 |
+| Kraken | none | reactive on HTTP 429/418/502/503/504/520, body-level `EAPI:Rate limit exceeded` and `EService:Throttled: <ts>` |
+
+Reactive backoffs (HTTP 429, soft codes like Bybit's `retCode: 10006`, Kraken's body-level errors) all funnel into the same `_backoff_until` mechanism.
+
+<br>
+
+### Kraken-specific retry behavior
+
+Kraken's documented rate-limit semantics differ enough from the other exchanges that the adapter does more than simple `_backoff_until` scheduling. The implementation in [exchange_router/exchanges/kraken/adapter.py](../exchange_router/exchanges/kraken/adapter.py) `_make_request` enforces both proactive spacing (so we rarely trigger Kraken's limits in the first place) and a sophisticated retry strategy when we do.
+
+**Proactive spacing (always on, even on the happy path):**
+
+- **`_base_interval_ms = 200ms`** between any two Kraken calls globally. Cheap insurance against simultaneous bursts when concurrent probes happen to fire at the same instant.
+- **`_pair_interval_ms = 1100ms`** between successive calls to `/0/public/OHLC` or `/0/public/Trades` for the same `pair`. Kraken docs gate these specifically per IP per pair with "1 per second or less" guidance; 1.1s gives 10% margin under that cap.
+
+**Retry strategy when something does go wrong:**
+
+1. **Body-level signals**, not just HTTP status. Kraken sometimes returns HTTP 200 with `error: ["EAPI:Rate limit exceeded"]` or `error: ["EService:Throttled: <unix_ts>"]` in the JSON body. The adapter parses these and treats them as rate-limit signals, sleeping until the absolute timestamp when given.
+2. **Exponential backoff with full jitter**. Up to 8 retries on Spot REST (5 on Futures) with delays of `2^attempt` seconds capped at 60s, multiplied by `0.5 + random()`. This avoids consecutive retries landing inside the same cooldown window, which Kraken explicitly documents as making the cooldown last longer. Worst-case total backoff is ~4 minutes for the most stubborn cooldowns; most signals clear in ~10-30s.
+3. **Global forward-rate slowdown after rate-limit confirmation**. When HTTP 429/418 or a body-level rate-limit signal fires, `_extra_interval_ms` is set to 1000ms on top of the base 200ms (so 1.2s spacing) for the next 60s. All subsequent calls (not just the failing one) honor this spacing. Per Kraken's docs: "additional calls would be restricted for a few seconds (or possibly longer if calls continue to be made while the rate limits are active)."
+
+When all retries are exhausted, `_make_request` raises `UpstreamUnavailableError(f"Kraken throttled or unavailable: {url} (last_status=..., last_body_error=...)")`. The router translates it to HTTP 503 with the message in the body, so callers see actionable detail instead of opaque 500.
+
+If a future contributor finds these knobs incorrect for a specific Kraken behavior, the doc reference is `https://docs.kraken.com/api/docs/guides/spot-rest-ratelimits` and `https://support.kraken.com/articles/206548367-what-are-the-api-rate-limits-`.
+
+<br>
+
+### WebSocket multiplexing via `StreamHub`
+
+Every adapter's `_ws_connect` is implemented on top of `StreamHub` (in [exchange_router/exchanges/base.py](../exchange_router/exchanges/base.py)). Each hub owns exactly **one** persistent upstream WebSocket and fans incoming messages out to per-topic queues. Multiple subscribers acquire a queue per topic via `hub.subscribe(topic)` and release it via `hub.unsubscribe(topic, q)`. The hub sends `SUBSCRIBE` upstream when a topic's refcount transitions from 0 to 1 and `UNSUBSCRIBE` when it drops back to 0; on reconnect it re-subscribes every topic that still has subscribers.
+
+This is the difference between "1000 subscribed symbols open 1000 sockets to Binance" (banned in minutes under Binance's 300 conn / IP / 5 min cap) and "1000 subscribed symbols share one socket carrying 1000 SUBSCRIBE messages".
+
+A `StreamHub` is a tiny adapter-agnostic shell driven by five callbacks:
+
+| Callback | Returns | Purpose |
+| :--- | :--- | :--- |
+| `connect()` | connected websocket | Open the upstream WS. Adapter handles bullet tokens, welcome frames, etc. inside this coroutine. |
+| `subscribe_payload(topics)` | iterable of payloads | One or more JSON dicts (or raw strings) to send to subscribe to the listed topics. Adapter decides whether to batch or send one-per-topic. |
+| `unsubscribe_payload(topics)` | iterable of payloads | Same shape, for unsubscribe. |
+| `route(msg)` | topic str or `None` | Given a parsed inbound message, return the topic it belongs to. Returning `None` drops the message (welcome frames, pongs, subscribe acks). |
+| `keepalive_payload` (optional) | static payload | Sent every `keepalive_interval` seconds. Use for OKX's raw `"ping"`, Bybit's `{"op": "ping"}`, KuCoin's `{"id": ..., "type": "ping"}`. Set to `None` if the `websockets` library's own `ping_interval` handles it (Binance, Kraken). |
+
+The adapter owns a small `_hubs` dict keyed by whatever distinguishes upstream connections for that exchange (typically `MarketType`, sometimes `(MarketType, bucket)` for Binance USDM, sometimes a synthetic key for Kraken spot's per-payload-shape hubs). `_ws_connect` looks up or lazily creates the right hub, calls `subscribe`, yields from the queue, and unsubscribes in `finally`. `shutdown()` calls `await hub.close()` on every hub it created.
+
+When adding a new exchange, the work is: identify the upstream's subscribe / unsubscribe / keepalive shape, write the four (or five) callbacks, and let the hub do the rest.
+
+<br>
+
+### Subscription payload quirks
+
+Documented here so future adapter authors know what to look for when wrapping a new exchange.
+
+- **Binance.** Standard JSON `{"method": "SUBSCRIBE", "params": [...], "id": ...}`. Connect to the **combined-stream** URL (`/stream`, not `/ws`); responses arrive wrapped as `{"stream": "...", "data": {...}}` so routing is just `msg["stream"]`. No client keepalive needed; the `websockets` library's `ping_interval=20` handles it. USDM still needs the per-bucket URL routing (see "Binance USD-M WebSocket routing buckets" below): one hub per `(market_type, bucket)`.
+- **Bybit.** Standard JSON `{"op": "subscribe", "args": [...], "req_id": "sub-<ms>"}` (the `req_id` is opaque, used by Bybit to correlate responses; the adapter generates a fresh one per subscribe call). Routing field is `topic`. Send `{"op": "ping"}` every 20 seconds via the hub's `keepalive_payload`.
+- **Kraken spot.** Use the v2 WebSocket protocol on `wss://ws.kraken.com/v2`. Translate `XBT`/`XDG` to `BTC`/`DOGE` when constructing subscription payloads. The `ticker` channel needs `event_trigger: "bbo"` to emit BBO updates without trade activity. The `trade` channel needs `"snapshot": true` to emit recent trades on connect. Because incoming messages don't echo `event_trigger`/`depth`/`snapshot`, two subscriptions that differ only in those flags are indistinguishable on the receive side; the adapter therefore creates a **separate hub per subscription shape** (one for ticker, one for ticker-bbo, one for book-depth-N, etc.) keyed off the params dict in `_hub_key`.
+- **Kraken futures.** Use the v1 WebSocket protocol on a separate URL (`wss://futures.kraken.com/ws/v1`); message shapes differ from v2 spot. Routing is `f"{feed}:{product_id}"`. Multiple route methods can share a single subscription on the same `feed` (futures `ticker` carries last/bid/ask/markPrice/indexPrice/fundingRate all at once, so `stream_ticker`, `stream_book_ticker`, and `stream_mark_price` all subscribe to the same `ticker:<product>` topic; the hub fans the same message into each consumer's queue).
+- **KuCoin.** Two-step handshake. `POST /api/v1/bullet-public` against the spot or futures host returns `{token, instanceServers: [{endpoint, pingInterval, ...}]}`. The hub's `connect()` performs the bullet fetch, builds `endpoint?token=...&connectId=<uuid>`, opens the WS, and consumes the welcome frame before returning. Subscribe payload: `{"id": ..., "type": "subscribe", "topic": "/market/ticker:BTC-USDT", "privateChannel": false, "response": false}` (one per topic; KuCoin doesn't batch multiple topics in one subscribe). Routing is `msg["topic"]`. Heartbeat: `{"id": ..., "type": "ping"}` every ~15 seconds. Spot and futures use different bullet endpoints and topic prefixes (`/market/`, `/spotMarket/` vs `/contractMarket/`, `/contract/`).
+- **OKX.** OKX closes idle connections after 30 seconds. Send a raw `"ping"` (not JSON) every 25 seconds; the server replies with raw `"pong"`. OKX subscribe args are dicts, not strings, so the adapter keeps a `_topic_args: Dict[str, dict]` mapping the synthetic topic key back to the wire-format arg the hub callbacks reconstruct. The key is `f"{channel}:{instId or instType or ''}"`: instance-scoped channels (`tickers`, `trades`, etc.) key on `instId`; the global `liquidation-orders` channel keys on `instType` (`"SWAP"`) since the wire arg carries no `instId`.
+
+<br>
+
+### Internal endpoints behind `open_interest` and `long_short_ratio`
+
+For adapter authors hitting these surfaces:
+
+- **OKX OI** comes from `/api/v5/rubik/stat/contracts/open-interest-history`. The history endpoint returns `[ts, oi (contracts), oiCcy (coin units), oiUsd (USD notional)]`. The adapter picks different columns per market type: linear (`BTC-USDT-SWAP`) reads `oiCcy` (coin units) and emits `unit: "base"`; inverse (`BTC-USD-SWAP`) reads `oi` (contracts) and emits `unit: "contract"` with `contract_size` from upstream `ctVal`. The `oiUsd` column is dropped because the model does not carry a USD slot (most exchanges don't expose one; see Exchange Notes for the per-exchange unit table).
+- **OKX L/S** comes from `/api/v5/rubik/stat/contracts/long-short-account-ratio`, parameterized by `ccy` (currency), not `instId`.
+- **Kraken OI and L/S** come from the Kraken Futures chart analytics API (`https://futures.kraken.com/api/charts/v1/analytics/{symbol}/{type}`). The adapter uses the close value of each OHLC-style bucket as the representative.
+- **KuCoin OI** comes from the unified analytics endpoint `https://api.kucoin.com/api/ua/v1/market/open-interest`, parameterized by `symbol` (futures form) and `interval` (`5min`, `15min`, `30min`, `1hour`, `4hour`, `1day`). The endpoint lives on the spot host even though it serves futures data. Response rows are `{ts, openInterest}`. KuCoin does not expose long/short ratio publicly.
+
+<br>
+
+### Binance USD-M WebSocket routing buckets
+
+USD-M futures (`wss://fstream.binance.com`) requires per-stream routing into three sub-endpoints: `/public`, `/market`, `/private`. A subscription on the wrong bucket connects but silently drops frames, so the adapter selects the correct bucket per topic before opening the connection.
+
+| Stream | Bucket |
+| :--- | :--- |
+| `<symbol>@trade` | public |
+| `<symbol>@bookTicker` | public |
+| `<symbol>@depth<level>@<speed>` | public |
+| `<symbol>@ticker` | market |
+| `<symbol>@miniTicker` | market |
+| `<symbol>@markPrice` (and `@1s` variant) | market |
+| `<symbol>@aggTrade` | market |
+| `<symbol>@forceOrder` | market |
+
+Routing is handled by `BinanceAdapter._usdm_bucket_for_topic`. Adding a new USD-M stream means matching an existing entry (`depth*` normalises to `depth`) or adding a key to `_USDM_BUCKETS`. Unknown channels default to `public`. COIN-M (INVERSE, `wss://dstream.binance.com`) and SPOT (`wss://stream.binance.com:9443`) do not use bucketed routing.
+
+<br>
+
+### KuCoin: two REST domains
+
+KuCoin splits its public REST surface across two hosts: `api.kucoin.com` for spot and the unified analytics endpoints (open interest history under `/api/ua/v1/`), and `api-futures.kucoin.com` for everything contract-related (contracts list, ticker, orderbook, trades, klines, mark price, funding history). The router routes per call. There is no caller-visible effect.
+
+<br>
+
+### KuCoin: timestamp unit normalisation
+
+KuCoin mixes timestamp units across endpoints. Spot trade history (`/api/v1/market/histories`) and futures ticker, orderbook, trade history, and execution streams return timestamps in **nanoseconds**. Spot stats, futures klines, mark price, funding history, and open interest history return **milliseconds**. Spot kline rows lead with **seconds**. The adapter normalises all of these to milliseconds before they reach the model, but contributors debugging raw upstream payloads will see the source units.
+
+<br>
+
+### OKX: inverse base/quote derivation
+
+For SWAP instruments (linear and inverse), OKX returns empty `baseCcy`/`quoteCcy` on the instruments endpoint. The adapter derives `base_asset` and `quote_asset` from the upstream `uly` field. If `uly` is missing, both fields fall back to empty strings.

@@ -9,12 +9,14 @@
 
 <sub>
   <a href="../README.md">Introduction</a> &nbsp;•&nbsp;
-  <a href="API_Reference.md">API Reference</a> &nbsp;•&nbsp;
-  <a href="Python_SDK.md">Python SDK</a> &nbsp;•&nbsp;
+  <a href="Python_API.md">Python API</a> &nbsp;•&nbsp;
+  <a href="HTTP_Reference.md">HTTP Reference</a> &nbsp;•&nbsp;
   <a href="Exchange_Notes.md">Exchange Notes</a> &nbsp;•&nbsp;
-  <a href="System_Architecture.md">System Architecture</a> &nbsp;•&nbsp;
-  <b>Auditor Guide</b> &nbsp;•&nbsp;
-  <a href="Contributor_Guide.md">Contributor Guide</a>
+  <a href="Architecture.md">Architecture</a> &nbsp;•&nbsp;
+  <a href="Decisions.md">Decisions</a> &nbsp;•&nbsp;
+  <a href="Adapter_Guide.md">Adapter Guide</a> &nbsp;•&nbsp;
+  <a href="Contributor_Guide.md">Contributor Guide</a> &nbsp;•&nbsp;
+  <b>Auditor Guide</b>
 </sub>
 
 <br>
@@ -28,7 +30,7 @@ Adapter compliance is validated via the **auditor** package at `tools/auditor/`.
 
 Getting capabilities wrong in either direction surfaces as a failure, not a skip. Claim `True` for a feature the adapter does not implement and the route either 501s (recorded by the `error_paths` probe) or succeeds in a way that contradicts the schema (recorded by `capabilities_drift`). Claim `False` for a feature that works and `capabilities_drift` flags it: a `rest: False` route that returns 200 is a hard FAIL.
 
-The auditor stamps the served `schema_version` field on every `results.json` and pins its expected value to the constant in [src/version.py](../src/version.py). Drift between the two fails the suite, so a wire shape change that did not move the constant surfaces immediately.
+The auditor stamps the served `schema_version` field on every `results.json` and pins its expected value to the constant in [exchange_router/version.py](../exchange_router/version.py). Drift between the two fails the suite, so a wire shape change that did not move the constant surfaces immediately.
 
 <br>
 <br>
