@@ -4,8 +4,14 @@
 # Auditor Guide records under "why the suite runs locally, not in CI". So this
 # checks what is checkable with no upstream: every adapter package registers an
 # adapter and declares a usable capabilities map, the client SDK builds and
-# installs clean, and the image boots and answers on the routes that need no
-# network. It is a smaller claim than emsl's gate, deliberately.
+# installs clean, the image boots and answers on the routes that need no
+# network, and the offline suite holds. It is a smaller claim than emsl's gate,
+# deliberately.
+#
+# The suite is the newest of the four and the only one that can catch a
+# behavioural regression. It reaches the app through an ASGI transport with a
+# fake adapter in the registry, so it needs no container to talk to, no port and
+# no upstream, and it runs on a blocked runner exactly as it runs on a laptop.
 
 name: ci
 
@@ -109,3 +115,15 @@ jobs:
           docker logs "$id"
           docker rm -f "$id" >/dev/null
           test "$count" -gt 0 || { echo "::error::the service came up with no exchanges registered"; exit 1; }
+
+  suite:
+    name: the offline suite holds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # the test stage sits between the shared base and the service stage, so a
+      # plain `docker build` still produces the service and the test
+      # dependencies never reach the image anyone runs.
+      - run: docker build --target test -t ers-test .
+      - name: run the suite in the image it was built into
+        run: docker run --rm ers-test pytest -q
