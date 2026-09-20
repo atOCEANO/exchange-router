@@ -329,13 +329,17 @@ class LocalBackend(Backend):
         try:
             return MarketType(market_type)
         except ValueError:
-            raise RouterError(f"market_type '{market_type}' is not one of spot, linear, inverse", 422)
+            raise RouterError(
+                f"market_type '{market_type}' is not a market type; use spot, linear or inverse",
+                422,
+            )
 
 
     async def fetch(self, route: str, exchange: Optional[str] = None, market_type: Optional[str] = None,
                     symbol: Optional[str] = None, **params: Any) -> Any:
         try:
-            return await self._dispatch(route, exchange, self._market_type(market_type), symbol, params)
+            market = self._market_type(market_type)
+            return await self._dispatch(route, exchange, market, symbol, params)
 
         except RouterError:
             raise
@@ -378,7 +382,7 @@ class LocalBackend(Backend):
                 "exchange":    exchange,
                 "market_type": market_type.value,
                 "count":       len(info_list),
-                "markets":     [to_jsonable_python(symbol_info_to_lite(info)) for info in info_list],
+                "markets":     [to_jsonable_python(symbol_info_to_lite(i)) for i in info_list],
             }
 
         if route in INTERVAL_ROUTES:
@@ -399,7 +403,10 @@ class LocalBackend(Backend):
             rows = await self._series(adapter, route, market_type, symbol, params)
             return to_jsonable_python(rows)
 
-        raise NotSupported(f"route '{route}' is not served in local mode", 501)
+        raise NotSupported(
+            f"route '{route}' is not served in local mode; it exists on the service only",
+            501,
+        )
 
 
     async def _symbol_count(self, adapter, market_type: MarketType) -> int:
@@ -414,7 +421,7 @@ class LocalBackend(Backend):
         adapter      = self._adapter(exchange)
         capabilities = adapter.get_capabilities()
         market_types = adapter.supported_market_types
-        counts       = await asyncio.gather(*[self._symbol_count(adapter, mt) for mt in market_types])
+        counts       = await asyncio.gather(*[self._symbol_count(adapter, m) for m in market_types])
 
         return {
             "exchange":     exchange,
@@ -435,28 +442,38 @@ class LocalBackend(Backend):
         start = params.get("start")
 
         if route == "trades":
-            return await adapter.get_trades(market_type, symbol, params.get("limit", 100))
+            limit = params.get("limit", 100)
+            return await adapter.get_trades(market_type, symbol, limit)
 
         if route == "agg_trades":
-            return await adapter.get_agg_trades(market_type, symbol, start, params.get("limit", 500))
+            limit = params.get("limit", 500)
+            return await adapter.get_agg_trades(market_type, symbol, start, limit)
 
         if route == "candles":
-            return await adapter.get_candles(market_type, symbol, params.get("interval", "1h"), start, params.get("limit", 100))
+            interval = params.get("interval", "1h")
+            limit    = params.get("limit", 100)
+            return await adapter.get_candles(market_type, symbol, interval, start, limit)
 
         if route == "funding_rate":
-            return await adapter.get_funding_rate(market_type, symbol, start, params.get("limit", 100))
+            limit = params.get("limit", 100)
+            return await adapter.get_funding_rate(market_type, symbol, start, limit)
 
         if route == "liquidations":
-            return await adapter.get_liquidations(market_type, symbol, start, params.get("limit", 100))
+            limit = params.get("limit", 100)
+            return await adapter.get_liquidations(market_type, symbol, start, limit)
 
         if route == "long_short_ratio":
-            return await adapter.get_long_short_ratio(market_type, symbol, params.get("period", "5m"), start, params.get("limit", 30))
+            period = params.get("period", "5m")
+            limit  = params.get("limit", 30)
+            return await adapter.get_long_short_ratio(market_type, symbol, period, start, limit)
 
         period  = params.get("period", "1h")
         limit   = params.get("limit", 30)
         oi_rows = await adapter.get_open_interest(market_type, symbol, period, start, limit)
 
-        return await join_open_interest_basis(adapter, market_type, symbol, period, start, limit, oi_rows)
+        return await join_open_interest_basis(
+            adapter, market_type, symbol, period, start, limit, oi_rows,
+        )
 
 
     async def stream(self, exchange: str, market_type: str, channel: str, symbol: str) -> AsyncGenerator[Dict, None]:
@@ -465,7 +482,10 @@ class LocalBackend(Backend):
 
         method = getattr(adapter, f"stream_{channel}", None)
         if method is None:
-            raise NotSupported(f"channel '{channel}' is not a channel this router streams", 501)
+            raise NotSupported(
+                f"channel '{channel}' has no stream here; get_capabilities lists the ones served",
+                501,
+            )
 
         try:
             async for item in method(mt, symbol):

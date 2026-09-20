@@ -50,7 +50,7 @@ class AsyncCore:
 
 
     async def close(self) -> None:
-        task = self._warm_task
+        task            = self._warm_task
         self._warm_task = None
         if task is not None and not task.done():
             task.cancel()

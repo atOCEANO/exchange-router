@@ -40,7 +40,7 @@ def test_a_bare_string_that_is_not_all_is_refused(cls):
     with pytest.raises(BadRequest) as caught:
         cls.local("fake")
 
-    assert '["fake"]' in str(caught.value)
+    assert "['fake']" in str(caught.value)
 
 
 @pytest.mark.parametrize("cls", [Router, AsyncRouter], ids=["sync", "async"])

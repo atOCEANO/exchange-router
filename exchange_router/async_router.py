@@ -18,18 +18,18 @@ DEPRECATION = (
 
 def resolve_scope(exchanges: Union[List[str], str], known: Optional[List[str]]) -> List[str]:
     if exchanges is None:
-        raise BadRequest("exchanges is required; pass a list of names or \"all\"")
+        raise BadRequest("exchanges is required; pass a list of names or 'all'")
 
     if isinstance(exchanges, str):
         if exchanges != ALL:
-            raise BadRequest(f"exchanges '{exchanges}' is not a list of names; pass [\"{exchanges}\"] or \"all\"")
+            raise BadRequest(f"exchanges '{exchanges}' is not a list of names; pass ['{exchanges}'] or 'all'")
         if known is None:
             return []
         return list(known)
 
     names = list(exchanges)
     if not names:
-        raise BadRequest("exchanges is empty; name at least one exchange or pass \"all\"")
+        raise BadRequest("exchanges is empty; name at least one exchange or pass 'all'")
 
     if known is not None:
         missing = [name for name in names if name not in known]
@@ -85,7 +85,7 @@ class AsyncRouter(AsyncCore):
             raise BadRequest("url is required; Router.service needs the address of a running service")
 
         if fallback not in (None, "local"):
-            raise BadRequest(f"fallback '{fallback}' is not a mode; the only opt-in fallback is \"local\"")
+            raise BadRequest(f"fallback '{fallback}' is not a mode; the only opt-in fallback is 'local'")
 
         base   = url.rstrip("/")
         chosen = backend if backend is not None else RemoteBackend(base, timeout, max_retries)
@@ -95,7 +95,6 @@ class AsyncRouter(AsyncCore):
         scope = resolve_scope(exchanges, None)
 
         return cls._assemble(chosen, "service", scope, verbose, base, timeout, max_retries)
-
 
 
     def market(self, exchange: str, market_type: str, symbol: str) -> AsyncMarket:
