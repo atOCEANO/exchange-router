@@ -1,0 +1,84 @@
+import inspect
+
+from fastapi.routing import APIRoute, APIWebSocketRoute
+
+from exchange_router_client.async_client import AsyncExchangeRouterClient
+from src.main import app
+
+
+ROUTE_TO_METHOD = {
+    "/":                                          None,
+    "/status":                                    "get_status",
+    "/version":                                   "get_version",
+    "/exchanges":                                 "get_exchanges",
+    "/{exchange}":                                None,
+    "/{exchange}/status":                         None,
+    "/{exchange}/capabilities":                   "get_capabilities",
+    "/{exchange}/market_types":                   "get_market_types",
+    "/{exchange}/{market_type}/markets":          "get_markets",
+    "/{exchange}/{market_type}/markets/{symbol}": "get_symbol_info",
+    "/{exchange}/{market_type}/ticker/{symbol}":            "get_ticker",
+    "/{exchange}/{market_type}/book_ticker/{symbol}":       "get_book_ticker",
+    "/{exchange}/{market_type}/mark_price/{symbol}":        "get_mark_price",
+    "/{exchange}/{market_type}/orderbook/{symbol}":         "get_orderbook",
+    "/{exchange}/{market_type}/trades/{symbol}":            "get_trades",
+    "/{exchange}/{market_type}/agg_trades/{symbol}":        "get_agg_trades",
+    "/{exchange}/{market_type}/candles/{symbol}":           "get_candles",
+    "/{exchange}/{market_type}/open_interest/{symbol}":     "get_open_interest",
+    "/{exchange}/{market_type}/funding_rate/{symbol}":      "get_funding_rate",
+    "/{exchange}/{market_type}/liquidations/{symbol}":      "get_liquidations",
+    "/{exchange}/{market_type}/long_short_ratio/{symbol}":  "get_long_short_ratio",
+    "/ws/{exchange}/{market_type}":                         "stream",
+}
+
+KNOWN_GAPS = {
+    "/":                  "service metadata, reachable through get_status and get_exchanges",
+    "/{exchange}":        "per-market-type symbol counts, which nothing in the SDK exposes",
+    "/{exchange}/status": "the adapter's own status",
+}
+
+COMPOSITES = {
+    "market", "markets", "close", "fetch_many", "subscribe",
+    "candles_many", "trades_many", "agg_trades_many", "funding_rate_many",
+    "open_interest_many", "liquidations_many", "long_short_ratio_many",
+}
+
+
+def served_paths():
+    return {
+        route.path
+        for route in app.routes
+        if isinstance(route, (APIRoute, APIWebSocketRoute))
+    }
+
+
+def sdk_methods():
+    return {
+        name
+        for name, value in inspect.getmembers(AsyncExchangeRouterClient, inspect.isfunction)
+        if not name.startswith("_")
+    }
+
+
+def test_the_route_table_describes_exactly_the_routes_the_app_serves():
+    assert served_paths() == set(ROUTE_TO_METHOD)
+
+
+def test_every_route_with_a_method_names_a_method_that_exists():
+    named = {m for m in ROUTE_TO_METHOD.values() if m is not None}
+    assert named <= sdk_methods()
+
+
+def test_the_only_routes_without_a_method_are_the_three_recorded_gaps():
+    gaps = {path for path, method in ROUTE_TO_METHOD.items() if method is None}
+    assert gaps == set(KNOWN_GAPS)
+
+
+def test_every_sdk_method_is_a_route_or_a_declared_composite():
+    covered = {m for m in ROUTE_TO_METHOD.values() if m is not None}
+    assert sdk_methods() - covered == COMPOSITES
+
+
+def test_no_gap_is_recorded_without_a_reason():
+    for path, reason in KNOWN_GAPS.items():
+        assert reason and isinstance(reason, str)
