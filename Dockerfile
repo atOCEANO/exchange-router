@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir ".[server]"
 
 FROM base AS test
 
-RUN pip install --no-cache-dir ".[test]"
+RUN pip install --no-cache-dir ".[test,audit]"
 
 CMD ["pytest", "-q"]
 
