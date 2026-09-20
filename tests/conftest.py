@@ -3,6 +3,7 @@ import pytest
 import pytest_asyncio
 
 from exchange_router.async_router import AsyncExchangeRouterClient
+from exchange_router.backend import LocalBackend, RemoteBackend
 from exchange_router import exchanges as registry
 from exchange_router.service import app
 
@@ -24,16 +25,17 @@ def backend(request):
     return request.param
 
 
+def service_backend():
+    return RemoteBackend(
+        "http://router.test",
+        http = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), timeout=30),
+    )
+
+
 @pytest_asyncio.fixture
 async def router(backend):
-    if backend == "local":
-        pytest.skip("local mode arrives in PART 4; this leg is the reason the suite is parametrised")
-
-    client = AsyncExchangeRouterClient(base_url="http://router.test", verbose=False)
-    client._http = httpx.AsyncClient(
-        transport = httpx.ASGITransport(app=app),
-        timeout   = 30,
-    )
+    chosen = LocalBackend() if backend == "local" else service_backend()
+    client = AsyncExchangeRouterClient(verbose=False, backend=chosen)
 
     yield client
     await client.close()
