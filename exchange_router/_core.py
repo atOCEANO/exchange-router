@@ -1,126 +1,40 @@
 import asyncio
-import json
-import random
 from typing import Any, Dict, List, Optional
 
-import httpx
 import pandas as pd
-import websockets
 
 from . import frames
 from . import rows
+from .backend import Backend, RemoteBackend, is_retryable_stream_error
 from .capabilities import route_block
 from ._warnings import emit
 from .batch import BatchResult
-from .errors import BadRequest, NotSupported, RouterError, RouterUnreachable, error_for_status
-from .version import __version__
+from .errors import BadRequest, NotSupported, RouterError
 
-
-MAX_SLEEP_S = 60.0
 
 SERIES_ROUTES = ("candles", "trades", "agg_trades", "funding_rate", "open_interest", "liquidations", "long_short_ratio")
-
-FATAL_CLOSE_CODES = (1003, 1008)
-
-
-def _detail(response: httpx.Response) -> str:
-    try:
-        body = response.json()
-        return body.get("detail") or body.get("error") or str(body)
-    except Exception:
-        return response.text or f"HTTP {response.status_code}"
-
-
-def _retry_after(response: httpx.Response) -> Optional[float]:
-    raw = response.headers.get("Retry-After")
-    if raw is None:
-        return None
-
-    try:
-        return float(raw)
-    except ValueError:
-        return None
-
-
-def _sleep_for(attempt: int, retry_after: Optional[float]) -> float:
-    if retry_after is not None:
-        return min(retry_after, MAX_SLEEP_S)
-
-    base = 1.0
-    return base * attempt + random.uniform(0, base)
-
-
-def _is_fatal_close(error: Exception) -> bool:
-    rcvd = getattr(error, "rcvd", None)
-    code = getattr(rcvd, "code", None) if rcvd is not None else getattr(error, "code", None)
-    return code in FATAL_CLOSE_CODES
 
 
 class AsyncCore:
 
-    def __init__(self, base_url: str = "http://localhost:8040", timeout: int = 30, max_retries: int = 3, verbose: bool = True):
+    def __init__(self, base_url: str = "http://localhost:8040", timeout: int = 30, max_retries: int = 3,
+                 verbose: bool = True, backend: Optional[Backend] = None):
         self.base_url    = base_url.rstrip("/")
         self.timeout     = timeout
         self.max_retries = max_retries
         self.verbose     = verbose
-        self._http: Optional[httpx.AsyncClient] = None
+        self._backend    = backend if backend is not None else RemoteBackend(self.base_url, timeout, max_retries)
         self._capabilities: Dict[str, Dict] = {}
 
 
-    def _ensure_http(self) -> httpx.AsyncClient:
-        if self._http is None:
-            self._http = httpx.AsyncClient(
-                timeout = self.timeout,
-                headers = {"User-Agent": f"exchange-router-client/{__version__}"},
-            )
-
-        return self._http
-
-
     async def close(self) -> None:
-        if self._http is not None:
-            await self._http.aclose()
-
-
-    async def _request(self, method: str, endpoint: str, params: Optional[Dict] = None) -> Any:
-        url     = f"{self.base_url}/{endpoint}"
-        attempt = 0
-
-        while True:
-            try:
-                response = await self._ensure_http().request(method, url, params=params)
-                response.raise_for_status()
-                return response.json()
-
-            except httpx.HTTPStatusError as e:
-                status      = e.response.status_code
-                detail      = _detail(e.response)
-                retry_after = _retry_after(e.response)
-
-                if status not in (429, 500, 502, 503, 504):
-                    raise error_for_status(status, detail, retry_after)
-
-                attempt += 1
-                if attempt > self.max_retries:
-                    raise error_for_status(status, detail, retry_after)
-
-                await asyncio.sleep(_sleep_for(attempt, retry_after))
-
-            except httpx.TransportError as e:
-                attempt += 1
-                if attempt > self.max_retries:
-                    raise RouterUnreachable(f"{type(e).__name__}: {e}")
-
-                await asyncio.sleep(_sleep_for(attempt, None))
-
-            except httpx.HTTPError as e:
-                raise RouterUnreachable(f"{type(e).__name__}: {e}")
+        await self._backend.close()
 
 
     async def _ensure_capabilities(self, exchange: str) -> Dict:
         if exchange not in self._capabilities:
             try:
-                self._capabilities[exchange] = await self._request("GET", f"{exchange}/capabilities") or {}
+                self._capabilities[exchange] = await self._backend.fetch("capabilities", exchange) or {}
             except RouterError:
                 self._capabilities[exchange] = {}
 
@@ -167,7 +81,7 @@ class AsyncCore:
 
         await self._preflight(exchange, market_type, route, symbol=symbol, interval=interval, interval_label=interval_label, verbose=v)
 
-        rows = await self._request("GET", f"{exchange}/{market_type}/{route}/{symbol}", params)
+        rows = await self._backend.fetch(route, exchange, market_type, symbol, **params)
         ctx  = self._ctx(exchange, market_type, symbol, params.get("limit"), route)
 
         df, warnings = frames.build(route, rows, ctx)
@@ -177,21 +91,21 @@ class AsyncCore:
 
 
     async def get_status(self) -> Dict:
-        return await self._request("GET", "status")
+        return await self._backend.fetch("status")
 
 
     async def get_version(self) -> str:
-        data = await self._request("GET", "version")
+        data = await self._backend.fetch("version")
         return data.get("version", "")
 
 
     async def get_exchanges(self) -> List[str]:
-        data = await self._request("GET", "exchanges")
+        data = await self._backend.fetch("exchanges")
         return data.get("exchanges", [])
 
 
     async def get_market_types(self, exchange: str) -> List[str]:
-        data = await self._request("GET", f"{exchange}/market_types")
+        data = await self._backend.fetch("market_types", exchange)
         return [str(mt) for mt in data.get("market_types", [])]
 
 
@@ -200,32 +114,32 @@ class AsyncCore:
 
 
     async def get_markets(self, exchange: str, market_type: str) -> Dict:
-        return await self._request("GET", f"{exchange}/{market_type}/markets")
+        return await self._backend.fetch("markets", exchange, market_type)
 
 
     async def get_symbol_info(self, exchange: str, market_type: str, symbol: str) -> rows.Row:
-        return rows.symbol_info_row(await self._request("GET", f"{exchange}/{market_type}/markets/{symbol}"))
+        return rows.symbol_info_row(await self._backend.fetch("symbol_info", exchange, market_type, symbol))
 
 
     async def get_ticker(self, exchange: str, market_type: str, symbol: str, verbose: Optional[bool] = None) -> rows.Row:
         v = self.verbose if verbose is None else verbose
 
         await self._preflight(exchange, market_type, "ticker", symbol=symbol, verbose=v)
-        return rows.ticker_row(await self._request("GET", f"{exchange}/{market_type}/ticker/{symbol}"))
+        return rows.ticker_row(await self._backend.fetch("ticker", exchange, market_type, symbol))
 
 
     async def get_book_ticker(self, exchange: str, market_type: str, symbol: str, verbose: Optional[bool] = None) -> rows.Row:
         v = self.verbose if verbose is None else verbose
 
         await self._preflight(exchange, market_type, "book_ticker", symbol=symbol, verbose=v)
-        return rows.book_ticker_row(await self._request("GET", f"{exchange}/{market_type}/book_ticker/{symbol}"))
+        return rows.book_ticker_row(await self._backend.fetch("book_ticker", exchange, market_type, symbol))
 
 
     async def get_mark_price(self, exchange: str, market_type: str, symbol: str, verbose: Optional[bool] = None) -> rows.Row:
         v = self.verbose if verbose is None else verbose
 
         await self._preflight(exchange, market_type, "mark_price", symbol=symbol, verbose=v)
-        data = await self._request("GET", f"{exchange}/{market_type}/mark_price/{symbol}")
+        data = await self._backend.fetch("mark_price", exchange, market_type, symbol)
 
         warnings = []
         if data.get("index_price") is None:
@@ -241,7 +155,7 @@ class AsyncCore:
         v = self.verbose if verbose is None else verbose
 
         await self._preflight(exchange, market_type, "orderbook", symbol=symbol, depth=depth, verbose=v)
-        data = await self._request("GET", f"{exchange}/{market_type}/orderbook/{symbol}", {"depth": depth})
+        data = await self._backend.fetch("orderbook", exchange, market_type, symbol, depth=depth)
 
         ctx = {"exchange": exchange, "market_type": market_type, "symbol": symbol}
         return frames.orderbook(data, ctx)
@@ -338,14 +252,8 @@ class AsyncCore:
 
 
     async def subscribe(self, exchange: str, market_type: str, channel: str, symbol: str):
-        ws_url = self.base_url.replace("http", "ws", 1) + f"/ws/{exchange}/{market_type}"
-
-        async with websockets.connect(ws_url) as ws:
-            await ws.send(json.dumps({"channel": channel, "symbol": symbol}))
-
-            while True:
-                message = await ws.recv()
-                yield json.loads(message)
+        async for message in self._backend.stream(exchange, market_type, channel, symbol):
+            yield message
 
 
     async def stream(self, exchange: str, market_type: str, channel: str, symbol: str, reconnect: bool = True):
@@ -354,8 +262,8 @@ class AsyncCore:
                 async for message in self.subscribe(exchange, market_type, channel, symbol):
                     yield message
 
-            except (websockets.ConnectionClosed, websockets.WebSocketException, OSError) as error:
-                if not reconnect or _is_fatal_close(error):
+            except Exception as error:
+                if not reconnect or not is_retryable_stream_error(error):
                     raise
 
                 await asyncio.sleep(2)
