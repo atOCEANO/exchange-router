@@ -28,9 +28,9 @@
 
 `Router` is the whole API. It is synchronous by default: methods return their data directly, with no `await`. The sync class runs the async machinery on a private background event loop, so the same code works in a plain script and in a Jupyter cell without `asyncio.run` or top-level `await`. An `AsyncRouter` with the identical surface is available when you want concurrency.
 
-The one decision you make is which constructor to call. `Router.local` runs the exchange adapters inside your own process. `Router.service` translates the same calls into HTTP against a service you are running. Nothing else about your code changes, and [Which mode to use](../README.md#which-mode-to-use) covers when each is the right answer.
+The only decision is which constructor to call. `Router.local` runs the exchange adapters inside your own process. `Router.service` translates the same calls into HTTP against a service you are running. Nothing else about your code changes; [Which mode to use](../README.md#which-mode-to-use) says when to pick each.
 
-The return surface follows one rule, so you never have to remember what a call hands back:
+The return surface follows one rule:
 
 > Anything tabular is a pandas **DataFrame** with flat, stable columns. A single quote is a flat **Row** you read with `t.price`. Batches are a **BatchResult**. Every quantity is named the same way everywhere: `x` (native), `x_usd` (quote notional), `x_unit` (what `x` counts).
 
@@ -42,7 +42,7 @@ The return surface follows one rule, so you never have to remember what a call h
 | Batch (`*_many`) | `BatchResult`, behaves like a dict over the symbols that returned |
 | Discovery (exchanges, market_types, capabilities, markets) | `dict` / `list` |
 
-Upgrading from the `exchange-router-client` package, or from an older client major, is covered in [Migration](Migration.md). The wire schema has not changed across any of those hops; only the Python surface moved.
+Upgrading from `exchange-router-client`, or from an older client major, is covered in [Migration](Migration.md).
 
 <br>
 <br>
@@ -102,7 +102,7 @@ r.warm()            # block until the declared scope is ready
 r.warm("kraken")    # warm one, declared or not
 ```
 
-`warm()` is the blocking form of something that is already happening. Use it to move the cost outside a timed loop rather than into your first measurement. In service mode it runs the schema handshake and the capability fetch instead, so it means the same thing in both: pay the setup cost now.
+`warm()` is the blocking form of something already happening. Use it to keep the cost out of your first measurement. In service mode it runs the schema handshake and the capability fetch instead, so it means the same thing in both modes.
 
 Both constructors also accept `backend=`, which replaces the one they would have built. It exists so the test suite can drive the app in process and stand in a fake service without reaching into a private attribute. Passing your own works; the `Backend` interface is two methods and is not covered by the schema guarantee.
 
