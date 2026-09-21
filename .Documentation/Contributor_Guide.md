@@ -1,4 +1,4 @@
-<h1>OCEΛNO <small><code>exchange-router-service</code></small></h1>
+<h1>OCEΛNO <small><code>exchange-router</code></small></h1>
 
 
 <div style="padding-top: 0px;">
@@ -72,7 +72,7 @@ When something breaks, it helps to drop below the router entirely. Instantiate t
 
 The split is load-bearing rather than tidy. The base install is what makes a library possible: FastAPI is not a dependency of using this, only of serving it, and CI asserts that a base install cannot `import fastapi`. Two dependency lists is how the pandas that the frame builders need went missing from the service image once already, which is why there is now exactly one.
 
-**Adding a new dependency:** put it in the narrowest extra that needs it. A profiler or a debugging library that only you use belongs in neither, and in your own venv.
+**Adding a new dependency:** put it in the narrowest extra that needs it. A profiler or a debugging library that only you use belongs in neither; keep it in your own venv.
 
 When iterating without `--reload`, set `--port` on the uvicorn command line directly; the `EXCHANGE_ROUTER_SERVICE_PORT` env var is only consumed by `docker-compose.yml` and is not read by the Python service.
 
@@ -138,7 +138,7 @@ Verification runs in Docker. Run it that way rather than against your venv, so t
 
 The fake adapter lives in `tests/fake_exchange.py` and is deliberately awkward in the ways real venues are: it carries contract-denominated quantities on its inverse market and base on the others, both funding conventions, and an open-interest series whose first row has no candle to join against. Build inputs in the test that uses them, so a reader sees the input and the expected frame side by side.
 
-**What it does not cover.** Streaming, in either direction: an ASGI transport carries HTTP and not websockets, so the served side of a stream cannot be driven here. That gap is known and recorded rather than papered over.
+**What it does not cover.** Streaming, in either direction: an ASGI transport carries HTTP and not websockets, so the served side of a stream cannot be driven here.
 
 <br>
 

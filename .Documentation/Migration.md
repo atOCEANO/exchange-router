@@ -1,4 +1,4 @@
-<h1>OCEΛNO <small><code>exchange-router-service</code></small></h1>
+<h1>OCEΛNO <small><code>exchange-router</code></small></h1>
 
 
 <div style="padding-top: 0px;">
@@ -26,39 +26,21 @@
 
 ## Migration
 
-Three hops are recorded here, newest first. The wire schema has not changed across any
-of them: `schema_version` has been 3 throughout, so code reading raw response bodies or
-stream messages is unaffected every time. What changes is the Python surface.
+Three hops are recorded here, newest first. The wire schema has not changed across any of them: `schema_version` has been 3 throughout, so code reading raw response bodies or stream messages is unaffected every time. What changes is the Python surface.
 
-This page is not in the navigation strip. It is linked from
-[Python API](Python_API.md) and from the release notes, because it is something you
-read once while upgrading rather than something you keep open.
+This page is not in the navigation strip. It is linked from [Python API](Python_API.md) and from the release notes, because it is something you read once while upgrading rather than something you keep open.
 
 <br>
 
 ## Client 5.x to 3.0.0
 
-**The version number appears to go backwards, and that is intentional.** The service
-and the client used to be numbered on separate lines: the service reached 2.5.7 while
-the client reached 5.1.1. They are one package now, with one number, and that number
-continues the service's line rather than the client's, because the repository, the
-releases and the tags have always been numbered that way. A 5.1.1 install and a 3.0.0
-install are not comparable by version; they are different packages.
+**The version number appears to go backwards, and that is intentional.** The service and the client used to be numbered on separate lines: the service reached 2.5.7 while the client reached 5.1.1. They are one package now, with one number, and that number continues the service's line rather than the client's, because the repository, the releases and the tags have always been numbered that way. A 5.1.1 install and a 3.0.0 install are not comparable by version; they are different packages.
 
-**The package name changed.** What was `pip install exchange-router-client`, imported
-as `exchange_router_client`, is now `pip install exchange-router`, imported as
-`exchange_router`. The base install carries the Python API and local mode;
-`exchange-router[server]` adds FastAPI and uvicorn for running the service.
+**The package name changed.** What was `pip install exchange-router-client`, imported as `exchange_router_client`, is now `pip install exchange-router`, imported as `exchange_router`. The base install carries the Python API and local mode; `exchange-router[server]` adds FastAPI and uvicorn for running the service.
 
-**Nothing you call has changed its name, signature or return type.** Every read method,
-the market handle, `Row`, `BatchResult`, `with_provenance`, `funding_paid`,
-`per_hour_view` and the error tree are identical. A search and replace on the import
-line is the whole migration for code that already worked.
+**Nothing you call has changed its name, signature or return type.** Every read method, the market handle, `Row`, `BatchResult`, `with_provenance`, `funding_paid`, `per_hour_view` and the error tree are identical. A search and replace on the import line is the whole migration for code that already worked.
 
-**Construction is the one break, and it cannot happen silently.**
-`ExchangeRouterClient()` still exists, still defaults to localhost, and still works; it
-emits a `DeprecationWarning` naming its replacement. New code uses one of two
-constructors, and both require the exchange scope:
+**Construction is the one break, and it cannot happen silently.** `ExchangeRouterClient()` still exists, still defaults to localhost, and still works; it emits a `DeprecationWarning` naming its replacement. New code uses one of two constructors, and both require the exchange scope:
 
 ```python
 from exchange_router import Router
@@ -67,25 +49,15 @@ r = Router.local(exchanges=["binance"])
 r = Router.service("http://localhost:8040", exchanges=["binance"])
 ```
 
-Bare `Router(...)` raises rather than guessing. Mode is never inferred from a missing
-URL, so configuration-driven code branches explicitly:
+Bare `Router(...)` raises rather than guessing. Mode is never inferred from a missing URL, so configuration-driven code branches explicitly:
 
 ```python
 r = Router.service(url, exchanges=E) if url else Router.local(exchanges=E)
 ```
 
-**What is new.** `Router.local` runs the adapters in your own process, with no
-container to deploy. `.mode` and `.schema_version` report what you built. `.warm()`
-blocks until the declared scope is ready, so the cost sits outside a timed loop rather
-than inside the first measurement. `SchemaMismatch` joins the error tree and is raised
-on the first call when an SDK and a service disagree on the wire contract, instead of
-failing later in a way that looks like bad data. `get_exchange_overview` and
-`get_exchange_status` expose two routes the SDK previously did not reach.
+**What is new.** `Router.local` runs the adapters in your own process, with no container to deploy. `.mode` and `.schema_version` report what you built. `.warm()` blocks until the declared scope is ready, so the cost sits outside a timed loop rather than inside the first measurement. `SchemaMismatch` joins the error tree and is raised on the first call when an SDK and a service disagree on the wire contract, instead of failing later in a way that looks like bad data. `get_exchange_overview` and `get_exchange_status` expose two routes the SDK previously did not reach.
 
-**One thing to know before choosing local mode.** Each local process carries its own
-rate-limit budget and the exchange sees the sum of all of them. One researcher in one
-process is what it is for; run the service as soon as there is more than one of
-anything.
+**One thing to know before choosing local mode.** Each local process carries its own rate-limit budget and the exchange sees the sum of all of them. One researcher in one process is what it is for; run the service as soon as there is more than one of anything.
 
 <br>
 <br>

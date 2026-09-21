@@ -1,4 +1,4 @@
-<h1>OCEΛNO <small><code>exchange-router-service</code></small></h1>
+<h1>OCEΛNO <small><code>exchange-router</code></small></h1>
 
 
 <div style="padding-top: 0px;">
@@ -45,10 +45,10 @@ The service is one deployment of the same library. `exchange_router/service/main
 
 <div align="center">
   <img src="imgs/204652.png" alt="One API, two backends, rejoining at the adapters" width="46%" />
-  <p style="margin: 0;"><i>One path above the seam, two through it, one below. Everything down to the seam is shared and is never told which backend answered; everything below it is the same adapters reached from a different process</i></p>
+  <p style="margin: 0;"><i>One path above the seam, two through it, one below: the same adapters, reached from a different process</i></p>
 </div>
 
-The two paths are not kept in agreement by discipline. Every test body in the suite runs against both backends and asserts the same frames, dtypes, index, provenance and exception types, which is what [0005](Decisions.md) records and why that suite exists.
+Every test body in the suite runs against both backends and asserts the same frames, dtypes, index, provenance and exception types. That is what holds the two paths together, and [0005](Decisions.md) records why it is a suite rather than a structure.
 
 <br>
 <br>

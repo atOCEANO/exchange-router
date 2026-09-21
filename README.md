@@ -1,4 +1,4 @@
-<h1>OCEΛNO <small><code>exchange-router-service</code></small></h1>
+<h1>OCEΛNO <small><code>exchange-router</code></small></h1>
 
 
 <div style="padding-top: 0px;">
@@ -27,13 +27,13 @@
 
 ## Introduction
 
-The `exchange-router` is **one Python API over public crypto exchange market data, running either in your own process or against a service you deploy**. Every registered adapter speaks the same schema, so a client written once works across all of them, and the only thing that differs between the two ways of running it is which constructor you call. The currently supported set is listed in [Supported Exchanges](#supported-exchanges) below.
+The `exchange-router` is **one Python API over public crypto exchange market data, running either in your own process or against a service you deploy**. Every registered adapter speaks the same schema, so a client written once works across all of them. The currently supported set is listed in [Supported Exchanges](#supported-exchanges) below.
 
 ```python
 from exchange_router import Router
 
-r = Router.local(exchanges=["binance"])                            # this process does the work
-r = Router.service("http://localhost:8040", exchanges=["binance"]) # a running service does
+r = Router.local(exchanges=["binance"])                            # adapters in this process
+r = Router.service("http://localhost:8040", exchanges=["binance"]) # adapters behind a container
 
 df = r.market("binance", "perp", "BTCUSDT").candles("1h", limit=500)
 ```
@@ -48,7 +48,7 @@ Field names, units, funding conventions, and pagination semantics differ from on
 
 ### Which mode to use
 
-The two modes are functionally identical and operationally different. Local mode can do everything the service can. What it cannot do is coordinate, because coordination needs one process, and that is exactly what the service is.
+The modes are functionally identical and operationally different. Local can do everything the service can; what it cannot do is coordinate, because coordination needs one process.
 
 | | `local` | `service` |
 | :--- | :--- | :--- |
@@ -58,11 +58,9 @@ The two modes are functionally identical and operationally different. Local mode
 | blast radius | your IP | one service you can restart |
 | what you deploy | nothing | one container |
 
-**Reach for `local`** when there is one person in one process: a notebook or a script, nothing to deploy and nothing to keep running, exploratory work at modest volume. A heavy single-process backfill is a perfectly good reason to stay local.
+**Local** is for one person in one process: a notebook or a script, nothing to deploy and nothing to keep running. A heavy single-process backfill is a fine reason to stay local.
 
-**Reach for `service`** as soon as there is more than one of anything. More than one caller, anything scheduled or long-running, several notebooks at once. Each local process carries its own rate-limit budget and the exchange sees the sum of all of them, so this is the threshold that matters rather than a question of how serious the work is.
-
-The one sentence version: local mode is for one researcher in one process, and you run the service as soon as there is more than one of anything.
+**The service** is for more than one of anything: more than one caller, anything scheduled or long-running, several notebooks at once. Each local process carries its own rate-limit budget and the exchange sees the sum.
 
 <br>
 

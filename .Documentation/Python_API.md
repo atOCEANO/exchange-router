@@ -1,4 +1,4 @@
-<h1>OCEΛNO <small><code>exchange-router-service</code></small></h1>
+<h1>OCEΛNO <small><code>exchange-router</code></small></h1>
 
 
 <div style="padding-top: 0px;">
@@ -86,13 +86,13 @@ Router.service(
 )
 ```
 
-Nothing is inferred. In particular the mode is never chosen from a missing URL, because an unset config variable arriving as `None` would silently hand you a private per-process rate budget when you asked for the shared one. Config-driven code branches explicitly, and the branch is the point:
+Nothing is inferred. In particular the mode is never chosen from a missing URL, because an unset config variable arriving as `None` would silently hand you a private per-process rate budget when you asked for the shared one. Config-driven code branches explicitly:
 
 ```python
 r = Router.service(url, exchanges=E) if url else Router.local(exchanges=E)
 ```
 
-Naming the scope is what makes the warm attributable. Whatever you declare is warmed in the background; nothing else is. The scope is not a fence, so a call to an exchange you did not declare still works and warms lazily.
+Whatever scope you name is warmed in the background and nothing else is, so a slow start always has a cause you can see. The scope is not a fence: a call to an exchange you did not declare still works, and warms lazily.
 
 ```python
 r.mode              # "local" | "service"
@@ -104,7 +104,7 @@ r.warm("kraken")    # warm one, declared or not
 
 `warm()` is the blocking form of something that is already happening. Use it to move the cost outside a timed loop rather than into your first measurement. In service mode it runs the schema handshake and the capability fetch instead, so it means the same thing in both: pay the setup cost now.
 
-Both constructors also accept `backend=`, which replaces the one they would have built. It exists so the test suite can drive the FastAPI app in process and stand in a fake service without reaching into a private attribute, and it is the reason the suite needs no knowledge of the transport. Passing your own is supported and undocumented beyond this paragraph: the `Backend` interface is two methods and it is not covered by the schema guarantee.
+Both constructors also accept `backend=`, which replaces the one they would have built. It exists so the test suite can drive the app in process and stand in a fake service without reaching into a private attribute. Passing your own works; the `Backend` interface is two methods and is not covered by the schema guarantee.
 
 <br>
 <br>
