@@ -27,13 +27,13 @@
 
 ## Introduction
 
-The `exchange-router` is **one Python API over public crypto exchange market data, running either in your own process or against a service you deploy**. Every registered adapter speaks the same schema, so a client written once works across all of them. The currently supported set is listed in [Supported Exchanges](#supported-exchanges) below.
+The `exchange-router` is **one Python API over public crypto exchange market data, usable as a library or against a service you deploy**. Every registered adapter speaks the same schema, so a client written once works across all of them. The currently supported set is listed in [Supported Exchanges](#supported-exchanges) below.
 
 ```python
 from exchange_router import Router
 
-r = Router.local(exchanges=["binance"])                            # adapters in this process
-r = Router.service("http://localhost:8040", exchanges=["binance"]) # adapters behind a container
+r = Router.local(exchanges=["binance"])                            # adapters run in your program
+r = Router.service("http://localhost:8040", exchanges=["binance"]) # adapters run in the container
 
 df = r.market("binance", "perp", "BTCUSDT").candles("1h", limit=500)
 ```
@@ -58,7 +58,7 @@ The modes are functionally identical and operationally different. Local can do e
 | blast radius | your IP | one service you can restart |
 | what you deploy | nothing | one container |
 
-**Local** is for one person in one process: a notebook or a script, nothing to deploy and nothing to keep running. A heavy single-process backfill is a fine reason to stay local.
+**Local** is the library: a notebook or a script, nothing to deploy and nothing to keep running. A heavy backfill from one script is a fine reason to stay local.
 
 **The service** is for more than one of anything: more than one caller, anything scheduled or long-running, several notebooks at once. Each local process carries its own rate-limit budget and the exchange sees the sum.
 
@@ -66,7 +66,7 @@ The modes are functionally identical and operationally different. Local can do e
 
 <div align="center">
   <img src=".Documentation/imgs/204644.png" alt="One API, two ways to run it" width="90%" />
-  <p style="margin: 0;"><i>One API, two ways to run it: the adapters either live in your process or behind a container you deploy, and the schema is the same either way</i></p>
+  <p style="margin: 0;"><i>One API, two ways to run it: the adapters either live in your own program or behind a container you deploy, and the schema is the same either way</i></p>
 </div>
 
 <br>

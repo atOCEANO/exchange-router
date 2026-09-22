@@ -78,6 +78,18 @@ When iterating without `--reload`, set `--port` on the uvicorn command line dire
 
 <br>
 
+### The documentation set
+
+Everything lives in `.Documentation/`, one page per topic, plus the top-level README. There are no per-folder READMEs.
+
+Every page opens with the wordmark, the badge row, and a nav strip listing all of them with the current page bolded. The strip is the only navigation, so adding a page means editing every other one. That is the cost of having no generated index, and at ten files it is small enough to pay.
+
+The order of the strip is shared with the other Oceano repositories: Introduction, Python API, this repository's domain pages, Architecture, Decisions, its guides, then Contributor Guide near the end. `Python_API.md`, `Architecture.md` and `Decisions.md` carry those exact filenames in every repository that has them, so somebody moving between two of them finds the same page in the same slot.
+
+[Migration](Migration.md) is deliberately absent from the strip. It is read once during an upgrade rather than kept open, and it is reachable from [Python API](Python_API.md) and from the release notes.
+
+<br>
+
 ### Documentation diagrams
 
 `dev/diagrams/` holds the mermaid source for every hand-made diagram in `.Documentation/imgs/`, one `.mmd` per image, plus the shared palette in `config.json`. Nothing in the service depends on it and it is not installed anywhere; it exists so that no picture in the documentation is a file nobody can remake. Rendering the whole set writes straight into the image directory:

@@ -28,7 +28,7 @@
 
 `Router` is the whole API. It is synchronous by default: methods return their data directly, with no `await`. The sync class runs the async machinery on a private background event loop, so the same code works in a plain script and in a Jupyter cell without `asyncio.run` or top-level `await`. An `AsyncRouter` with the identical surface is available when you want concurrency.
 
-The only decision is which constructor to call. `Router.local` runs the exchange adapters inside your own process. `Router.service` translates the same calls into HTTP against a service you are running. Nothing else about your code changes; [Which mode to use](../README.md#which-mode-to-use) says when to pick each.
+The only decision is which constructor to call. `Router.local` is the library: the exchange adapters run inside your own program. `Router.service` translates the same calls into HTTP against a service you are running. Nothing else about your code changes; [Which mode to use](../README.md#which-mode-to-use) says when to pick each.
 
 The return surface follows one rule:
 
