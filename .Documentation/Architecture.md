@@ -130,7 +130,7 @@ Each adapter holds a shared `_backoff_until` timestamp guarded by an `asyncio.Lo
 
 <div align="center">
   <img src="imgs/204651.png" alt="Rate-limit and ban avoidance" width="40%" />
-  <p style="margin: 0;"><i>Binance's per-request path, the most instrumented of the six: wait out any active host backoff, throttle proactively once the used-weight header passes 95 percent of that host's budget, honor Retry-After on 429 or 418, and fail with 503 plus Retry-After once the retries are spent. The backoff window and the retry ladder are common to every adapter; the weight header is Binance's alone</i></p>
+  <p style="margin: 0;"><i>Binance's per-request path, the most instrumented of the adapters: wait out any active host backoff, throttle proactively once the used-weight header passes 95 percent of that host's budget, honor Retry-After on 429 or 418, and fail with 503 plus Retry-After once the retries are spent. The backoff window and the retry ladder are common to every adapter; the weight header is Binance's alone</i></p>
 </div>
 
 <br>

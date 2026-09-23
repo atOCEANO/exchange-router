@@ -110,7 +110,7 @@ r.warm("kraken")    # warm one, declared or not
 
 `warm()` is the blocking form of something already happening. Use it to keep the cost out of your first measurement. In service mode it runs the schema handshake and the capability fetch instead, so it means the same thing in both modes.
 
-Both constructors also accept `backend=`, which replaces the one they would have built. It exists so the test suite can drive the app in process and stand in a fake service without reaching into a private attribute. Passing your own works; a `Backend` has to implement `fetch` and `stream`, the other three methods have defaults, and none of it is covered by the schema guarantee.
+Both constructors also accept `backend=`, which replaces the one they would have built. It exists so the test suite can drive the app in process and stand in a fake service without reaching into a private attribute. Passing your own works; a `Backend` has to implement `fetch` and `stream`, the rest have defaults, and none of it is covered by the schema guarantee.
 
 <br>
 <br>
@@ -355,7 +355,7 @@ print(result.report())    # the summary, then every symbol that was not clean
 
 A symbol is `degraded` when the result carries warnings (in `df.attrs["warnings"]`), `failed` when the request raised, `ok` otherwise. There is a `*_many` for every series route (`candles_many`, `trades_many`, `agg_trades_many`, `funding_rate_many`, `open_interest_many`, `liquidations_many`, `long_short_ratio_many`). Iterating a `BatchResult`, `len()`, `in` and `result[symbol]` all read `data()`, so a failed symbol is simply absent rather than present as `None`.
 
-The seven are one function underneath, and it is public. `fetch_many` takes the route by name and passes the route's own parameters through, so code that walks several routes over one universe needs no branch per route:
+They are one function underneath, and it is public. `fetch_many` takes the route by name and passes the route's own parameters through, so code that walks several routes over one universe needs no branch per route:
 
 ```python
 routes = {"candles": {"interval": "1h"}, "funding_rate": {}, "open_interest": {"period": "1h"}}
@@ -365,7 +365,7 @@ for route, params in routes.items():
     print(route, result.summary())
 ```
 
-A route that is not one of the seven raises `BadRequest`.
+A route that is not a series route raises `BadRequest`.
 
 <br>
 <br>
@@ -470,7 +470,7 @@ for msg in client.stream("binance", "spot", "ticker", "BTCUSDT"):
     print(msg["symbol"], msg["price"])
 ```
 
-Stream messages are the raw wire dicts (the same shapes as the REST response bodies), not `Row` objects; to get the flat Row shape on a ticker, book_ticker, or mark_price message, pass it through the matching builder in `exchange_router.rows`, which is `ticker_row`, `book_ticker_row` or `mark_price_row`, for example `from exchange_router.rows import ticker_row; ticker_row(msg)`. Pass `reconnect=False` to have the iterator raise `websockets.ConnectionClosed` on a drop instead. `subscribe` is the same without reconnect. On the sync router the messages cross into your thread through a buffer of 1024; a consumer slower than the feed loses the oldest, and is told so with a `RouterDataWarning` rather than losing them quietly. One subscription per connection: to change channel or symbol, leave the loop and start a new one. On the async router these are `async for`.
+Stream messages are the raw wire dicts (the same shapes as the REST response bodies), not `Row` objects; to get the flat Row shape on a ticker, book_ticker, or mark_price message, pass it through the matching builder in `exchange_router.rows`, which is `ticker_row`, `book_ticker_row` or `mark_price_row`, for example `from exchange_router.rows import ticker_row; ticker_row(msg)`. Pass `reconnect=False` to have the iterator raise `websockets.ConnectionClosed` on a drop instead. `subscribe` is the same without reconnect. On the sync router the messages cross into your thread through a buffer of 1024; a consumer slower than the feed loses the oldest, and is told so with a `RouterDataWarning` whatever `verbose` is set to, because this is data loss rather than noise. One subscription per connection: to change channel or symbol, leave the loop and start a new one. On the async router these are `async for`.
 
 <br>
 <br>
