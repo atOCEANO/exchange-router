@@ -14,6 +14,7 @@
   <b>Exchange Notes</b> &nbsp;•&nbsp;
   <a href="Architecture.md">Architecture</a> &nbsp;•&nbsp;
   <a href="Decisions.md">Decisions</a> &nbsp;•&nbsp;
+  <a href="Migration.md">Migration</a> &nbsp;•&nbsp;
   <a href="Adapter_Guide.md">Adapter Guide</a> &nbsp;•&nbsp;
   <a href="Contributor_Guide.md">Contributor Guide</a> &nbsp;•&nbsp;
   <a href="Auditor_Guide.md">Auditor Guide</a>

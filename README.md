@@ -15,6 +15,7 @@
   <a href=".Documentation/Exchange_Notes.md">Exchange Notes</a> &nbsp;•&nbsp;
   <a href=".Documentation/Architecture.md">Architecture</a> &nbsp;•&nbsp;
   <a href=".Documentation/Decisions.md">Decisions</a> &nbsp;•&nbsp;
+  <a href=".Documentation/Migration.md">Migration</a> &nbsp;•&nbsp;
   <a href=".Documentation/Adapter_Guide.md">Adapter Guide</a> &nbsp;•&nbsp;
   <a href=".Documentation/Contributor_Guide.md">Contributor Guide</a> &nbsp;•&nbsp;
   <a href=".Documentation/Auditor_Guide.md">Auditor Guide</a>

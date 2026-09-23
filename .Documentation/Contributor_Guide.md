@@ -14,6 +14,7 @@
   <a href="Exchange_Notes.md">Exchange Notes</a> &nbsp;•&nbsp;
   <a href="Architecture.md">Architecture</a> &nbsp;•&nbsp;
   <a href="Decisions.md">Decisions</a> &nbsp;•&nbsp;
+  <a href="Migration.md">Migration</a> &nbsp;•&nbsp;
   <a href="Adapter_Guide.md">Adapter Guide</a> &nbsp;•&nbsp;
   <b>Contributor Guide</b> &nbsp;•&nbsp;
   <a href="Auditor_Guide.md">Auditor Guide</a>
@@ -84,9 +85,9 @@ Everything lives in `.Documentation/`, one page per topic, plus the top-level RE
 
 Every page opens with the wordmark, the badge row, and a nav strip listing all of them with the current page bolded. The strip is the only navigation, so adding a page means editing every other one. That is the cost of having no generated index, and at ten files it is small enough to pay.
 
-The order of the strip is shared with the other Oceano repositories: Introduction, Python API, this repository's domain pages, Architecture, Decisions, its guides, then Contributor Guide near the end. `Python_API.md`, `Architecture.md` and `Decisions.md` carry those exact filenames in every repository that has them, so somebody moving between two of them finds the same page in the same slot.
+The order of the strip is shared with the other Oceano repositories: Introduction, Python API, this repository's domain pages, Architecture, Decisions, Migration, then its guides with Contributor Guide near the end. `Python_API.md`, `Architecture.md`, `Decisions.md` and `Migration.md` carry those exact filenames in every repository that has them, so somebody moving between two of them finds the same page in the same slot.
 
-[Migration](Migration.md) is deliberately absent from the strip. It is read once during an upgrade rather than kept open, and it is reachable from [Python API](Python_API.md) and from the release notes.
+Nothing is left out of the strip. A page that exists and is not listed is a page nobody finds, and the judgement that some pages are read too rarely to deserve a slot is the kind that ages badly: the reader who needs the rare page needs it most.
 
 <br>
 
