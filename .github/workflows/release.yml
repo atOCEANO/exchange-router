@@ -1,29 +1,3 @@
-# Release: check the tag against the version, build the distributions, then
-# publish a GitHub Release with notes and attach them.
-#
-# This workflow used to build nothing, on two arguments that were both true at
-# the time and are both false now. The first was that a library has to arrive as
-# a file while this is a service you run, so the artifact is the repository at
-# the tag. It is a library now: `Router.local` runs the adapters in the caller's
-# own process and FastAPI is an optional extra. The second was that the client
-# SDK carried its own version, so a wheel built here would publish a file whose
-# number disagreed with the release it was attached to. There is one number now.
-# Both premises died at 3.0.0, and the comment is kept rather than deleted so
-# nobody re-derives the old conclusion from the old reasoning.
-#
-# One wheel, no matrix. Pure Python means a single py3-none-any file covers every
-# platform, which is the whole difference from emsl, where four legs exist only
-# because it compiles Rust.
-#
-# Nothing is published to an index. Installing is `pip install git+...@tag`, and
-# the wheel on the release page is for anyone who would rather have the file.
-# Publishing to PyPI is a one-job addition and a token; not doing it is the
-# reversible direction, since a name taken there cannot be given back.
-#
-# A v* tag releases. All three jobs below are gated on that tag, so a manual
-# dispatch runs none of them: it is a way to read the workflow from the Actions
-# tab and not a dry run of the guard.
-
 name: release
 
 on:
@@ -35,14 +9,10 @@ permissions:
   contents: read
 
 jobs:
-  # The guard the release hangs off. v2.2.0 was tagged on a commit whose
-  # exchange_router/version.py still read 2.1.0, so a running container reported a version
-  # that no tag matched and nothing anywhere noticed. Every tag from v2.2.1 on
-  # has agreed; this is what keeps it that way.
   version:
     name: the tag matches the version
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') # a dispatch has no tag to match
+    if: startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/checkout@v4
       - name: compare the tag against exchange_router/version.py
@@ -64,17 +34,14 @@ jobs:
     name: the wheel and the sdist build
     needs: [version]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') # a dispatch has no tag to match
+    if: startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10" # the floor the package declares
+          python-version: "3.10"
       - run: pip install build
       - run: python -m build
-      # the version guard above reads the module; this reads the metadata the
-      # build actually wrote. They come from the same assignment, and checking
-      # both is what catches a pyproject that stopped pointing at it.
       - name: the built version matches the tag
         run: |
           tag="${GITHUB_REF_NAME#v}"
@@ -92,9 +59,9 @@ jobs:
     name: publish the release
     needs: [version, build]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') # a dispatch has no tag to match
+    if: startsWith(github.ref, 'refs/tags/')
     permissions:
-      contents: write # creating a release writes to the repo
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:

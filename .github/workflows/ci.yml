@@ -1,18 +1,3 @@
-# Continuous integration: the half of the local loop that a hosted runner can
-# actually do. The auditor is the real suite and it cannot run here, because
-# exchange APIs block the datacenter IPs hosted runners issue from, which the
-# Auditor Guide records under "why the suite runs locally, not in CI". So this
-# checks what is checkable with no upstream: every adapter package registers an
-# adapter and declares a usable capabilities map, the client SDK builds and
-# installs clean, the image boots and answers on the routes that need no
-# network, and the offline suite holds. It is a smaller claim than emsl's gate,
-# deliberately.
-#
-# The suite is the newest of the four and the only one that can catch a
-# behavioural regression. It reaches the app through an ASGI transport with a
-# fake adapter in the registry, so it needs no container to talk to, no port and
-# no upstream, and it runs on a blocked runner exactly as it runs on a laptop.
-
 name: ci
 
 on:
@@ -31,18 +16,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10" # the floor the client declares, so the service is held to it too
-      # the base install, with no server extra: the adapters must come up
-      # without FastAPI on the machine, which is what makes local mode a real
-      # claim rather than a packaging accident.
+          python-version: "3.10"
       - run: pip install .
-      # load_exchanges() logs and swallows an adapter that fails to import
-      # (exchange_router/exchanges/__init__.py), so a broken adapter leaves a
-      # service running with one fewer exchange and nothing anywhere fails.
-      # Counting the packages on disk against the registry is what turns that
-      # into a red build. Nothing here touches the network: an adapter's
-      # __init__ is documented as synchronous and lightweight, and
-      # get_capabilities is a static declaration.
       - name: every adapter package registers an adapter
         run: |
           python - <<'PY'
@@ -84,19 +59,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-      # this is the install the docs and the release notes tell people to run,
-      # pointed at the checkout instead of at github, so a broken pyproject or a
-      # dependency missing from it fails here rather than in someone's first pip
-      # install. A clean venv, so nothing already on the runner can satisfy an
-      # import the package forgot to declare.
       - name: install it into a clean interpreter
         run: |
           python -m venv /tmp/fresh
           /tmp/fresh/bin/pip install .
           /tmp/fresh/bin/python -c "import exchange_router as r; print('package', r.__version__)"
-      # the split between the base install and the server extra is the whole
-      # reason a library can exist here, so it is checked rather than asserted.
-      # If FastAPI ever leaks into the base dependency list this goes red.
       - name: the base install pulls no FastAPI
         run: |
           /tmp/fresh/bin/python - <<'PY'
@@ -107,8 +74,6 @@ jobs:
               sys.exit("fastapi reached a base install; it belongs to the server extra")
           print("no fastapi in the base install")
           PY
-      # py.typed is what makes the annotations count for anyone type-checking
-      # against this. It ships as package data and package data is easy to drop.
       - name: the type marker ships
         run: |
           /tmp/fresh/bin/python - <<'PY'
@@ -129,10 +94,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t ers-ci .
-      # the lifespan preloads adapters over the network and every one of those
-      # calls will fail on a blocked runner. That is fine and is the point of
-      # checking these three routes: they are the ones served off the registry
-      # and the version module, so they answer whether or not a warm succeeded.
       - name: boot it and check the routes that need no upstream
         run: |
           id=$(docker run -d -p 8040:8040 ers-ci)
@@ -153,9 +114,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # the test stage sits between the shared base and the service stage, so a
-      # plain `docker build` still produces the service and the test
-      # dependencies never reach the image anyone runs.
       - run: docker build --target test -t ers-test .
       - name: run the suite in the image it was built into
         run: docker run --rm ers-test pytest -q
