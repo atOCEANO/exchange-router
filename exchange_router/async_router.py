@@ -51,7 +51,8 @@ class AsyncRouter(AsyncCore):
 
     @classmethod
     def _assemble(cls, backend: Backend, mode: str, scope: List[str], verbose: bool,
-                  base_url: str = "", timeout: int = 30, max_retries: int = 3) -> "AsyncRouter":
+                  base_url: str = "", timeout: int = 30, max_retries: int = 3,
+                  scope_all: bool = False) -> "AsyncRouter":
         router = object.__new__(cls)
         AsyncCore.__init__(
             router,
@@ -62,6 +63,7 @@ class AsyncRouter(AsyncCore):
             backend     = backend,
             mode        = mode,
             scope       = scope,
+            scope_all   = scope_all,
         )
         router._start_warm()
 
@@ -92,9 +94,11 @@ class AsyncRouter(AsyncCore):
         if fallback == "local":
             chosen = FallbackBackend(chosen, LocalBackend())
 
+        # nothing here knows the roster, so "all" travels as a flag and the handshake fills it in
         scope = resolve_scope(exchanges, None)
 
-        return cls._assemble(chosen, "service", scope, verbose, base, timeout, max_retries)
+        return cls._assemble(chosen, "service", scope, verbose, base, timeout, max_retries,
+                             scope_all = exchanges == ALL)
 
 
     def market(self, exchange: str, market_type: str, symbol: str) -> AsyncMarket:

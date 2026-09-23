@@ -109,3 +109,23 @@ async def test_an_unreachable_service_fails_and_does_not_fall_back_on_its_own():
 
     with pytest.raises(RouterUnreachable):
         await router.get_ticker("fake", "spot", "BTCUSDT")
+
+
+DISCOVERY = [
+    ("get_status",            ()),
+    ("get_version",           ()),
+    ("get_exchanges",         ()),
+    ("get_market_types",      ("fake",)),
+    ("get_exchange_overview", ("fake",)),
+    ("get_exchange_status",   ("fake",)),
+    ("get_markets",           ("fake", "spot")),
+    ("get_symbol_info",       ("fake", "spot", "BTCUSDT")),
+]
+
+
+@pytest.mark.parametrize("method, args", DISCOVERY)
+async def test_a_mismatch_arrives_even_when_the_first_call_is_a_discovery_route(method, args):
+    router, stub = build(schema=4)
+
+    with pytest.raises(SchemaMismatch):
+        await getattr(router, method)(*args)

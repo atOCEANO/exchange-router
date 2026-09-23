@@ -15,12 +15,18 @@ from .version import SCHEMA_VERSION, __version__
 
 SERIES_ROUTES = ("candles", "trades", "agg_trades", "funding_rate", "open_interest", "liquidations", "long_short_ratio")
 
+CLOSED = (
+    "this router is closed; build another with AsyncRouter.local(exchanges=[...]) or "
+    "AsyncRouter.service(url, exchanges=[...])"
+)
+
 
 class AsyncCore:
 
     def __init__(self, base_url: str = "http://localhost:8040", timeout: int = 30, max_retries: int = 3,
                  verbose: bool = True, backend: Optional[Backend] = None,
-                 mode: str = "service", scope: Optional[List[str]] = None):
+                 mode: str = "service", scope: Optional[List[str]] = None,
+                 scope_all: bool = False):
         self.base_url    = base_url.rstrip("/")
         self.timeout     = timeout
         self.max_retries = max_retries
@@ -28,10 +34,12 @@ class AsyncCore:
         self._backend    = backend if backend is not None else RemoteBackend(self.base_url, timeout, max_retries)
         self._mode       = mode
         self._scope      = list(scope) if scope else []
+        self._scope_all  = scope_all
         self._capabilities: Dict[str, Dict] = {}
         self._handshake_done  = False
         self._handshake_error: Optional[RouterError] = None
         self._warm_task: Optional[asyncio.Task] = None
+        self._closed = False
 
 
     @property
@@ -49,7 +57,16 @@ class AsyncCore:
         return list(self._scope)
 
 
+    @property
+    def degraded(self) -> bool:
+        return bool(getattr(self._backend, "degraded", False))
+
+
     async def close(self) -> None:
+        if self._closed:
+            return
+
+        self._closed    = True
         task            = self._warm_task
         self._warm_task = None
         if task is not None and not task.done():
@@ -58,8 +75,13 @@ class AsyncCore:
         await self._backend.close()
 
 
+    def _check_open(self) -> None:
+        if self._closed:
+            raise RouterError(CLOSED)
+
+
     def _start_warm(self) -> None:
-        if self._warm_task is not None or not self._scope:
+        if self._warm_task is not None or not (self._scope or self._scope_all):
             return
 
         try:
@@ -80,13 +102,17 @@ class AsyncCore:
 
 
     async def warm(self, exchange: Optional[str] = None) -> None:
+        self._check_open()
+
+        if self._mode == "service":
+            # the handshake is what resolves an "all" scope, so the names are read after it
+            await self._ensure_handshake()
+
         names = [exchange] if exchange is not None else list(self._scope)
 
         if self._mode == "service":
-            await self._ensure_handshake()
             for name in names:
                 await self._ensure_capabilities(name)
-            return
 
         await self._backend.warm(names)
 
@@ -112,29 +138,45 @@ class AsyncCore:
             )
             raise self._handshake_error
 
-        if self._scope:
-            served  = set((await self._backend.fetch("exchanges")).get("exchanges", []))
-            missing = [name for name in self._scope if name not in served]
-            if missing:
-                self._handshake_error = NotFound(
-                    f"exchanges {missing} are not served by {self.base_url}; it carries {sorted(served)}",
-                    404,
-                )
-                raise self._handshake_error
+        if self._scope or self._scope_all:
+            served = set((await self._backend.fetch("exchanges")).get("exchanges", []))
+
+            if self._scope_all:
+                self._scope = sorted(served)
+            else:
+                missing = [name for name in self._scope if name not in served]
+                if missing:
+                    self._handshake_error = NotFound(
+                        f"exchanges {missing} are not served by {self.base_url}; it carries {sorted(served)}",
+                        404,
+                    )
+                    raise self._handshake_error
 
         self._handshake_done = True
 
 
-    async def _ensure_capabilities(self, exchange: str) -> Dict:
+    async def _ensure_capabilities(self, exchange: str, quiet: bool = True) -> Dict:
+        self._check_open()
         await self._ensure_handshake()
 
         if exchange not in self._capabilities:
             try:
                 self._capabilities[exchange] = await self._backend.fetch("capabilities", exchange) or {}
             except RouterError:
-                self._capabilities[exchange] = {}
+                if not quiet:
+                    raise
+                # not cached: a block that failed once would otherwise disable preflight for good
+                return {}
 
         return self._capabilities[exchange]
+
+
+    async def _fetch(self, route: str, exchange: Optional[str] = None, market_type: Optional[str] = None,
+                     symbol: Optional[str] = None, **params: Any) -> Any:
+        self._check_open()
+        await self._ensure_handshake()
+
+        return await self._backend.fetch(route, exchange, market_type, symbol, **params)
 
 
     def _route_block(self, exchange: str, market_type: str, route: str) -> Dict:
@@ -177,7 +219,7 @@ class AsyncCore:
 
         await self._preflight(exchange, market_type, route, symbol=symbol, interval=interval, interval_label=interval_label, verbose=v)
 
-        rows = await self._backend.fetch(route, exchange, market_type, symbol, **params)
+        rows = await self._fetch(route, exchange, market_type, symbol, **params)
         ctx  = self._ctx(exchange, market_type, symbol, params.get("limit"), route)
 
         df, warnings = frames.build(route, rows, ctx)
@@ -187,63 +229,63 @@ class AsyncCore:
 
 
     async def get_status(self) -> Dict:
-        return await self._backend.fetch("status")
+        return await self._fetch("status")
 
 
     async def get_version(self) -> str:
-        data = await self._backend.fetch("version")
+        data = await self._fetch("version")
         return data.get("version", "")
 
 
     async def get_exchanges(self) -> List[str]:
-        data = await self._backend.fetch("exchanges")
+        data = await self._fetch("exchanges")
         return data.get("exchanges", [])
 
 
     async def get_market_types(self, exchange: str) -> List[str]:
-        data = await self._backend.fetch("market_types", exchange)
+        data = await self._fetch("market_types", exchange)
         return [str(mt) for mt in data.get("market_types", [])]
 
 
     async def get_exchange_overview(self, exchange: str) -> Dict:
-        return await self._backend.fetch("overview", exchange)
+        return await self._fetch("overview", exchange)
 
 
     async def get_exchange_status(self, exchange: str) -> Dict:
-        return await self._backend.fetch("exchange_status", exchange)
+        return await self._fetch("exchange_status", exchange)
 
 
     async def get_capabilities(self, exchange: str) -> Dict:
-        return await self._ensure_capabilities(exchange)
+        return await self._ensure_capabilities(exchange, quiet=False)
 
 
     async def get_markets(self, exchange: str, market_type: str) -> Dict:
-        return await self._backend.fetch("markets", exchange, market_type)
+        return await self._fetch("markets", exchange, market_type)
 
 
     async def get_symbol_info(self, exchange: str, market_type: str, symbol: str) -> rows.Row:
-        return rows.symbol_info_row(await self._backend.fetch("symbol_info", exchange, market_type, symbol))
+        return rows.symbol_info_row(await self._fetch("symbol_info", exchange, market_type, symbol))
 
 
     async def get_ticker(self, exchange: str, market_type: str, symbol: str, verbose: Optional[bool] = None) -> rows.Row:
         v = self.verbose if verbose is None else verbose
 
         await self._preflight(exchange, market_type, "ticker", symbol=symbol, verbose=v)
-        return rows.ticker_row(await self._backend.fetch("ticker", exchange, market_type, symbol))
+        return rows.ticker_row(await self._fetch("ticker", exchange, market_type, symbol))
 
 
     async def get_book_ticker(self, exchange: str, market_type: str, symbol: str, verbose: Optional[bool] = None) -> rows.Row:
         v = self.verbose if verbose is None else verbose
 
         await self._preflight(exchange, market_type, "book_ticker", symbol=symbol, verbose=v)
-        return rows.book_ticker_row(await self._backend.fetch("book_ticker", exchange, market_type, symbol))
+        return rows.book_ticker_row(await self._fetch("book_ticker", exchange, market_type, symbol))
 
 
     async def get_mark_price(self, exchange: str, market_type: str, symbol: str, verbose: Optional[bool] = None) -> rows.Row:
         v = self.verbose if verbose is None else verbose
 
         await self._preflight(exchange, market_type, "mark_price", symbol=symbol, verbose=v)
-        data = await self._backend.fetch("mark_price", exchange, market_type, symbol)
+        data = await self._fetch("mark_price", exchange, market_type, symbol)
 
         warnings = []
         if data.get("index_price") is None:
@@ -259,7 +301,7 @@ class AsyncCore:
         v = self.verbose if verbose is None else verbose
 
         await self._preflight(exchange, market_type, "orderbook", symbol=symbol, depth=depth, verbose=v)
-        data = await self._backend.fetch("orderbook", exchange, market_type, symbol, depth=depth)
+        data = await self._fetch("orderbook", exchange, market_type, symbol, depth=depth)
 
         ctx = {"exchange": exchange, "market_type": market_type, "symbol": symbol}
         return frames.orderbook(data, ctx)
@@ -356,6 +398,8 @@ class AsyncCore:
 
 
     async def subscribe(self, exchange: str, market_type: str, channel: str, symbol: str):
+        self._check_open()
+
         async for message in self._backend.stream(exchange, market_type, channel, symbol):
             yield message
 
@@ -365,6 +409,9 @@ class AsyncCore:
             try:
                 async for message in self.subscribe(exchange, market_type, channel, symbol):
                     yield message
+
+                if not reconnect:
+                    return
 
             except Exception as error:
                 if not reconnect or not is_retryable_stream_error(error):

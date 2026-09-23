@@ -43,3 +43,7 @@ async def shutdown_exchanges() -> None:
         logger.info(f"   Closing {name}...")
         await adapter.cancel_warm()
         await adapter.shutdown()
+
+    # these adapters hold closed HTTP clients now, and the registry is process-global:
+    # leaving them here hands the next local router objects that can no longer send
+    EXCHANGE_REGISTRY.clear()

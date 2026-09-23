@@ -7,8 +7,10 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 from ._core import AsyncCore
+from ._warnings import emit
 from .async_router import AsyncRouter
 from .batch import BatchResult
+from .errors import RouterError
 from .handle import SyncMarket
 from .rows import Row
 
@@ -20,6 +22,18 @@ DEPRECATION = (
     "use Router.service(url, exchanges=...) or Router.local(exchanges=...)"
 )
 
+CLOSED = (
+    "this router is closed; build another with Router.local(exchanges=[...]) or "
+    "Router.service(url, exchanges=[...])"
+)
+
+DROPPING = (
+    "stream: the {size} message buffer is full and the oldest are being dropped; "
+    "consume faster or buffer the messages yourself"
+)
+
+DROPPED = "stream: {count} messages were dropped while this stream ran"
+
 
 async def _kick_warm(core: AsyncCore) -> None:
     core._start_warm()
@@ -30,6 +44,7 @@ class _LoopThread:
     def __init__(self):
         self._loop   = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._run, daemon=True)
+        self._closed = False
         self._thread.start()
 
 
@@ -38,14 +53,27 @@ class _LoopThread:
         self._loop.run_forever()
 
 
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+
     def run(self, coro) -> Any:
+        if self._closed:
+            # nothing will ever await it, and an unawaited coroutine warns at collection
+            coro.close()
+            raise RouterError(CLOSED)
+
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
 
 
     def iterate(self, async_gen):
+        if self._closed:
+            raise RouterError(CLOSED)
+
         sentinel = object()
         items: "queue.Queue" = queue.Queue(maxsize=STREAM_BUFFER_MAX)
-        handle: Dict[str, Any] = {}
+        handle: Dict[str, Any] = {"dropped": 0}
 
         def offer(item):
             while True:
@@ -55,6 +83,10 @@ class _LoopThread:
                 except queue.Full:
                     try:
                         items.get_nowait()
+                        handle["dropped"] += 1
+                        # data loss is not a verbosity matter, so it warns either way
+                        if handle["dropped"] == 1:
+                            emit([DROPPING.format(size=STREAM_BUFFER_MAX)], True)
                     except queue.Empty:
                         pass
 
@@ -82,13 +114,25 @@ class _LoopThread:
         finally:
             future.cancel()
             task = handle.get("task")
-            if task is not None:
+            # a generator left open across close() is finalized later, against a loop that is gone
+            if task is not None and not self._closed:
                 self._loop.call_soon_threadsafe(task.cancel)
+
+            if handle["dropped"]:
+                emit([DROPPED.format(count=handle["dropped"])], True)
 
 
     def stop(self) -> None:
+        if self._closed:
+            return
+
+        self._closed = True
         self._loop.call_soon_threadsafe(self._loop.stop)
         self._thread.join(timeout=5)
+
+        # closing a loop that is still running raises, and the join above can time out
+        if not self._thread.is_alive():
+            self._loop.close()
 
 
 class Router:
@@ -145,6 +189,11 @@ class Router:
         return self._core.scope
 
 
+    @property
+    def degraded(self) -> bool:
+        return self._core.degraded
+
+
     def warm(self, exchange=None) -> None:
         self._loop.run(self._core.warm(exchange))
 
@@ -160,6 +209,9 @@ class Router:
 
 
     def close(self) -> None:
+        if self._loop.closed:
+            return
+
         self._loop.run(self._core.close())
         self._loop.stop()
 
