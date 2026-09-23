@@ -6,6 +6,7 @@ from exchange_router import Router
 from exchange_router.backend import LocalBackend
 from exchange_router.errors import BadRequest
 from exchange_router.models import MarketType
+from exchange_router.version import VERSION
 
 
 EX = "fake"
@@ -202,7 +203,7 @@ async def test_long_short_ratio_reports_both_account_sides(router, period):
 
 
 async def test_the_service_metadata_routes_answer(router):
-    assert await router.get_version() == "2.5.7"
+    assert await router.get_version() == VERSION
     assert EX in await router.get_exchanges()
     assert await router.get_market_types(EX) == ["spot", "linear", "inverse"]
 
