@@ -570,8 +570,10 @@ Connect to `ws://localhost:8040/ws/{exchange}/{market_type}` and send a JSON sub
 | Code | Meaning |
 | :--- | :--- |
 | **1003** | Subscription payload rejected. Three causes: missing `channel` or `symbol`, channel name not in the supported set (`ticker`, `book_ticker`, `mark_price`, `agg_trades`, `trades`, `orderbook`, `liquidations`), or the channel exists but `ws: False` for this exchange/market in the capability map. |
-| **1008** | Exchange not registered, market type not supported by that adapter, or no subscription payload received within the 10s handshake window. |
+| **1008** | No subscription payload received within the 10s handshake window. |
 | **1011** | Upstream exchange connection lost. Reconnect and re-subscribe. |
+
+An exchange that is not registered, or a market type its adapter does not carry, is refused before the upgrade rather than with a close code: the server closes before accepting, which ASGI answers with an HTTP `403` in place of the WebSocket handshake. A client sees the handshake fail, never a `1008`.
 
 <br>
 <br>

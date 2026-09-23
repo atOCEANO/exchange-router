@@ -110,7 +110,7 @@ r.warm("kraken")    # warm one, declared or not
 
 `warm()` is the blocking form of something already happening. Use it to keep the cost out of your first measurement. In service mode it runs the schema handshake and the capability fetch instead, so it means the same thing in both modes.
 
-Both constructors also accept `backend=`, which replaces the one they would have built. It exists so the test suite can drive the app in process and stand in a fake service without reaching into a private attribute. Passing your own works; the `Backend` interface is two methods and is not covered by the schema guarantee.
+Both constructors also accept `backend=`, which replaces the one they would have built. It exists so the test suite can drive the app in process and stand in a fake service without reaching into a private attribute. Passing your own works; a `Backend` has to implement `fetch` and `stream`, the other three methods have defaults, and none of it is covered by the schema guarantee.
 
 <br>
 <br>
@@ -381,7 +381,7 @@ These are plain functions, not coroutines, so they are never awaited. `funding_p
 
 ## Errors
 
-The router raises a small typed tree, so failures are programmable without parsing message strings. Every error carries `.status` (the HTTP status, where applicable) and `.detail`. **The same failure raises the same type in both modes**: local mode maps adapter faults straight into this tree instead of round-tripping them through a status code. The suite asserts that for every read path. It cannot assert it for the stream paths, because the in-process transport the suite runs against carries HTTP and not websockets, so those are argued from the code and checked by hand.
+The router raises a small typed tree, so failures are programmable without parsing message strings. Every error carries `.status` (the HTTP status, where applicable) and `.detail`. **The same failure raises the same type in both modes**: local mode maps adapter faults straight into this tree instead of round-tripping them through a status code. The suite asserts that for every read path. It cannot assert it for the stream paths, because the in-process transport the suite runs against carries HTTP and not websockets, so those are argued from the code, and the argument has one known gap, described under [Real-time streams](#real-time-streams).
 
 | Exception | When | Modes |
 | :--- | :--- | :--- |
@@ -448,7 +448,7 @@ The batch methods on the sync router already run their fetches concurrently, so 
 
 ## Real-time streams
 
-`stream` yields messages as dicts and reconnects automatically, in both modes, when the upstream drops (over a service, the router closes the socket with code `1011`) or the transport fails. It does not retry a deliberate rejection: an unsupported channel raises `NotSupported` and a refused subscription raises `BadRequest`, in both modes, so a misconfigured call fails fast instead of reconnecting forever.
+`stream` yields messages as dicts and reconnects automatically, in both modes, when the upstream drops (over a service, the router closes the socket with code `1011`) or the transport fails. It does not retry a deliberate rejection, so a misconfigured call fails fast instead of reconnecting forever: an unsupported channel raises `NotSupported` and an unknown exchange raises `NotFound`, in both modes. A market type the adapter does not carry is the one place the modes still differ, `BadRequest` locally and `NotFound` over a service, because the service refuses it before the upgrade and a refused upgrade does not say which of the two causes it was. `except RouterError` catches both.
 
 ```python
 for msg in client.stream("binance", "spot", "ticker", "BTCUSDT"):
