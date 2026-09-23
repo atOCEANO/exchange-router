@@ -8,7 +8,9 @@ import httpx
 import websockets
 from pydantic import ValidationError
 from pydantic_core import to_jsonable_python
+from websockets.exceptions import InvalidHandshake
 
+from ._warnings import emit
 from .capabilities import market_block
 from .errors import (
     BadRequest,
@@ -33,6 +35,11 @@ from .version import SCHEMA_VERSION, VERSION
 logger = logging.getLogger(__name__)
 
 MAX_SLEEP_S = 60.0
+
+DEGRADED = (
+    "{where} is unreachable ({kind}: {error}); this router has fallen back to local adapters "
+    "and a private per-process rate budget, and stays there"
+)
 
 FATAL_CLOSE_CODES = (1003, 1008)
 
@@ -90,6 +97,22 @@ def _is_fatal_close(error: Exception) -> bool:
 
 def is_retryable_stream_error(error: Exception) -> bool:
     return isinstance(error, STREAM_RETRYABLE) and not _is_fatal_close(error)
+
+
+def error_for_close(error: Exception, exchange: str, market_type: str,
+                    channel: str) -> Optional[RouterError]:
+    if not _is_fatal_close(error):
+        return None
+
+    rcvd   = getattr(error, "rcvd", None)
+    code   = getattr(rcvd, "code", None) if rcvd is not None else getattr(error, "code", None)
+    reason = (getattr(rcvd, "reason", "") if rcvd is not None else "") or ""
+
+    if code == 1003:
+        unstreamed = f"channel '{channel}' is not streamed on {exchange}/{market_type}"
+        return NotSupported(reason or unstreamed, 501)
+
+    return BadRequest(reason or f"{exchange}/{market_type} refused the subscription", 400)
 
 
 def _detail(response: httpx.Response) -> str:
@@ -230,12 +253,24 @@ class RemoteBackend(Backend):
     async def stream(self, exchange: str, market_type: str, channel: str, symbol: str) -> AsyncGenerator[Dict, None]:
         ws_url = self.url.replace("http", "ws", 1) + f"/ws/{exchange}/{market_type}"
 
-        async with websockets.connect(ws_url) as ws:
-            await ws.send(json.dumps({"channel": channel, "symbol": symbol}))
+        try:
+            async with websockets.connect(ws_url) as ws:
+                await ws.send(json.dumps({"channel": channel, "symbol": symbol}))
 
-            while True:
-                message = await ws.recv()
-                yield json.loads(message)
+                while True:
+                    message = await ws.recv()
+                    yield json.loads(message)
+
+        except websockets.ConnectionClosed as exc:
+            error = error_for_close(exc, exchange, market_type, channel)
+            if error is None:
+                raise
+            raise error from exc
+
+        # an unknown exchange or market type is refused before the upgrade, and that arrives as a
+        # handshake failure, which the retry path would otherwise treat as a drop and repeat forever
+        except InvalidHandshake as exc:
+            raise NotFound(f"{exchange}/{market_type} is not streamed by {self.url}", 404) from exc
 
 
 class FallbackBackend(Backend):
@@ -250,21 +285,40 @@ class FallbackBackend(Backend):
         return self._secondary if self.degraded else self._primary
 
 
+    def _degrade(self, error: Exception) -> None:
+        self.degraded = True
+        emit([DEGRADED.format(
+            where = getattr(self._primary, "url", "the service"),
+            kind  = type(error).__name__,
+            error = error,
+        )], True)
+
+
     async def fetch(self, route: str, exchange: Optional[str] = None, market_type: Optional[str] = None,
                     symbol: Optional[str] = None, **params: Any) -> Any:
         try:
             return await self._pick().fetch(route, exchange, market_type, symbol, **params)
 
-        except RouterUnreachable:
+        except RouterUnreachable as error:
             if self.degraded:
                 raise
-            self.degraded = True
+            self._degrade(error)
             return await self._secondary.fetch(route, exchange, market_type, symbol, **params)
 
 
     async def stream(self, exchange: str, market_type: str, channel: str, symbol: str) -> AsyncGenerator[Dict, None]:
-        async for message in self._pick().stream(exchange, market_type, channel, symbol):
-            yield message
+        try:
+            async for message in self._pick().stream(exchange, market_type, channel, symbol):
+                yield message
+
+        # a socket that will not open is the service being gone; a close mid-stream is a drop, and
+        # that belongs to the reconnect path above, which comes back here if the service really left
+        except (RouterUnreachable, OSError) as error:
+            if self.degraded:
+                raise
+            self._degrade(error)
+            async for message in self._secondary.stream(exchange, market_type, channel, symbol):
+                yield message
 
 
     def known_exchanges(self) -> Optional[List[str]]:
@@ -494,7 +548,11 @@ class LocalBackend(Backend):
         except RouterError:
             raise
 
+        # reconnect is decided by type, so a drop has to reach the retry path as the transport
+        # raised it; wrapping it here is what made reconnect=True do nothing in local mode
         except Exception as exc:
+            if is_retryable_stream_error(exc):
+                raise
             raise error_for_fault(exc) from exc
 
 
