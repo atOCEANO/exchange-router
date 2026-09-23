@@ -16,3 +16,4 @@ Thumbs.db
 .Documentation/
 dev/
 tools/auditor/runs/
+!.Documentation/*.md
