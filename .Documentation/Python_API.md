@@ -79,7 +79,7 @@ Router.service(
     url,                        # required
     exchanges,                  # required: a list of names, or "all"
     *,
-    fallback    = None,         # "local" to degrade on an unreachable service, off by default
+    fallback    = None,         # "local" to degrade to local adapters, one way, off by default
     timeout     = 30,
     max_retries = 3,
     verbose     = True,
@@ -92,15 +92,20 @@ Nothing is inferred. In particular the mode is never chosen from a missing URL, 
 r = Router.service(url, exchanges=E) if url else Router.local(exchanges=E)
 ```
 
+`fallback="local"` is the one exception, and it is opt-in for the same reason. When the service cannot be reached the router switches to local adapters, warns you that it has, and sets `r.degraded`. It is one way: nothing probes for the service coming back, because a router that silently moves between a shared rate budget and a private one is the thing the paragraph above refuses to do at construction. Call `r.warm()` after a switch to warm the adapters that are now serving.
+
 Whatever scope you name is warmed in the background and nothing else is, so a slow start always has a cause you can see. The scope is not a fence: a call to an exchange you did not declare still works, and warms lazily.
 
 ```python
 r.mode              # "local" | "service"
 r.scope             # the exchange names you declared
+r.degraded          # True once fallback="local" has taken over
 r.schema_version    # 3, the wire contract this SDK speaks
 r.warm()            # block until the declared scope is ready
 r.warm("kraken")    # warm one, declared or not
 ```
+
+`exchanges="all"` is answered by the registry in local mode and by the service in service mode, so a service-mode `r.scope` reads empty until the router has spoken to the service once. `r.warm()` forces that.
 
 `warm()` is the blocking form of something already happening. Use it to keep the cost out of your first measurement. In service mode it runs the schema handshake and the capability fetch instead, so it means the same thing in both modes.
 
@@ -128,7 +133,7 @@ with Router.service("http://localhost:8040", exchanges=["binance"]) as client:
     df = client.get_candles("binance", "spot", "BTCUSDT", interval="1h", limit=100)
 ```
 
-The router holds persistent connections and, in local mode, live adapters. Release it when done. The `with` block above guarantees cleanup; outside one, call `client.close()`.
+The router holds persistent connections and, in local mode, live adapters. Release it when done. The `with` block above guarantees cleanup; outside one, call `client.close()`. Closing is final: a call on a closed router raises rather than waiting, and closing twice is harmless. In local mode it shuts down every adapter in the process, not only the ones you declared, and empties the registry, so the next `Router.local(...)` builds fresh adapters and pays for its own warm.
 
 The `start` parameter, where applicable, follows the [router's pagination contract](HTTP_Reference.md#pagination-semantics): pass the oldest timestamp you already have to walk further back.
 
@@ -375,13 +380,13 @@ These are plain functions, not coroutines, so they are never awaited. `funding_p
 
 ## Errors
 
-The router raises a small typed tree, so failures are programmable without parsing message strings. Every error carries `.status` (the HTTP status, where applicable) and `.detail`. **The same failure raises the same type in both modes**, which is asserted by the test suite rather than promised here: local mode maps adapter faults straight into this tree instead of round-tripping them through a status code.
+The router raises a small typed tree, so failures are programmable without parsing message strings. Every error carries `.status` (the HTTP status, where applicable) and `.detail`. **The same failure raises the same type in both modes**: local mode maps adapter faults straight into this tree instead of round-tripping them through a status code. The suite asserts that for every read path. It cannot assert it for the stream paths, because the in-process transport the suite runs against carries HTTP and not websockets, so those are argued from the code and checked by hand.
 
 | Exception | When | Modes |
 | :--- | :--- | :--- |
 | `BadRequest` | `400`, including an interval or period the route does not declare | both |
 | `NotFound` | `404`, an unknown exchange | both |
-| `RateLimited` | `429` | both |
+| `RateLimited` | `429` from the service | `service` only |
 | `UpstreamUnavailable` | `503`, carries `.retry_after` | both |
 | `NotSupported` | the route is not exposed on this exchange and market, caught before the request, or a server `501` | both |
 | `RouterUnreachable` | transport failure, or retries exhausted | `service` only |
@@ -406,7 +411,9 @@ except UpstreamUnavailable as e:
     time.sleep(e.retry_after or 5)
 ```
 
-All of these inherit from `RouterError`, so `except RouterError` catches everything. The client retries `429` and transient `5xx` with jittered backoff, honoring the `Retry-After` header the router sends on `503`; if the window outlasts the retry budget it raises `UpstreamUnavailable` carrying that `retry_after` so you can wait the rest.
+All of these inherit from `RouterError`, so `except RouterError` catches everything.
+
+Retries live in the transport, so the two modes spend them differently. In service mode the SDK retries `429` and transient `5xx` with jittered backoff, honoring the `Retry-After` header the router sends on `503`; if the window outlasts the retry budget it raises `UpstreamUnavailable` carrying that `retry_after` so you can wait the rest. In local mode there is no HTTP hop to retry: each adapter already backs off and retries the exchange itself, and surfaces exhaustion as `UpstreamUnavailable`, usually carrying a `retry_after` (Kraken is the one that does not). That is why a rate limit reaches you as `RateLimited` from a service and as `UpstreamUnavailable` from a local adapter; `except RouterError` covers both, and `except UpstreamUnavailable` covers both cases where waiting is the answer.
 
 Symbol validity is left to the server, which normalizes case and separators. A bad symbol surfaces as one of the errors above on the call, rather than a client-side guess that could falsely reject a valid symbol.
 
@@ -440,14 +447,14 @@ The batch methods on the sync router already run their fetches concurrently, so 
 
 ## Real-time streams
 
-`stream` yields messages as dicts and reconnects automatically when the upstream drops (the router closes the socket with code `1011`) or the transport fails. It does not retry a deliberate rejection: on close code `1003` or `1008` (for example an unsupported channel, or a subscription that never arrived) it raises `websockets.ConnectionClosed` so a misconfigured call fails fast instead of reconnecting forever.
+`stream` yields messages as dicts and reconnects automatically, in both modes, when the upstream drops (over a service, the router closes the socket with code `1011`) or the transport fails. It does not retry a deliberate rejection: an unsupported channel raises `NotSupported` and a refused subscription raises `BadRequest`, in both modes, so a misconfigured call fails fast instead of reconnecting forever.
 
 ```python
 for msg in client.stream("binance", "spot", "ticker", "BTCUSDT"):
     print(msg["symbol"], msg["price"])
 ```
 
-Stream messages are the raw wire dicts (the same shapes as the REST response bodies), not `Row` objects; to get the flat Row shape on a ticker, book_ticker, or mark_price message, pass it through the matching builder, for example `from exchange_router.rows import ticker_row; ticker_row(msg)`. Pass `reconnect=False` to have the iterator raise `websockets.ConnectionClosed` on a drop instead. `subscribe` is the same without reconnect. One subscription per connection: to change channel or symbol, leave the loop and start a new one. On the async router these are `async for`.
+Stream messages are the raw wire dicts (the same shapes as the REST response bodies), not `Row` objects; to get the flat Row shape on a ticker, book_ticker, or mark_price message, pass it through the matching builder, for example `from exchange_router.rows import ticker_row; ticker_row(msg)`. Pass `reconnect=False` to have the iterator raise `websockets.ConnectionClosed` on a drop instead. `subscribe` is the same without reconnect. On the sync router the messages cross into your thread through a buffer of 1024; a consumer slower than the feed loses the oldest, and is told so with a `RouterDataWarning` rather than losing them quietly. One subscription per connection: to change channel or symbol, leave the loop and start a new one. On the async router these are `async for`.
 
 <br>
 <br>
@@ -463,9 +470,9 @@ The router exposes routing-facing symbols: the exchange-native symbol with any c
 
 Signatures are for the sync `Router`. `AsyncRouter` is identical with `await`, and `markets()`, `stream()`, and `subscribe()` become `async`. Everything here is available in both modes.
 
-**Lifecycle.** `warm(exchange=None)`, `close()`, and the read-only `mode`, `scope`, `schema_version` and `verbose` attributes.
+**Lifecycle.** `warm(exchange=None)`, `close()`, and the read-only `mode`, `scope`, `degraded`, `schema_version` and `verbose` attributes.
 
-**Discovery.** `get_status()`, `get_version()`, `get_exchanges()`, `get_exchange_overview(exchange)`, `get_exchange_status(exchange)`, `get_market_types(exchange)`, `get_capabilities(exchange)`, `get_markets(exchange, market_type)`. `get_version()` returns a version string; the others return `dict` or `list`. `get_exchange_overview` carries per-market-type symbol counts alongside the capability block.
+**Discovery.** `get_status()`, `get_version()`, `get_exchanges()`, `get_exchange_overview(exchange)`, `get_exchange_status(exchange)`, `get_market_types(exchange)`, `get_capabilities(exchange)`, `get_markets(exchange, market_type)`. `get_version()` returns a version string; the others return `dict` or `list`. `get_exchange_overview` carries per-market-type symbol counts alongside the capability block. `get_capabilities` raises if the block cannot be fetched, rather than reporting an exchange with no capabilities.
 
 **Snapshots (return `Row`).** `get_ticker(exchange, market_type, symbol)`, `get_book_ticker(...)`, `get_mark_price(...)`, `get_symbol_info(exchange, market_type, symbol)`.
 

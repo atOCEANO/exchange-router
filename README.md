@@ -35,7 +35,7 @@ from exchange_router import Router
 r = Router.local(exchanges=["binance"])                            # adapters run in your program
 r = Router.service("http://localhost:8040", exchanges=["binance"]) # adapters run in the container
 
-df = r.market("binance", "perp", "BTCUSDT").candles("1h", limit=500)
+df = r.market("binance", "linear", "BTCUSDT").candles("1h", limit=500)
 ```
 
 One line differs. Everything below it is the same object, with the same methods, returning the same types.
@@ -48,7 +48,7 @@ Field names, units, funding conventions, and pagination semantics differ from on
 
 ### Which mode to use
 
-The modes are functionally identical and operationally different. Local can do everything the service can; what it cannot do is coordinate, because coordination needs one process.
+The modes share one API and return the same types. Local serves every route the service serves; what it cannot do is coordinate, because coordination needs one process.
 
 | | `local` | `service` |
 | :--- | :--- | :--- |

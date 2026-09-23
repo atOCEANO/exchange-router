@@ -186,7 +186,7 @@ The release used to build and attach nothing, on the reasoning that a library ha
 
 The full startup, request and WebSocket lifecycles live in [Architecture](Architecture.md#startup-lifecycle), including the background warm and the log timeline it emits. What matters to an adapter author is short.
 
-An adapter is started and stopped the same way in both modes, and it cannot tell which one it is in. In the service, the FastAPI lifespan manager walks the registry on startup and tears it down on shutdown. In local mode, `Router.local` warms the scope in the background and `close()` releases the adapters. The adapter sees `preload()` then `shutdown()` either way.
+An adapter is started and stopped the same way in both modes, and it cannot tell which one it is in. In the service, the FastAPI lifespan manager walks the registry on startup and tears it down on shutdown. In local mode, `Router.local` warms the scope in the background, and `close()` shuts down every adapter in the process and empties the registry, so the next local router builds new ones. The adapter sees `preload()` then `shutdown()` either way.
 
 So the adapter owes the lifecycle exactly two things: a correct `shutdown()` that closes every client it opened in `__init__`, and optionally a `_warm()` (see [The `_warm()` hook](Adapter_Guide.md#the-_warm-hook)) if startup prebuilding is worth it. An adapter that leaks on `shutdown()` used to leak only in a container that was about to exit; in local mode it leaks inside somebody's notebook.
 

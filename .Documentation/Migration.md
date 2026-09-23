@@ -53,7 +53,7 @@ Bare `Router(...)` raises rather than guessing. Mode is never inferred from a mi
 r = Router.service(url, exchanges=E) if url else Router.local(exchanges=E)
 ```
 
-**What is new.** `Router.local` is the library: the adapters run in your own program, with no container to deploy. `.mode` and `.schema_version` report what you built. `.warm()` blocks until the declared scope is ready, so the cost lands where you choose. `SchemaMismatch` joins the error tree and is raised on the first call when an SDK and a service disagree on the wire contract, instead of failing later in a way that looks like bad data. `get_exchange_overview` and `get_exchange_status` expose two routes the SDK previously did not reach.
+**What is new.** `Router.local` is the library: the adapters run in your own program, with no container to deploy. `.mode` and `.schema_version` report what you built, and `.degraded` reports whether an opt-in `fallback="local"` has taken over. `.warm()` blocks until the declared scope is ready, so the cost lands where you choose. `SchemaMismatch` joins the error tree and is raised on the first call when an SDK and a service disagree on the wire contract, instead of failing later in a way that looks like bad data. `get_exchange_overview` and `get_exchange_status` expose two routes the SDK previously did not reach.
 
 Before reaching for local mode, read [Which mode to use](../README.md#which-mode-to-use): each local process carries its own rate-limit budget, and the exchange sees the sum.
 
