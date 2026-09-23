@@ -190,7 +190,6 @@ async def test_a_capability_fetch_that_failed_is_not_remembered_as_an_empty_bloc
     stub   = Roster(capability_faults=1)
     router = AsyncRouter.service("http://router.test", ["alpha"], verbose=False, backend=stub)
 
-    # the background warm would spend the one fault this test is about
     router._warm_task.cancel()
 
     with pytest.raises(UpstreamUnavailable):

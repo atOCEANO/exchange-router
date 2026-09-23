@@ -94,7 +94,6 @@ class AsyncRouter(AsyncCore):
         if fallback == "local":
             chosen = FallbackBackend(chosen, LocalBackend())
 
-        # nothing here knows the roster, so "all" travels as a flag and the handshake fills it in
         scope = resolve_scope(exchanges, None)
 
         return cls._assemble(chosen, "service", scope, verbose, base, timeout, max_retries,

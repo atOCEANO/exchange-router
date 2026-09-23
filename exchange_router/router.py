@@ -28,11 +28,9 @@ CLOSED = (
 )
 
 DROPPING = (
-    "stream: the {size} message buffer is full and the oldest are being dropped; "
-    "consume faster or buffer the messages yourself"
+    f"stream: the {STREAM_BUFFER_MAX} message buffer is full and the oldest are being dropped; "
+    f"consume faster or buffer the messages yourself"
 )
-
-DROPPED = "stream: {count} messages were dropped while this stream ran"
 
 
 async def _kick_warm(core: AsyncCore) -> None:
@@ -60,7 +58,6 @@ class _LoopThread:
 
     def run(self, coro) -> Any:
         if self._closed:
-            # nothing will ever await it, and an unawaited coroutine warns at collection
             coro.close()
             raise RouterError(CLOSED)
 
@@ -84,9 +81,8 @@ class _LoopThread:
                     try:
                         items.get_nowait()
                         handle["dropped"] += 1
-                        # data loss is not a verbosity matter, so it warns either way
                         if handle["dropped"] == 1:
-                            emit([DROPPING.format(size=STREAM_BUFFER_MAX)], True)
+                            emit([DROPPING], True)
                     except queue.Empty:
                         pass
 
@@ -114,12 +110,12 @@ class _LoopThread:
         finally:
             future.cancel()
             task = handle.get("task")
-            # a generator left open across close() is finalized later, against a loop that is gone
             if task is not None and not self._closed:
                 self._loop.call_soon_threadsafe(task.cancel)
 
-            if handle["dropped"]:
-                emit([DROPPED.format(count=handle["dropped"])], True)
+            dropped = handle["dropped"]
+            if dropped:
+                emit([f"stream: {dropped} messages were dropped while this stream ran"], True)
 
 
     def stop(self) -> None:
@@ -130,7 +126,6 @@ class _LoopThread:
         self._loop.call_soon_threadsafe(self._loop.stop)
         self._thread.join(timeout=5)
 
-        # closing a loop that is still running raises, and the join above can time out
         if not self._thread.is_alive():
             self._loop.close()
 

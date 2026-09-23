@@ -36,11 +36,6 @@ logger = logging.getLogger(__name__)
 
 MAX_SLEEP_S = 60.0
 
-DEGRADED = (
-    "{where} is unreachable ({kind}: {error}); this router has fallen back to local adapters "
-    "and a private per-process rate budget, and stays there"
-)
-
 FATAL_CLOSE_CODES = (1003, 1008)
 
 STREAM_RETRYABLE = (websockets.ConnectionClosed, websockets.WebSocketException, OSError)
@@ -109,10 +104,14 @@ def error_for_close(error: Exception, exchange: str, market_type: str,
     reason = (getattr(rcvd, "reason", "") if rcvd is not None else "") or ""
 
     if code == 1003:
-        unstreamed = f"channel '{channel}' is not streamed on {exchange}/{market_type}"
+        unstreamed = (
+            f"channel '{channel}' is not streamed on {exchange}/{market_type}; "
+            f"get_capabilities lists the channels that are"
+        )
         return NotSupported(reason or unstreamed, 501)
 
-    return BadRequest(reason or f"{exchange}/{market_type} refused the subscription", 400)
+    refused = f"channel '{channel}' was refused by {exchange}/{market_type}; subscribe again"
+    return BadRequest(reason or refused, 400)
 
 
 def _detail(response: httpx.Response) -> str:
@@ -267,10 +266,12 @@ class RemoteBackend(Backend):
                 raise
             raise error from exc
 
-        # an unknown exchange or market type is refused before the upgrade, and that arrives as a
-        # handshake failure, which the retry path would otherwise treat as a drop and repeat forever
         except InvalidHandshake as exc:
-            raise NotFound(f"{exchange}/{market_type} is not streamed by {self.url}", 404) from exc
+            raise NotFound(
+                f"exchange '{exchange}' or market_type '{market_type}' is not streamed by "
+                f"{self.url}; check both against get_exchanges and get_market_types",
+                404,
+            ) from exc
 
 
 class FallbackBackend(Backend):
@@ -287,11 +288,12 @@ class FallbackBackend(Backend):
 
     def _degrade(self, error: Exception) -> None:
         self.degraded = True
-        emit([DEGRADED.format(
-            where = getattr(self._primary, "url", "the service"),
-            kind  = type(error).__name__,
-            error = error,
-        )], True)
+        where         = getattr(self._primary, "url", "the service")
+
+        emit([
+            f"{where} is unreachable ({type(error).__name__}: {error}); this router now runs "
+            f"on local adapters with a private per-process rate budget, and stays there",
+        ], True)
 
 
     async def fetch(self, route: str, exchange: Optional[str] = None, market_type: Optional[str] = None,
@@ -311,8 +313,6 @@ class FallbackBackend(Backend):
             async for message in self._pick().stream(exchange, market_type, channel, symbol):
                 yield message
 
-        # a socket that will not open is the service being gone; a close mid-stream is a drop, and
-        # that belongs to the reconnect path above, which comes back here if the service really left
         except (RouterUnreachable, OSError) as error:
             if self.degraded:
                 raise
@@ -548,8 +548,6 @@ class LocalBackend(Backend):
         except RouterError:
             raise
 
-        # reconnect is decided by type, so a drop has to reach the retry path as the transport
-        # raised it; wrapping it here is what made reconnect=True do nothing in local mode
         except Exception as exc:
             if is_retryable_stream_error(exc):
                 raise

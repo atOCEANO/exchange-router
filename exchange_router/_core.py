@@ -105,7 +105,6 @@ class AsyncCore:
         self._check_open()
 
         if self._mode == "service":
-            # the handshake is what resolves an "all" scope, so the names are read after it
             await self._ensure_handshake()
 
         names = [exchange] if exchange is not None else list(self._scope)
@@ -165,7 +164,6 @@ class AsyncCore:
             except RouterError:
                 if not quiet:
                     raise
-                # not cached: a block that failed once would otherwise disable preflight for good
                 return {}
 
         return self._capabilities[exchange]

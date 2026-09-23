@@ -89,7 +89,6 @@ def test_a_slow_consumer_is_told_that_it_lost_messages(monkeypatch):
         messages = router.subscribe("fake", "spot", "trades", "BTCUSDT")
         next(messages)
 
-        # the pump has the whole 4000 to push while this thread is asleep, so the buffer overflows
         time.sleep(0.3)
 
         for _ in messages:
