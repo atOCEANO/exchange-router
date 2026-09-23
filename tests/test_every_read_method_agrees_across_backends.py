@@ -2,6 +2,9 @@ import pandas as pd
 import pytest
 
 from fake_exchange import BASE_TS, CONTRACT_SIZE, FUNDING_CYCLE_MS, INTERVAL_MS
+from exchange_router import Router
+from exchange_router.backend import LocalBackend
+from exchange_router.errors import BadRequest
 from exchange_router.models import MarketType
 
 
@@ -216,3 +219,25 @@ async def test_batch_reads_return_one_frame_per_symbol(router):
     assert result.requested == 2
     assert len(result["BTCUSDT"]) == 3
     assert list(result["ETHUSDT"]["close"]) == [100.0, 101.0, 102.0]
+
+
+async def test_the_generic_batch_takes_any_series_route_by_name(router):
+    result = await router.fetch_many("candles", EX, "linear", ["BTCUSDT"], interval="1h", limit=3)
+
+    assert list(result) == ["BTCUSDT"]
+    assert result.failed == {}
+    assert result.summary().startswith("1 requested: ")
+
+
+async def test_the_generic_batch_refuses_a_route_that_is_not_a_series(router):
+    with pytest.raises(BadRequest):
+        await router.fetch_many("ticker", EX, "linear", ["BTCUSDT"])
+
+
+def test_the_sync_router_forwards_the_generic_batch():
+    router = Router.local([EX], verbose=False, backend=LocalBackend())
+    result = router.fetch_many("candles", EX, "linear", ["BTCUSDT"], interval="1h", limit=3)
+
+    assert list(result) == ["BTCUSDT"]
+
+    router.close()

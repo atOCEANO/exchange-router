@@ -3,6 +3,7 @@ import inspect
 from fastapi.routing import APIRoute, APIWebSocketRoute
 
 from exchange_router.async_router import AsyncRouter
+from exchange_router.router import Router
 from exchange_router.service import app
 
 
@@ -62,6 +63,14 @@ def sdk_methods():
     }
 
 
+def sync_methods():
+    return {
+        name
+        for name, value in inspect.getmembers(Router, inspect.isfunction)
+        if not name.startswith("_")
+    }
+
+
 def test_the_route_table_describes_exactly_the_routes_the_app_serves():
     assert served_paths() == set(ROUTE_TO_METHOD)
 
@@ -101,3 +110,7 @@ async def test_the_two_routes_that_used_to_be_gaps_now_answer_through_both_backe
 
     status = await router.get_exchange_status("fake")
     assert status == {"status": "online", "exchange": "fake"}
+
+
+def test_the_sync_router_offers_exactly_the_methods_the_async_one_does():
+    assert sync_methods() == sdk_methods()

@@ -361,7 +361,7 @@ class AsyncCore:
 
     async def fetch_many(self, route: str, exchange: str, market_type: str, symbols: List[str], verbose: Optional[bool] = None, max_concurrent: int = 8, **kwargs) -> BatchResult:
         if route not in SERIES_ROUTES:
-            raise ValueError(f"fetch_many supports {SERIES_ROUTES}, not '{route}'")
+            raise BadRequest(f"route '{route}' is not a series route; fetch_many takes one of {', '.join(SERIES_ROUTES)}", 400)
 
         v         = self.verbose if verbose is None else verbose
         semaphore = asyncio.Semaphore(max_concurrent)

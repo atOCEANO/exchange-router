@@ -313,6 +313,10 @@ class Router:
         return [SyncMarket(self, exchange, market_type, m["symbol"]) for m in data["markets"]]
 
 
+    def fetch_many(self, route: str, exchange: str, market_type: str, symbols: List[str], verbose: Optional[bool] = None, max_concurrent: int = 8, **kwargs) -> BatchResult:
+        return self._loop.run(self._core.fetch_many(route, exchange, market_type, symbols, verbose=verbose, max_concurrent=max_concurrent, **kwargs))
+
+
     def candles_many(self, exchange: str, market_type: str, symbols: List[str], interval: str = "1h", limit: int = 100, start: Optional[int] = None, verbose: Optional[bool] = None, max_concurrent: int = 8) -> BatchResult:
         return self._loop.run(self._core.fetch_many("candles", exchange, market_type, symbols, verbose=verbose, max_concurrent=max_concurrent, interval=interval, limit=limit, start=start))
 
