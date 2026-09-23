@@ -338,7 +338,10 @@ for symbol, df in result.items():     # every symbol that returned data
 result.ok          # {symbol: DataFrame}                 clean
 result.degraded    # {symbol: (DataFrame, [warnings])}    returned with gaps
 result.failed      # {symbol: exception}                  never returned
-print(result.report())
+result.requested   # how many symbols were asked for
+result.data()      # {symbol: DataFrame}, ok and degraded together
+print(result.summary())   # one line, for a log
+print(result.report())    # the summary, then every symbol that was not clean
 ```
 
 ```text
@@ -350,7 +353,19 @@ print(result.report())
     FOOUSDT   BadRequest: ...
 ```
 
-A symbol is `degraded` when the result carries warnings (in `df.attrs["warnings"]`), `failed` when the request raised, `ok` otherwise. There is a `*_many` for every series route (`candles_many`, `trades_many`, `agg_trades_many`, `funding_rate_many`, `open_interest_many`, `liquidations_many`, `long_short_ratio_many`).
+A symbol is `degraded` when the result carries warnings (in `df.attrs["warnings"]`), `failed` when the request raised, `ok` otherwise. There is a `*_many` for every series route (`candles_many`, `trades_many`, `agg_trades_many`, `funding_rate_many`, `open_interest_many`, `liquidations_many`, `long_short_ratio_many`). Iterating a `BatchResult`, `len()`, `in` and `result[symbol]` all read `data()`, so a failed symbol is simply absent rather than present as `None`.
+
+The seven are one function underneath, and it is public. `fetch_many` takes the route by name and passes the route's own parameters through, so code that walks several routes over one universe needs no branch per route:
+
+```python
+routes = {"candles": {"interval": "1h"}, "funding_rate": {}, "open_interest": {"period": "1h"}}
+
+for route, params in routes.items():
+    result = client.fetch_many(route, "binance", "linear", symbols, limit=100, **params)
+    print(route, result.summary())
+```
+
+A route that is not one of the seven raises `BadRequest`.
 
 <br>
 <br>
@@ -455,7 +470,7 @@ for msg in client.stream("binance", "spot", "ticker", "BTCUSDT"):
     print(msg["symbol"], msg["price"])
 ```
 
-Stream messages are the raw wire dicts (the same shapes as the REST response bodies), not `Row` objects; to get the flat Row shape on a ticker, book_ticker, or mark_price message, pass it through the matching builder, for example `from exchange_router.rows import ticker_row; ticker_row(msg)`. Pass `reconnect=False` to have the iterator raise `websockets.ConnectionClosed` on a drop instead. `subscribe` is the same without reconnect. On the sync router the messages cross into your thread through a buffer of 1024; a consumer slower than the feed loses the oldest, and is told so with a `RouterDataWarning` rather than losing them quietly. One subscription per connection: to change channel or symbol, leave the loop and start a new one. On the async router these are `async for`.
+Stream messages are the raw wire dicts (the same shapes as the REST response bodies), not `Row` objects; to get the flat Row shape on a ticker, book_ticker, or mark_price message, pass it through the matching builder in `exchange_router.rows`, which is `ticker_row`, `book_ticker_row` or `mark_price_row`, for example `from exchange_router.rows import ticker_row; ticker_row(msg)`. Pass `reconnect=False` to have the iterator raise `websockets.ConnectionClosed` on a drop instead. `subscribe` is the same without reconnect. On the sync router the messages cross into your thread through a buffer of 1024; a consumer slower than the feed loses the oldest, and is told so with a `RouterDataWarning` rather than losing them quietly. One subscription per connection: to change channel or symbol, leave the loop and start a new one. On the async router these are `async for`.
 
 <br>
 <br>
@@ -471,7 +486,7 @@ The router exposes routing-facing symbols: the exchange-native symbol with any c
 
 Signatures are for the sync `Router`. `AsyncRouter` is identical with `await`, and `markets()`, `stream()`, and `subscribe()` become `async`. Everything here is available in both modes.
 
-**Lifecycle.** `warm(exchange=None)`, `close()`, and the read-only `mode`, `scope`, `degraded`, `schema_version` and `verbose` attributes.
+**Lifecycle.** `warm(exchange=None)`, `close()`, the read-only `mode`, `scope`, `degraded` and `schema_version` attributes, and `verbose`, which you can set at any time to change the router's default for every later call. The installed release is `exchange_router.__version__`, which is a different number from `schema_version`: the release moves with every fix, the schema only with a breaking wire change.
 
 **Discovery.** `get_status()`, `get_version()`, `get_exchanges()`, `get_exchange_overview(exchange)`, `get_exchange_status(exchange)`, `get_market_types(exchange)`, `get_capabilities(exchange)`, `get_markets(exchange, market_type)`. `get_version()` returns a version string; the others return `dict` or `list`. `get_exchange_overview` carries per-market-type symbol counts alongside the capability block. `get_capabilities` raises if the block cannot be fetched, rather than reporting an exchange with no capabilities.
 
@@ -493,7 +508,7 @@ get_long_short_ratio(exchange, market_type, symbol, period="5m", limit=30, start
 
 **Handles.** `market(exchange, market_type, symbol)`, `markets(exchange, market_type)`.
 
-**Batch (return `BatchResult`).** `candles_many`, `trades_many`, `agg_trades_many`, `funding_rate_many`, `open_interest_many`, `liquidations_many`, `long_short_ratio_many`, each taking the same per-route parameters plus `max_concurrent=8`.
+**Batch (return `BatchResult`).** `candles_many`, `trades_many`, `agg_trades_many`, `funding_rate_many`, `open_interest_many`, `liquidations_many`, `long_short_ratio_many`, each taking the same per-route parameters plus `max_concurrent=8`, and `fetch_many(route, exchange, market_type, symbols, max_concurrent=8, **params)`, the general form they are built on.
 
 **Streams.** `stream(exchange, market_type, channel, symbol, reconnect=True)`, `subscribe(exchange, market_type, channel, symbol)`. Channels: `ticker`, `book_ticker`, `trades`, `agg_trades`, `orderbook`, `mark_price`, `liquidations`. Check `get_capabilities` to confirm a channel is supported.
 

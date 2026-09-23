@@ -39,7 +39,7 @@ Three hops, newest first. The wire schema has not changed across any of them: `s
 
 **Nothing you call has changed its name, signature or return type.** Every read method, the market handle, `Row`, `BatchResult`, `with_provenance`, `funding_paid`, `per_hour_view` and the error tree are identical. A search and replace on the import line is the whole migration for code that already worked, with one exception: `get_capabilities` used to answer a failed fetch with an empty dict and now raises, so code that tested the result for emptiness to detect an unreachable service should catch `RouterError` instead.
 
-**Construction is the one break, and it cannot happen silently.** `ExchangeRouterClient()` still exists, still defaults to localhost, and still works; it emits a `DeprecationWarning` naming its replacement. New code uses one of two constructors, and both require the exchange scope:
+**Construction is the one break, and it cannot happen silently.** `ExchangeRouterClient()` and `AsyncExchangeRouterClient()` still exist, still default to localhost, and still work; each emits a `DeprecationWarning` naming its replacement. New code uses one of two constructors, and both require the exchange scope:
 
 ```python
 from exchange_router import Router
