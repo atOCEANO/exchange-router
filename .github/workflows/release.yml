@@ -81,7 +81,7 @@ jobs:
             ## Install it
 
             ```bash
-            pip install "git+https://github.com/atOCEANO/exchange-router-service.git@${{ github.ref_name }}"
+            pip install "git+https://github.com/atOCEANO/exchange-router.git@${{ github.ref_name }}"
             ```
 
             The wheel and the sdist are attached below if you would rather have
@@ -119,8 +119,8 @@ jobs:
             ## Run the service without Docker
 
             ```bash
-            git clone --branch ${{ github.ref_name }} https://github.com/atOCEANO/exchange-router-service.git
-            cd exchange-router-service
+            git clone --branch ${{ github.ref_name }} https://github.com/atOCEANO/exchange-router.git
+            cd exchange-router
             python -m venv .venv
             source .venv/bin/activate
             pip install ".[server]"
@@ -137,8 +137,8 @@ jobs:
             pull from and nothing to trust but the source you just cloned:
 
             ```bash
-            git clone --branch ${{ github.ref_name }} https://github.com/atOCEANO/exchange-router-service.git
-            cd exchange-router-service
+            git clone --branch ${{ github.ref_name }} https://github.com/atOCEANO/exchange-router.git
+            cd exchange-router
             cp .env.example .env
             docker compose up --build
             ```
@@ -167,16 +167,16 @@ jobs:
             not; the number continues the service line, which is the one the tags
             and releases have always used.
 
-            [Migration](https://github.com/atOCEANO/exchange-router-service/blob/${{ github.ref_name }}/.Documentation/Migration.md)
+            [Migration](https://github.com/atOCEANO/exchange-router/blob/${{ github.ref_name }}/.Documentation/Migration.md)
             has the detail, and
-            [Python API](https://github.com/atOCEANO/exchange-router-service/blob/${{ github.ref_name }}/.Documentation/Python_API.md)
+            [Python API](https://github.com/atOCEANO/exchange-router/blob/${{ github.ref_name }}/.Documentation/Python_API.md)
             is the full surface.
 
             ## What is in it
 
             - Every registered adapter behind one schema, across spot, linear and
               inverse markets. The set supported at this tag is listed in
-              [Supported Exchanges](https://github.com/atOCEANO/exchange-router-service/blob/${{ github.ref_name }}/README.md#supported-exchanges);
+              [Supported Exchanges](https://github.com/atOCEANO/exchange-router/blob/${{ github.ref_name }}/README.md#supported-exchanges);
               adding one is a new adapter and no change to the routing core.
             - One normalized wire format. Raw upstream dicts never cross the
               boundary; every response is a Pydantic model from `exchange_router/models.py`.

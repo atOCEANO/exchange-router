@@ -38,7 +38,7 @@ audit = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/atOCEANO/exchange-router-service"
+Homepage = "https://github.com/atOCEANO/exchange-router"
 
 [tool.setuptools.dynamic]
 version = { attr = "exchange_router.version.VERSION" }

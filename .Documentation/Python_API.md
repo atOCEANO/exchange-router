@@ -51,13 +51,13 @@ Upgrading from `exchange-router-client`, or from an older client major, is cover
 ## Installation
 
 ```bash
-pip install "git+https://github.com/atOCEANO/exchange-router-service.git"
+pip install "git+https://github.com/atOCEANO/exchange-router.git"
 ```
 
 That is everything `Router.local` and `Router.service` need. To run the service yourself, add the extra that carries FastAPI and uvicorn:
 
 ```bash
-pip install "exchange-router[server] @ git+https://github.com/atOCEANO/exchange-router-service.git"
+pip install "exchange-router[server] @ git+https://github.com/atOCEANO/exchange-router.git"
 ```
 
 For local development, `pip install -e ".[server,test]"` from a checkout. Requires Python 3.10+.
@@ -148,7 +148,7 @@ Binding the exchange, market type, and symbol once avoids repeating them on ever
 ```python
 m = client.market("kraken", "linear", "XBTUSD")
 
-candles = m.candles("1h", 500)
+candles = m.candles(interval="1h", limit=500)
 funding = m.funding_rate(limit=200)
 mark    = m.mark_price()
 book    = m.orderbook(depth=50)
@@ -163,7 +163,7 @@ Iterate every market in a category as handles:
 
 ```python
 for m in client.markets("binance", "linear"):
-    oi = m.open_interest("1h", 30)
+    oi = m.open_interest(period="1h", limit=30)
 ```
 
 The handle forwards to the flat `client.get_*` methods, which remain available for one-off calls and for code that iterates raw symbol strings.
@@ -446,7 +446,7 @@ from exchange_router import AsyncRouter
 
 async def main():
     async with AsyncRouter.service("http://localhost:8040", exchanges=["binance"]) as client:
-        df = await client.get_candles("binance", "spot", "BTCUSDT", "1m", 10000)
+        df = await client.get_candles("binance", "spot", "BTCUSDT", interval="1m", limit=10_000)
 
         m = client.market("binance", "linear", "BTCUSDT")
         funding = await m.funding_rate(limit=200)
@@ -508,7 +508,7 @@ get_long_short_ratio(exchange, market_type, symbol, period="5m", limit=30, start
 
 **Handles.** `market(exchange, market_type, symbol)`, `markets(exchange, market_type)`.
 
-**Batch (return `BatchResult`).** `candles_many`, `trades_many`, `agg_trades_many`, `funding_rate_many`, `open_interest_many`, `liquidations_many`, `long_short_ratio_many`, each taking the same per-route parameters plus `max_concurrent=8`, and `fetch_many(route, exchange, market_type, symbols, max_concurrent=8, **params)`, the general form they are built on.
+**Batch (return `BatchResult`).** `candles_many`, `trades_many`, `agg_trades_many`, `funding_rate_many`, `open_interest_many`, `liquidations_many`, `long_short_ratio_many`, each taking the same per-route parameters plus `max_concurrent=8`, and `fetch_many(route, exchange, market_type, symbols, verbose=None, max_concurrent=8, **params)`, the general form they are built on.
 
 **Streams.** `stream(exchange, market_type, channel, symbol, reconnect=True)`, `subscribe(exchange, market_type, channel, symbol)`. Channels: `ticker`, `book_ticker`, `trades`, `agg_trades`, `orderbook`, `mark_price`, `liquidations`. Check `get_capabilities` to confirm a channel is supported.
 

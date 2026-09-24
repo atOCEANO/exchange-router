@@ -2,7 +2,7 @@
 
 
 <div style="padding-top: 0px;">
-  <a href="https://github.com/atOCEANO/exchange-router-service/releases"><img src="https://img.shields.io/github/v/release/atOCEANO/exchange-router-service?label=release&color=2ea043" alt="Latest release" /></a>
+  <a href="https://github.com/atOCEANO/exchange-router/releases"><img src="https://img.shields.io/github/v/release/atOCEANO/exchange-router?label=release&color=2ea043" alt="Latest release" /></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+" /></a>
   <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-0.123.0-05998b.svg?logo=fastapi&logoColor=white" alt="FastAPI" /></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
@@ -36,12 +36,12 @@ from exchange_router import Router
 r = Router.local(exchanges=["binance"])                            # adapters run in your program
 r = Router.service("http://localhost:8040", exchanges=["binance"]) # adapters run in the container
 
-df = r.market("binance", "linear", "BTCUSDT").candles("1h", limit=500)
+df = r.market("binance", "linear", "BTCUSDT").candles(interval="1h", limit=500)
 ```
 
 One line differs. Everything below it is the same object, with the same methods, returning the same types.
 
-Field names, units, funding conventions, and pagination semantics differ from one exchange to the next. The router does that translation in the adapter layer, so callers see the same `Ticker`, `Candle`, `OrderBook`, `MarkPrice`, `FundingRate` shape regardless of which exchange served the request. It also handles the parts every integration needs: pagination for large historical pulls, request-weight throttling to prevent IP bans, and persistent connection management for WebSocket streams. Adding a new exchange means dropping in a new adapter, with no changes to the routing core.
+Field names, units, funding conventions, and pagination semantics differ from one exchange to the next. The router does that translation in the adapter layer, so callers see the same `Ticker`, `Candle`, `OrderBook`, `MarkPrice`, `FundingRate` shape regardless of which exchange served the request. It also handles the parts every integration needs: pagination for large historical pulls, request-weight throttling to prevent IP bans, and persistent connection management for WebSocket streams.
 
 **Stateless and keyless.** The router handles public market data only. It places no orders, holds no API keys, manages no accounts, and persists nothing to disk. If you need authentication or private endpoints, this is not it. See [Scope](#scope) for the full list of non-goals and deployment assumptions before pointing real traffic at it.
 
@@ -341,7 +341,7 @@ Designed for localhost or a trusted network: no TLS termination, no authenticati
 Nothing to deploy. Install it and make a call:
 
 ```bash
-pip install "git+https://github.com/atOCEANO/exchange-router-service.git"
+pip install "git+https://github.com/atOCEANO/exchange-router.git"
 ```
 
 ```python
@@ -361,8 +361,8 @@ The adapters warm their symbol caches in the background, so construction returns
 Once there is more than one caller, run it once and point everything at it. The service is a stateless Docker container:
 
 ```bash
-git clone https://github.com/atOCEANO/exchange-router-service.git
-cd exchange-router-service
+git clone https://github.com/atOCEANO/exchange-router.git
+cd exchange-router
 cp .env.example .env
 docker compose up -d --build
 curl http://localhost:8040/status
@@ -397,7 +397,7 @@ This variable lives in `.env` and is consumed by `docker-compose.yml` in the `po
 The same surface in both modes, with `AsyncRouter` alongside it for concurrency. Time-series methods return `pandas.DataFrame` objects indexed by datetime; point-in-time snapshots (ticker, book ticker, mark price) return a flat `Row` with attribute access; the order book returns one tidy `side, price, qty` frame. It is sync by default, so the same code runs in a script and in a Jupyter cell with no `await`. See [Exchange Notes](.Documentation/Exchange_Notes.md) for fields whose units vary across exchanges.
 
 ```bash
-pip install "git+https://github.com/atOCEANO/exchange-router-service.git"
+pip install "git+https://github.com/atOCEANO/exchange-router.git"
 ```
 
 ```python

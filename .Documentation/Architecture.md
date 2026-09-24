@@ -45,7 +45,7 @@ The seam between the router and a backend is semantic, not URL-shaped. It carrie
 The service is one deployment of the same library. `exchange_router/service/main.py` is a FastAPI app over the same adapters and the same shared logic, and the only thing it adds is HTTP, the exception handlers that turn faults into status codes, and the WebSocket fan-out. REST and WebSocket share the port and the adapter instance.
 
 <div align="center">
-  <img src="imgs/204652.png" alt="One API, two backends, rejoining at the adapters" width="46%" />
+  <img src="imgs/204652.png" alt="One API, two backends, rejoining at the adapters" width="40%" />
   <p style="margin: 0;"><i>One path above the seam, two through it, one below: the same adapters, reached from a different process</i></p>
 </div>
 
@@ -104,7 +104,7 @@ WebSocket streams do not follow the same path as REST. The `StreamManager` in `e
 When a client subscribes to a `(channel, symbol)` tuple on an exchange, the manager builds a key of the form `{exchange}:{market_type}:{channel}:{symbol}` and checks whether an upstream task already exists for it.
 
 <div align="center">
-  <img src="imgs/204647.png" alt="WebSocket fan-out lifecycle" width="85%" />
+  <img src="imgs/204647.png" alt="WebSocket fan-out lifecycle" width="90%" />
   <p style="margin: 0;"><i>One upstream WebSocket per (channel, symbol) tuple, fanned out to every attached client; cancelled when the last subscriber leaves</i></p>
 </div>
 
