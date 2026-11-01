@@ -441,4 +441,4 @@ finally:
 
 <br>
 
-Five notebooks in [`atOCEANO/examples`](https://github.com/atOCEANO/examples) drive this client end to end, from the first frame it hands back through a backtest, a parameter search, and a reinforcement-learning environment.
+Five notebooks in [`atOCEANO/examples`](https://github.com/atOCEANO/examples) drive this client end to end, from the first frame it hands back through a backtest, a parameter search, and a reinforcement-learning environment in [probatum](https://github.com/atOCEANO/probatum), which reads its bars from this client.
