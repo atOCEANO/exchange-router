@@ -136,6 +136,8 @@ with Router.service("http://localhost:8040", exchanges=["binance"]) as client:
 
 The router holds persistent connections and, in local mode, live adapters. Release it when done. The `with` block above guarantees cleanup; outside one, call `client.close()`. Closing is final: a call on a closed router raises rather than waiting, and closing twice is harmless. In local mode it shuts down every adapter in the process, not only the ones you declared, and empties the registry, so the next `Router.local(...)` builds fresh adapters and pays for its own warm.
 
+Keep one local router alive at a time. Every local router in the process shares the same adapters, and each runs them on a loop of its own, so re-running a notebook cell that builds one, before closing the router it built the last time, leaves two routers over one set of adapters, and calls on the second can fail with a lock or an event bound to a different event loop. Close the first, or build it in a `with` block.
+
 The `start` parameter, where applicable, follows the [router's pagination contract](HTTP_Reference.md#pagination-semantics): pass the oldest timestamp you already have to walk further back.
 
 <br>

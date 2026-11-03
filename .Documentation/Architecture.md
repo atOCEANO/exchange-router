@@ -171,9 +171,9 @@ The router carries two version numbers, defined in [exchange_router/version.py](
 
 The two are decoupled on purpose. A wire-compatible bug fix bumps `VERSION` and leaves `SCHEMA_VERSION` untouched, so clients pinned to a schema number do not need to change. A genuine wire break bumps both.
 
-**Compatibility is gated on the schema number and never on the release number.** In service mode the SDK reads `GET /version` once, on the first call that needs capabilities, and raises `SchemaMismatch` if the integers disagree. Gating on `VERSION` instead would mean a patch release of the container breaking every pinned install, and the two could never be deployed independently. The cost of that choice is recorded in [0004](Decisions.md): because additive fields never move the schema, the frame builders must tolerate a column that is not there rather than raising.
+**Compatibility is gated on the schema number and never on the release number.** In service mode the SDK reads `GET /version` once, in the background warm that starts with the router or on the first call where no warm ran, and raises `SchemaMismatch` if the integers disagree. Gating on `VERSION` instead would mean a patch release of the container breaking every pinned install, and the two could never be deployed independently. The cost of that choice is recorded in [0004](Decisions.md): because additive fields never move the schema, the frame builders must tolerate a column that is not there rather than raising.
 
-The check runs on the first request rather than at construction, because a constructor cannot await a round trip. It costs nothing extra: the SDK already makes a lazy first call to fetch capabilities, and the handshake rides along with it.
+The check is never made inside the constructor, which cannot await a round trip, and a mismatch the warm finds is raised on the first call. It costs nothing extra: the warm fetches the capabilities anyway, and the handshake rides along with it.
 
 <br>
 <br>
