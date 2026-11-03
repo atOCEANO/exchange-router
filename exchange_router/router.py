@@ -2,7 +2,7 @@ import asyncio
 import queue
 import threading
 import warnings
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import pandas as pd
 
@@ -33,8 +33,8 @@ DROPPING = (
 )
 
 
-async def _kick_warm(core: AsyncCore) -> None:
-    core._start_warm()
+async def _built(build: Callable[[], AsyncRouter]) -> AsyncRouter:
+    return build()
 
 
 class _LoopThread:
@@ -141,24 +141,28 @@ class Router:
 
 
     @classmethod
-    def _wrap(cls, core: AsyncCore) -> "Router":
+    def _wrap(cls, build: Callable[[], AsyncRouter]) -> "Router":
         router       = object.__new__(cls)
         router._loop = _LoopThread()
-        router._core = core
-        router._loop.run(_kick_warm(core))
+
+        try:
+            router._core = router._loop.run(_built(build))
+        except BaseException:
+            router._loop.stop()
+            raise
 
         return router
 
 
     @classmethod
     def local(cls, exchanges, *, verbose: bool = True, backend=None) -> "Router":
-        return cls._wrap(AsyncRouter.local(exchanges, verbose=verbose, backend=backend))
+        return cls._wrap(lambda: AsyncRouter.local(exchanges, verbose=verbose, backend=backend))
 
 
     @classmethod
     def service(cls, url: str, exchanges, *, fallback=None, timeout: int = 30, max_retries: int = 3,
                 verbose: bool = True, backend=None) -> "Router":
-        return cls._wrap(AsyncRouter.service(
+        return cls._wrap(lambda: AsyncRouter.service(
             url,
             exchanges,
             fallback    = fallback,
