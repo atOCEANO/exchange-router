@@ -87,7 +87,7 @@ Public market data from every registered exchange adapter, normalized to one sch
 
 * **No orders.** Read-only. There are no order-placement, cancellation, position-management, or transfer endpoints.
 * **No account access.** No authentication, no API keys, no account-state queries. Every endpoint is public market data.
-* **No persistence.** No database, no cache, no on-disk state. Every request hits upstream, and a restart loses only in-flight requests and WebSocket sessions.
+* **No persistence.** No database and no on-disk state, and market data is fetched from upstream on demand. In memory it keeps each exchange's instrument metadata, most of it refreshed every 24h, a few short-lived upstream snapshots and each adapter's backoff state, and a restart drops all of that along with in-flight requests and WebSocket sessions.
 * **No historical archive.** History is fetched from upstream on demand, bounded by each venue's own retention. The router never stores rows past the response.
 * **No inbound rate limiting.** Outbound rate-limit respect, which keeps the router from being banned by upstreams, is enforced per adapter. Inbound limits, quotas, and per-client throttling belong in a reverse proxy.
 * **No observability.** Logs go to stdout via Python `logging`. Metrics and traces are not emitted. Wrap the service at the edge if you need them.

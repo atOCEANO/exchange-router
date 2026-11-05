@@ -183,7 +183,7 @@ The check is never made inside the constructor, which cannot await a round trip,
 The router is designed to run as a single container per exchange IP. A few consequences follow from that.
 
 * **Rate limit state is in-memory.** Each router instance tracks its own backoff timestamps and per-adapter locks. Running two router instances behind a load balancer that both hit the same exchange from the same IP will double-count request weight and risk an IP ban. If you need horizontal scaling, shard exchanges across instances rather than replicating them.
-* **No persistence.** The service holds no database, no cache, no on-disk state. Historical data is always pulled from upstream on demand. A restart loses only in-flight requests and WebSocket sessions.
+* **No persistence.** The service holds no database and no on-disk state, and historical data is always pulled from upstream on demand. In memory it keeps each exchange's instrument metadata, most of it refreshed every 24h, a few short-lived upstream snapshots and the backoff state above; a restart drops all of that along with in-flight requests and WebSocket sessions.
 * **No built-in observability.** The router logs to stdout via Python's `logging` module. Metrics and traces are not emitted. If you need them, wrap the service at the edge (reverse proxy, sidecar) or add them directly to the adapter layer.
 * **CORS is open.** `allow_origins=["*"]` is set so any local client can talk to the router during development. If you expose the router beyond localhost, put it behind a proxy that enforces origin checks.
 
