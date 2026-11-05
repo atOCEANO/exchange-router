@@ -866,9 +866,10 @@ class BybitAdapter(BaseExchange):
             min_notional: Optional[float] = None
             lot = s.get("lotSizeFilter") or {}
             step_field = "basePrecision" if market_type == MarketType.SPOT else "qtyStep"
+            notional_field = "minOrderAmt" if market_type == MarketType.SPOT else "minNotionalValue"
             raw_min_qty = lot.get("minOrderQty")
             raw_max_qty = lot.get("maxOrderQty")
-            raw_min_notional = lot.get("minNotionalValue")
+            raw_min_notional = lot.get(notional_field)
             if raw_min_qty is not None:
                 v = float(raw_min_qty)
                 min_qty = v if v > 0 else None
@@ -876,8 +877,11 @@ class BybitAdapter(BaseExchange):
                 v = float(raw_max_qty)
                 max_qty = v if v > 0 else None
             if raw_min_notional is not None:
-                v = float(raw_min_notional)
-                min_notional = v if v > 0 else None
+                try:
+                    v = float(raw_min_notional)
+                    min_notional = v if v > 0 else None
+                except (TypeError, ValueError):
+                    min_notional = None
 
             qty_unit = "contract" if market_type == MarketType.INVERSE else "base"
             contract_size: Optional[float] = 1.0 if market_type == MarketType.INVERSE else None
@@ -903,7 +907,7 @@ class BybitAdapter(BaseExchange):
                 base_asset         = s["baseCoin"],
                 quote_asset        = s["quoteCoin"],
                 price_precision    = self._precision(s.get("priceFilter", {}).get("tickSize", "0.01")),
-                quantity_precision = self._precision(s.get("lotSizeFilter", {}).get("qtyStep", "0.001")),
+                quantity_precision = self._precision(lot.get(step_field, "0.001")),
                 min_qty            = min_qty,
                 max_qty            = max_qty,
                 min_notional       = min_notional,
