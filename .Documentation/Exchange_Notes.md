@@ -40,6 +40,8 @@ Quirks per exchange that callers can observe: symbol formats, fields the upstrea
 
 All adapters normalize to bare trading pairs (`BTCUSDT`, `ETHUSDT`) with no exchange-specific suffixes. The market type in the URL path conveys that context, so a symbol like `BTCUSDT` means different things depending on whether the path is `/binance/spot/`, `/binance/linear/`, or `/binance/inverse/`.
 
+Normalization rewrites a symbol's format, not its asset. Kraken's `XBT` stays `XBT` (see [Legacy asset codes stay literal](#legacy-asset-codes-stay-literal)), so one coin can carry a different symbol on each exchange, and code that reads several exchanges keeps its own map between them.
+
 `GET /{exchange}/{market_type}/markets` returns a dict `{exchange, market_type, count, markets}` where `markets` is an array of **lite** entries carrying `symbol`, `base_asset`, `quote_asset`, `qty_unit`, `contract_size`, and `funding`. To get the full specs for one symbol (including `native_symbol`, the raw symbol as it appears on the exchange's own API), call `GET /{exchange}/{market_type}/markets/{symbol}`:
 
 ```json
