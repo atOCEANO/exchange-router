@@ -9,11 +9,11 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
-    build_step_from_decimals,
+    build_step_from_decimals, build_margin_tier,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
-    MarketType, SymbolInfo, OpenInterest, FundingRate,
+    MarketType, SymbolInfo, OpenInterest, FundingRate, MarginTier, MarginTiers,
 )
 
 
@@ -51,6 +51,8 @@ class HyperliquidAdapter(BaseExchange):
         self._ctx_locks: Dict[str, asyncio.Lock] = {}
         self._hl_cache: Dict[str, Any] = {}
         self._hl_locks: Dict[str, asyncio.Lock] = {}
+        self._margin_meta: Dict[str, Any] = {}
+        self._margin_meta_at = 0
 
         self._capabilities = self._build_capabilities()
 
@@ -231,7 +233,7 @@ class HyperliquidAdapter(BaseExchange):
                         "intervals":    None,
                     },
                     "margin_tiers": {
-                        "rest": False,
+                        "rest": True,
                         "ws":   False,
                     },
                 },
@@ -793,6 +795,7 @@ class HyperliquidAdapter(BaseExchange):
 
         data     = await self._make_request("metaAndAssetCtxs", {"type": "metaAndAssetCtxs"})
         universe = data[0]["universe"]
+        metas    = {"": data[0]}
 
         self._funding_interval_cache.setdefault(market_type, {})
 
@@ -812,7 +815,11 @@ class HyperliquidAdapter(BaseExchange):
             self._funding_interval_cache[market_type][model_sym] = self._FUNDING_CYCLE_MS
             results.append(self._linear_symbol_info(model_sym, coin, coin, sz_dec))
 
-        results.extend(await self._fetch_builder_info(market_type, seen))
+        results.extend(await self._fetch_builder_info(market_type, seen, metas))
+
+        self._margin_meta    = metas
+        self._margin_meta_at = int(time.time() * 1000)
+
         return results
 
 
@@ -835,7 +842,7 @@ class HyperliquidAdapter(BaseExchange):
         )
 
 
-    async def _fetch_builder_info(self, market_type: MarketType, seen: Set[str]) -> List[SymbolInfo]:
+    async def _fetch_builder_info(self, market_type: MarketType, seen: Set[str], metas: Dict[str, Any]) -> List[SymbolInfo]:
         try:
             dexs = await self._make_request("perpDexs", {"type": "perpDexs"})
         except Exception as e:
@@ -851,8 +858,9 @@ class HyperliquidAdapter(BaseExchange):
                 continue
 
             try:
-                data     = await self._make_request("metaAndAssetCtxs", {"type": "metaAndAssetCtxs", "dex": dex})
-                universe = data[0]["universe"]
+                data       = await self._make_request("metaAndAssetCtxs", {"type": "metaAndAssetCtxs", "dex": dex})
+                universe   = data[0]["universe"]
+                metas[dex] = data[0]
                 for u in universe:
                     if u.get("isDelisted"):
                         continue
@@ -919,6 +927,39 @@ class HyperliquidAdapter(BaseExchange):
         if info is None:
             raise ValueError(f"Symbol {symbol} not found on Hyperliquid {market_type.value}")
         return info
+
+
+    async def get_margin_tiers(self, market_type: MarketType, symbol: str) -> MarginTiers:
+        if market_type != MarketType.LINEAR:
+            return await super().get_margin_tiers(market_type, symbol)
+
+        model_sym, coin, quote = await self._lookup(market_type, symbol)
+        meta  = self._margin_meta.get(coin.split(":", 1)[0] if ":" in coin else "") or {}
+        asset = next((u for u in meta.get("universe", []) if u.get("name") == coin), None)
+
+        return MarginTiers(
+            symbol      = model_sym,
+            market_type = market_type,
+            quote       = quote,
+            up_to_unit  = "quote",
+            tiers       = self._margin_tiers_of(asset, meta.get("marginTables") or []) if asset else [],
+            timestamp   = self._margin_meta_at,
+        )
+
+
+    @staticmethod
+    def _margin_tiers_of(asset: Dict[str, Any], tables: List[Any]) -> List[MarginTier]:
+        table_id = asset.get("marginTableId")
+        if not isinstance(table_id, int) or table_id < 50:
+            return [build_margin_tier(up_to=None, max_leverage=asset.get("maxLeverage"))]
+
+        entry = next((t for t in tables if isinstance(t, list) and t and t[0] == table_id), None)
+        if entry is None:
+            raise LookupError(f"Hyperliquid lists no margin table {table_id} for {asset.get('name')}")
+
+        rows   = entry[1]["marginTiers"]
+        bounds = [row["lowerBound"] for row in rows[1:]] + [None]
+        return [build_margin_tier(up_to=bound, max_leverage=row["maxLeverage"]) for row, bound in zip(rows, bounds)]
 
 
     async def stream_ticker(self, market_type: MarketType, symbol: str) -> AsyncGenerator[Ticker, None]:
