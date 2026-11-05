@@ -9,10 +9,12 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention, build_step,
+    build_margin_tier,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
     MarketType, SymbolInfo, OpenInterest, FundingRate, Liquidation, LongShortRatio,
+    MarginTiers,
 )
 
 
@@ -219,7 +221,7 @@ class BybitAdapter(BaseExchange):
                         "intervals":    ["5m", "15m", "30m", "1h", "4h", "1d"],
                     },
                     "margin_tiers": {
-                        "rest": False,
+                        "rest": True,
                         "ws":   False,
                     },
                 },
@@ -294,7 +296,7 @@ class BybitAdapter(BaseExchange):
                         "intervals":    ["5m", "15m", "30m", "1h", "4h", "1d"],
                     },
                     "margin_tiers": {
-                        "rest": False,
+                        "rest": True,
                         "ws":   False,
                     },
                 },
@@ -949,6 +951,49 @@ class BybitAdapter(BaseExchange):
         if info is None:
             raise ValueError(f"Symbol {symbol} not found on Bybit {market_type.value}")
         return info
+
+
+    async def get_margin_tiers(self, market_type: MarketType, symbol: str) -> MarginTiers:
+        if market_type == MarketType.SPOT:
+            return await super().get_margin_tiers(market_type, symbol)
+
+        info       = await self.get_symbol_info(market_type, symbol)
+        api_symbol = self.get_api_symbol(symbol, market_type)
+        params     = {"category": self._get_category(market_type), "symbol": api_symbol}
+
+        async def fetch():
+            rows   = []
+            cursor = None
+            pages  = 0
+            while pages < 10:
+                if cursor:
+                    params["cursor"] = cursor
+                data = await self._make_request("GET", "/v5/market/risk-limit", params)
+                rows.extend(data.get("list") or [])
+                pages += 1
+                cursor = data.get("nextPageCursor")
+                if not cursor:
+                    break
+            if cursor:
+                logger.warning(f"Bybit risk-limit for {api_symbol} stopped at the {pages}-page cap with a cursor still set")
+            return [build_margin_tier(
+                up_to                   = row.get("riskLimitValue"),
+                max_leverage            = row.get("maxLeverage"),
+                maintenance_margin_rate = row.get("maintenanceMargin"),
+                initial_margin_rate     = row.get("initialMargin"),
+                maintenance_deduction   = row.get("mmDeduction"),
+            ) for row in rows]
+
+        tiers, read_at = await self._margin_table(f"{market_type.value} {api_symbol}", fetch)
+
+        return MarginTiers(
+            symbol      = info.symbol,
+            market_type = market_type,
+            quote       = info.quote_asset,
+            up_to_unit  = "quote" if market_type == MarketType.LINEAR else "base",
+            tiers       = tiers,
+            timestamp   = read_at,
+        )
 
 
     async def stream_ticker(self, market_type: MarketType, symbol: str) -> AsyncGenerator[Ticker, None]:
