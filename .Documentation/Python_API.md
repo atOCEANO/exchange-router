@@ -259,7 +259,7 @@ Row keys per snapshot (missing values are `None`, never absent):
 | ticker | `symbol, market_type, quote, price, open_24h, high_24h, low_24h, volume_24h, volume_24h_usd, volume_24h_unit, price_change_percent, timestamp` |
 | book_ticker | `symbol, market_type, quote, bid_price, bid_qty, bid_qty_usd, ask_price, ask_qty, ask_qty_usd, qty_unit, timestamp` |
 | mark_price | `symbol, market_type, quote, mark_price, index_price, funding_kind, funding_per_cycle, funding_cycle_ms, funding_per_hour, funding_valid_until_ts, timestamp` |
-| symbol_info | `symbol, native_symbol, base_asset, quote_asset, price_precision, quantity_precision, min_qty, max_qty, min_notional, qty_unit, contract_size, funding_kind` |
+| symbol_info | `symbol, native_symbol, base_asset, quote_asset, price_precision, quantity_precision, min_qty, max_qty, min_notional, qty_unit, contract_size, tick_size, qty_step, funding_kind` |
 
 <br>
 <br>

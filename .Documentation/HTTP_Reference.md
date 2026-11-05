@@ -72,7 +72,7 @@ Every quantitative record (Trade, Candle, OpenInterest, etc.) carries nested val
 | `GET` | `/{exchange}/capabilities` | Supported REST routes and WebSocket channels for an adapter. | None |
 | `GET` | `/{exchange}/market_types` | Market types available on the exchange. | None |
 | `GET` | `/{exchange}/{market_type}/markets` | Lite list of every tradable symbol with `base_asset`, `quote_asset`, `qty_unit`, `contract_size`, and `funding.kind`. On `linear` and `inverse`, only perpetuals are returned. Served from the in-memory adapter cache (refreshed at most once per 24h): no upstream calls once the cache is warm, and the first request to arrive on a cold cache fills it. | None |
-| `GET` | `/{exchange}/{market_type}/markets/{symbol}` | Full `SymbolInfo` for one symbol: precision, order limits, contract size, funding convention. | None |
+| `GET` | `/{exchange}/{market_type}/markets/{symbol}` | Full `SymbolInfo` for one symbol: precision, tick and step, order limits, contract size, funding convention. | None |
 
 **Pricing**
 
@@ -220,11 +220,15 @@ The lite entry carries just enough metadata to enumerate and filter symbols with
   "min_notional": null,
   "qty_unit": "contract",
   "contract_size": 100.0,
-  "funding": {"kind": "discrete"}
+  "funding": {"kind": "discrete"},
+  "tick_size": 0.1,
+  "qty_step": 1.0
 }
 ```
 
 `symbol` is the routing-facing trading pair used across all router endpoints. `native_symbol` is the raw exchange symbol (e.g. `BTCUSD_PERP`, `PI_XBTUSD`) for cross-referencing back to the upstream API. `qty_unit` is `"base"` on spot/linear and `"contract"` on inverse; on inverse, `contract_size` carries the quote-asset notional per contract (commonly `100` or `1`, depending on the venue). `funding` is `null` on spot, `{"kind": "discrete"}` on discrete-funding futures, and `{"kind": "continuous"}` on continuous-funding futures. Per-venue specifics live in [Exchange Notes](Exchange_Notes.md).
+
+`tick_size` and `qty_step` are the grid an order has to sit on, as the exchange states it: the price step in `quote_asset` and the quantity step in `qty_unit`. `price_precision` and `quantity_precision` count decimal places and say less, since a count cannot express a step of 10 or more; check an order against the step, not the precision. Either grid field is `null` where the exchange states no step, as Hyperliquid states no tick. Each exchange's sources are in [Exchange Notes](Exchange_Notes.md#tick-and-step).
 
 Only tradeable symbols appear in `/markets` and `/markets/{symbol}`. Paused, halted, and offline instruments are filtered out at the adapter level, so a symbol's presence in the response is itself the liveness signal.
 

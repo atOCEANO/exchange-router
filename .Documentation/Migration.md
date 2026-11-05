@@ -27,8 +27,27 @@
 
 ## Migration
 
-Three hops, newest first. The wire schema has not changed across any of them: `schema_version` has been 3 throughout, so code reading raw response bodies or stream messages is unaffected every time. What changes is the Python surface.
+Four hops, newest first. `schema_version` has been 3 throughout: no field has been renamed, removed or retyped, so code written against an older release keeps parsing what a newer one sends. 3.1.0 adds two fields and corrects five values; the hops before it change the Python surface.
 
+<br>
+
+## 3.0.x to 3.1.0
+
+**Two fields are added, and nothing is renamed or removed.** `SymbolInfo` gains `tick_size` and `qty_step`, the grid an order has to sit on, after `funding` on the wire and before `funding_kind` on the `Row`. A `Row` read from a 3.0.x service has both as `None`.
+
+**Five values were wrong and are corrected.** Each moves on these instruments only:
+
+| Exchange and market | Field | 3.0.x | 3.1.0 |
+| :--- | :--- | :--- | :--- |
+| Kraken futures | `quantity_precision` | `8` on every perpetual | the instrument's `contractValueTradePrecision`, at least `0` (`4` on `PF_XBTUSD`) |
+| Kraken futures | `price_precision` | `0` where the tick is finer than ten decimals | the tick's decimals (`11` on `PF_MOGUSD`) |
+| Bybit spot | `quantity_precision` | `3` on every pair | the decimals of `basePrecision` (`6` on `BTCUSDT`) |
+| Bybit spot | `min_notional` | `null` on every pair | `minOrderAmt` (`5` on `BTCUSDT`) |
+| KuCoin futures | `price_precision` | `0` where the tick is below `0.0001` | the tick's decimals (`5` on `DOGEUSDTM`) |
+
+Code that rounds by these precisions rounds differently on those instruments, and code that reads Bybit spot's `min_notional` now sees a minimum where it saw none.
+
+<br>
 <br>
 
 ## Client 5.x to 3.0.0

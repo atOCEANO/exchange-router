@@ -60,6 +60,23 @@ For `linear` and `inverse` market types, both `/markets` and `/markets/{symbol}`
 
 <br>
 
+### Tick and step
+
+`SymbolInfo.tick_size` and `qty_step` are the grid an order has to sit on: the price step in `quote_asset` and the quantity step in `qty_unit`, as each exchange states them. `price_precision` and `quantity_precision` are counts of decimal places and say less: a step of 10 or more has a `quantity_precision` of `0`, and on Binance futures `price_precision` is Binance's own `pricePrecision`, which can be finer than the tick (`BTCUSDT` has `2` against a tick of `0.1`). Check an order against the step, not the precision.
+
+| Exchange | `tick_size` | `qty_step` |
+| :--- | :--- | :--- |
+| Binance | `PRICE_FILTER.tickSize` | `LOT_SIZE.stepSize`, in contracts on inverse |
+| Bybit | `priceFilter.tickSize` | `lotSizeFilter.qtyStep` on linear, `lotSizeFilter.qtyStep` in contracts on inverse, `lotSizeFilter.basePrecision` on spot |
+| OKX | `tickSz` | `lotSz` times `ctVal` on linear, `lotSz` in contracts on inverse, `lotSz` on spot |
+| Kraken | `tick_size` on spot, `tickSize` on futures | ten to the minus `lot_decimals` on spot, ten to the minus `contractValueTradePrecision` on futures |
+| KuCoin | `priceIncrement` on spot, `tickSize` on futures | `baseIncrement` on spot, `lotSize` times `multiplier` on linear, `lotSize` in contracts on inverse |
+| Hyperliquid | `null`, see [No public liquidations, long/short ratio, or per-symbol order limits](#no-public-liquidations-longshort-ratio-or-per-symbol-order-limits) | ten to the minus `szDecimals` |
+
+A step built from two exchange numbers is their decimal product, converted to a float once, so it is the float nearest the number the exchange means: `0.1` times `0.1` gives `0.01`, where a float product gives `0.010000000000000002`. Both fields are still floats, so test a price against the grid by rounding the quotient, not by comparing floats.
+
+<br>
+
 ### Data fidelity rule
 
 The router never invents data. When an upstream omits a field, the router surfaces the gap honestly rather than guessing:
@@ -69,7 +86,7 @@ The router never invents data. When an upstream omits a field, the router surfac
 * Missing list responses come back as `[]`, never a synthesized "best guess".
 * Queries past upstream retention return an empty list.
 
-`SymbolInfo` follows this rule with a split by type. The string fields, `base_asset` and `quote_asset`, come back as `""` when the adapter cannot derive them, which is why the Kraken futures note below calls out symbols whose suffix is not in the quote-currency list. The order-limit numbers, `min_qty`, `max_qty` and `min_notional`, are declared `Optional[float]` and come back `null`, never `0`, when the exchange does not publish the limit; each exchange's section below documents which of them tend to be missing. On `SymbolInfo` a `0` is therefore always a value the upstream sent, not a stand-in for absence.
+`SymbolInfo` follows this rule with a split by type. The string fields, `base_asset` and `quote_asset`, come back as `""` when the adapter cannot derive them, which is why the Kraken futures note below calls out symbols whose suffix is not in the quote-currency list. The order-limit numbers, `min_qty`, `max_qty` and `min_notional`, are declared `Optional[float]` and come back `null`, never `0`, when the exchange does not publish the limit; each exchange's section below documents which of them tend to be missing. On `SymbolInfo` a `0` is therefore always a value the upstream sent, not a stand-in for absence. The grid fields, `tick_size` and `qty_step`, come back `null` when the exchange states no step, as Hyperliquid states no tick. `tick_size` is never worked out from `price_precision`; where an exchange states its quantity step only as a count of decimals, as Kraken and Hyperliquid do, `qty_step` is ten to the minus that count.
 
 The same rule applies to derived values such as `usd` on `open_interest`: on linear markets it is joined from a same-period candle's close, and if that join misses, `usd` comes back `null` with `native` still populated. The router does not substitute a stale close, a ticker price, or a back-of-envelope estimate.
 
@@ -296,7 +313,7 @@ Hyperliquid settles funding every hour, so `MarkPrice.funding` and `FundingRate.
 
 ### No public liquidations, long/short ratio, or per-symbol order limits
 
-Hyperliquid exposes no public liquidation feed and no long/short account ratio, so `liquidations` and `long_short_ratio` are `False` for REST and WS and calling those routes returns HTTP 501. It also does not publish per-symbol order-size limits, so `SymbolInfo.min_qty` and `max_qty` come back `null`; `min_notional` is set to Hyperliquid's flat 10 USD minimum order value (a global platform floor, not a per-symbol figure). The funding cycle length and next-payout time are not on `SymbolInfo` (which carries only `funding.kind`); `cycle_ms` and `valid_until_ts` come from `mark_price`, and the hourly settlement timestamps from `funding_rate`.
+Hyperliquid exposes no public liquidation feed and no long/short account ratio, so `liquidations` and `long_short_ratio` are `False` for REST and WS and calling those routes returns HTTP 501. It also does not publish per-symbol order-size limits, so `SymbolInfo.min_qty` and `max_qty` come back `null`; `min_notional` is set to Hyperliquid's flat 10 USD minimum order value (a global platform floor, not a per-symbol figure). Hyperliquid states no price step either, so `tick_size` is `null`: a price is held to five significant figures and to at most `price_precision` decimals, a whole number always allowed. `qty_step` is one unit of the last of the asset's size decimals. The funding cycle length and next-payout time are not on `SymbolInfo` (which carries only `funding.kind`); `cycle_ms` and `valid_until_ts` come from `mark_price`, and the hourly settlement timestamps from `funding_rate`.
 
 <br>
 <br>
@@ -320,6 +337,12 @@ The Kraken spot OHLC endpoint has a hard ceiling of 720 candles per request with
 ### Inverse and linear `/markets/{symbol}` base/quote derivation
 
 The Kraken Futures `/instruments` endpoint returns `baseCurrency`/`quoteCurrency` as `null` on both `PF_*` (linear / multi-collateral) and `PI_*` (inverse) perpetuals; the `underlying` field is a reference-rate identifier like `rr_xbtusd`, not a currency code. The router parses the model symbol against a fixed quote-currency list (`USDT, USDC, USD, EUR, GBP, JPY, CHF, CAD, AUD`) and populates `base_asset`/`quote_asset` from that split. So `PF_XBTUSD` -> `base_asset=XBT`, `quote_asset=USD`. Symbols whose suffix isn't in that list will fall through to empty strings.
+
+<br>
+
+### Futures quantity precision follows the trade precision
+
+On futures, `quantity_precision` is the instrument's `contractValueTradePrecision`, and `qty_step` is ten to the minus that. A negative precision means lots of 10, 100 or 1,000, which a count of decimals cannot carry, so `quantity_precision` is `0` there and `qty_step` holds the lot.
 
 <br>
 
@@ -383,7 +406,7 @@ The `/api/v1/mark-price/{symbol}/current` endpoint only returns mark and index. 
 
 ### Futures sizes are contract-denominated upstream
 
-KuCoin reports futures sizes (trades, orderbook levels, kline volume, open interest, order limits) in contracts, not the base asset. Each instrument has a `multiplier` field on the upstream contract spec (absolute-valued; KuCoin sometimes returns negative multipliers for inverse and the adapter takes the magnitude). On linear contracts the adapter multiplies every contract count by the multiplier, so the wire is base-denominated throughout: data rows carry `unit: "base"`, and `SymbolInfo.min_qty` / `max_qty` / `quantity_precision` are in the base asset with `qty_unit: "base"` and `contract_size` null, per the schema; the multiplier itself lives in an adapter-internal cache. On inverse contracts the wire stays contract-denominated: `qty: {native, unit: "contract", contract_size, usd}` where `usd = native * contract_size` (price-independent), and `SymbolInfo.min_qty` / `max_qty` are contract counts with `qty_unit: "contract"` and `contract_size` populated. For `XBTUSDTM`, 1 contract represents 0.001 XBT; for `XBTUSDM`, 1 contract represents 1 USD. Spot reports `qty.native` / `volume.native` in the base asset directly with `unit: "base"`.
+KuCoin reports futures sizes (trades, orderbook levels, kline volume, open interest, order limits) in contracts, not the base asset. Each instrument has a `multiplier` field on the upstream contract spec (absolute-valued; KuCoin sometimes returns negative multipliers for inverse and the adapter takes the magnitude). On linear contracts the adapter multiplies every contract count by the multiplier, so the wire is base-denominated throughout: data rows carry `unit: "base"`, and `SymbolInfo.min_qty` / `max_qty` / `quantity_precision` / `qty_step` are in the base asset with `qty_unit: "base"` and `contract_size` null, per the schema; the multiplier itself lives in an adapter-internal cache. On inverse contracts the wire stays contract-denominated: `qty: {native, unit: "contract", contract_size, usd}` where `usd = native * contract_size` (price-independent), and `SymbolInfo.min_qty` / `max_qty` are contract counts with `qty_unit: "contract"` and `contract_size` populated. For `XBTUSDTM`, 1 contract represents 0.001 XBT; for `XBTUSDM`, 1 contract represents 1 USD. Spot reports `qty.native` / `volume.native` in the base asset directly with `unit: "base"`.
 
 <br>
 <br>
@@ -418,7 +441,7 @@ For SWAP and FUTURES (both linear and inverse), OKX reports `vol24h` as the **co
 
 ### Order size metadata is contract-denominated upstream
 
-OKX reports `minSz`, `lotSz`, and `maxLmtSz` in contracts on SWAP instruments, and `ctVal` carries the size of one contract denominated in `ctValCcy`: the base coin on linear (`0.01` BTC for `BTC-USDT-SWAP`), the quote on inverse (`100` USD for `BTC-USD-SWAP`). On linear the adapter converts order limits to the base asset, so `SymbolInfo.min_qty` / `max_qty` / `quantity_precision` come back base-denominated with `qty_unit: "base"` and `contract_size` null, matching every other linear market; the `ctVal` multiplier is held in an adapter-internal cache and drives the same conversion applied to trade, orderbook, book-ticker, and liquidation sizes. On inverse, limits stay contract counts with `qty_unit: "contract"` and `contract_size` = `ctVal` (quote notional per contract).
+OKX reports `minSz`, `lotSz`, and `maxLmtSz` in contracts on SWAP instruments, and `ctVal` carries the size of one contract denominated in `ctValCcy`: the base coin on linear (`0.01` BTC for `BTC-USDT-SWAP`), the quote on inverse (`100` USD for `BTC-USD-SWAP`). On linear the adapter converts order limits to the base asset, so `SymbolInfo.min_qty` / `max_qty` / `quantity_precision` / `qty_step` come back base-denominated with `qty_unit: "base"` and `contract_size` null, matching every other linear market; the `ctVal` multiplier is held in an adapter-internal cache and drives the same conversion applied to trade, orderbook, book-ticker, and liquidation sizes. On inverse, limits stay contract counts with `qty_unit: "contract"` and `contract_size` = `ctVal` (quote notional per contract).
 
 <br>
 
