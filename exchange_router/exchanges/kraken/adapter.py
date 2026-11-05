@@ -10,7 +10,7 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
-    build_step, build_step_from_decimals,
+    build_step, build_step_from_decimals, count_decimals,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -440,8 +440,7 @@ class KrakenAdapter(BaseExchange):
     def _decimal_places(value: float) -> int:
         if not value or value <= 0:
             return 8
-        s = f"{value:.10f}".rstrip("0")
-        return len(s.split(".")[1]) if "." in s else 0
+        return count_decimals(value) or 0
 
 
     def _extract_analytics(self, data: Any, field_name: str) -> List[Dict]:

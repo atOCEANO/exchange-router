@@ -143,6 +143,18 @@ def build_step_from_decimals(decimals: Any) -> Optional[float]:
     return build_step(step)
 
 
+def count_decimals(value: Any) -> Optional[int]:
+    try:
+        exponent = decimal.Decimal(str(value)).normalize().as_tuple().exponent
+    except (ArithmeticError, TypeError, ValueError):
+        return None
+
+    if not isinstance(exponent, int):
+        return None
+
+    return max(-exponent, 0)
+
+
 def validate_interval(adapter, market_type: MarketType, route: str, label: str, value: str) -> None:
     intervals = route_block(adapter.get_capabilities(), market_type, route).get("intervals")
 
