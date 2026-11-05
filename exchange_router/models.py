@@ -161,11 +161,11 @@ class FundingHistorical(BaseModel):
 class SymbolInfo(BaseModel):
     symbol: str = Field(
         ...,
-        description="Routing-facing symbol; exchange-native form with contract-type prefixes stripped (e.g. 'BTCUSDT' on Binance, 'XBTUSD' on Kraken futures where the PI_ prefix is stripped). No base-currency translation (XBT stays XBT).",
+        description="Routing-facing symbol; exchange-native form with contract-type prefixes or suffixes stripped (e.g. 'BTCUSDT' on Binance, 'XBTUSD' on Kraken futures where the PF_ prefix is stripped). No base-currency translation (XBT stays XBT).",
     )
     native_symbol: str = Field(
         ...,
-        description="Raw upstream symbol when it differs from the routing-facing one (e.g. 'BTCUSD_PERP' on Binance COIN-M, 'PI_XBTUSD' on Kraken futures).",
+        description="Raw upstream symbol when it differs from the routing-facing one (e.g. 'BTCUSD_PERP' on Binance COIN-M, 'PF_XBTUSD' on Kraken futures).",
     )
     base_asset: str = Field(
         ...,
@@ -201,7 +201,7 @@ class SymbolInfo(BaseModel):
     )
     contract_size: Optional[float] = Field(
         None,
-        description="Quote-asset notional per contract. Null for spot/linear; set on inverse perpetuals (e.g. 100 on Binance BTCUSD, 1 on Kraken XBTUSD).",
+        description="Quote-asset notional per contract. Null for spot/linear; set on inverse perpetuals (e.g. 100 on Binance BTCUSD, 1 on Bybit BTCUSD).",
     )
     funding: Optional[FundingConvention] = Field(
         None,

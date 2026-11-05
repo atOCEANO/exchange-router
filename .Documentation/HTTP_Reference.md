@@ -226,7 +226,7 @@ The lite entry carries just enough metadata to enumerate and filter symbols with
 }
 ```
 
-`symbol` is the routing-facing trading pair used across all router endpoints. `native_symbol` is the raw exchange symbol (e.g. `BTCUSD_PERP`, `PI_XBTUSD`) for cross-referencing back to the upstream API. `qty_unit` is `"base"` on spot/linear and `"contract"` on inverse; on inverse, `contract_size` carries the quote-asset notional per contract (commonly `100` or `1`, depending on the venue). `funding` is `null` on spot, `{"kind": "discrete"}` on discrete-funding futures, and `{"kind": "continuous"}` on continuous-funding futures. Per-venue specifics live in [Exchange Notes](Exchange_Notes.md).
+`symbol` is the routing-facing trading pair used across all router endpoints. `native_symbol` is the raw exchange symbol (e.g. `BTCUSD_PERP`, `PF_XBTUSD`) for cross-referencing back to the upstream API. `qty_unit` is `"base"` on spot/linear and `"contract"` on inverse; on inverse, `contract_size` carries the quote-asset notional per contract (commonly `100` or `1`, depending on the venue). `funding` is `null` on spot, `{"kind": "discrete"}` on discrete-funding futures, and `{"kind": "continuous"}` on continuous-funding futures. Per-venue specifics live in [Exchange Notes](Exchange_Notes.md).
 
 `tick_size` and `qty_step` are the grid an order has to sit on, as the exchange states it: the price step in `quote_asset` and the quantity step in `qty_unit`. `price_precision` and `quantity_precision` count decimal places and say less, since a count cannot express a step of 10 or more; check an order against the step, not the precision. Either grid field is `null` where the exchange states no step, as Hyperliquid states no tick. Each exchange's sources are in [Exchange Notes](Exchange_Notes.md#tick-and-step).
 
@@ -365,7 +365,7 @@ Continuous-funding variant:
 ```json
 {
   "symbol": "XBTUSD",
-  "market_type": "inverse",
+  "market_type": "linear",
   "quote": "USD",
   "mark_price": 72153.85,
   "index_price": 72150.10,
@@ -402,7 +402,7 @@ Continuous:
 ```json
 {
   "symbol": "XBTUSD",
-  "market_type": "inverse",
+  "market_type": "linear",
   "quote": "USD",
   "rate": {
     "kind": "continuous",

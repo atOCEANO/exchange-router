@@ -479,7 +479,7 @@ Stream messages are the raw wire dicts (the same shapes as the REST response bod
 
 ## Symbols
 
-The router exposes routing-facing symbols: the exchange-native symbol with any contract-type prefix stripped, so Kraken `PF_XBTUSD` (linear) and `PI_XBTUSD` (inverse) are both addressed as `XBTUSD`, told apart by `market_type`, and Binance COIN-M `BTCUSD_PERP` is `BTCUSD`. Base-currency codes are never translated: Kraken stays `XBT`, not `BTC`. The SDK passes symbols through unchanged. The canonical list for any venue and market type is `client.get_markets(...)`, and each row carries `base_asset` and `quote_asset`; build a per-venue map when you compare venues whose base codes differ.
+The router exposes routing-facing symbols: the exchange-native symbol with any contract-type prefix or suffix stripped, so Kraken `PF_XBTUSD` is addressed as `XBTUSD` and Binance COIN-M `BTCUSD_PERP` as `BTCUSD`. One symbol can name an instrument on several market types, as `BTCUSDT` does on Binance spot and linear, and `market_type` tells them apart. Base-currency codes are never translated: Kraken stays `XBT`, not `BTC`. The SDK passes symbols through unchanged. The canonical list for any venue and market type is `client.get_markets(...)`, and each row carries `base_asset` and `quote_asset`; build a per-venue map when you compare venues whose base codes differ.
 
 <br>
 <br>

@@ -103,7 +103,7 @@ The same rule applies to derived values such as `usd` on `open_interest`: on lin
 | Bybit LINEAR    | `base`     | base coin                                                                  | `51,528` BTC |
 | Bybit INVERSE   | `contract` | contracts (`contract_size` = $1)                                           | `403,155,610` contracts = $403M nominal |
 | Kraken LINEAR (PF\_\*)   | `base`     | base coin                                                         | `1,898.7` BTC |
-| Kraken INVERSE (PI\_\*)  | `contract` | contracts (`contract_size` = $1)                                  | `2,604,624` contracts = $2.6M nominal |
+| Kraken INVERSE (PI\_\*)  | `contract` | contracts (`contract_size` = $1)                                  | none listed, see [No inverse perpetuals are listed](#no-inverse-perpetuals-are-listed) |
 | KuCoin LINEAR   | `base`     | base coin (adapter pre-multiplies upstream contracts * multiplier)         | `30,361` BTC (= 30,361,348 contracts * 0.001) |
 | KuCoin INVERSE  | `contract` | contracts (`contract_size` = $1)                                           | `120,701,769` contracts = $121M nominal |
 | OKX LINEAR      | `base`     | base coin (adapter reads upstream's `oiCcy` column directly)               | `34,223.4` BTC |
@@ -336,7 +336,13 @@ The Kraken spot OHLC endpoint has a hard ceiling of 720 candles per request with
 
 ### Inverse and linear `/markets/{symbol}` base/quote derivation
 
-The Kraken Futures `/instruments` endpoint returns `baseCurrency`/`quoteCurrency` as `null` on both `PF_*` (linear / multi-collateral) and `PI_*` (inverse) perpetuals; the `underlying` field is a reference-rate identifier like `rr_xbtusd`, not a currency code. The router parses the model symbol against a fixed quote-currency list (`USDT, USDC, USD, EUR, GBP, JPY, CHF, CAD, AUD`) and populates `base_asset`/`quote_asset` from that split. So `PF_XBTUSD` -> `base_asset=XBT`, `quote_asset=USD`. Symbols whose suffix isn't in that list will fall through to empty strings.
+The Kraken Futures `/instruments` endpoint carries no `baseCurrency` or `quoteCurrency` on its perpetuals. The router parses the model symbol against a fixed quote-currency list (`USDT, USDC, USD, EUR, GBP, JPY, CHF, CAD, AUD`) and populates `base_asset`/`quote_asset` from that split. So `PF_XBTUSD` -> `base_asset=XBT`, `quote_asset=USD`, the code its symbol carries, though the `base` field `/instruments` sends beside it reads `BTC`. Symbols whose suffix isn't in that list will fall through to empty strings.
+
+<br>
+
+### No inverse perpetuals are listed
+
+Kraken Futures lists no inverse perpetuals: `/instruments` returns no `PI_` symbol. The `inverse` market stays registered, and the adapter still keeps instruments of type `futures_inverse` named `PI_` for it, so `/kraken/inverse/markets` answers an empty list and an inverse symbol is answered as one Kraken does not list.
 
 <br>
 
@@ -354,7 +360,7 @@ Kraken's spot ticker exposes `o` = "today's opening price" (UTC midnight) but no
 
 ### Inverse `vol24h` and `volumeQuote` semantics
 
-For Kraken inverse perpetuals (`PI_*`), the upstream returns `vol24h` as the **contract count** (each contract = 1 USD on Kraken inverse). `Ticker.volume_24h` lands as `{native: vol24h, unit: "contract", contract_size: 1.0, usd: native * contract_size, usd_basis: {method: "contract_size"}}`. Because `contract_size = 1`, `usd == native` numerically, which is the expected "200 == 200" pattern, not a bug. Linear / multi-collateral perpetuals (`PF_*`) follow the conventional layout: `vol24h` is the base coin, `volume_24h.unit = "base"`, USD derived from close * native.
+On a Kraken inverse perpetual (`PI_*`), the adapter reads `vol24h` as the **contract count** (each contract = 1 USD on Kraken inverse). `Ticker.volume_24h` lands as `{native: vol24h, unit: "contract", contract_size: 1.0, usd: native * contract_size, usd_basis: {method: "contract_size"}}`. Because `contract_size = 1`, `usd == native` numerically, which is the expected "200 == 200" pattern, not a bug. Linear / multi-collateral perpetuals (`PF_*`) follow the conventional layout: `vol24h` is the base coin, `volume_24h.unit = "base"`, USD derived from close * native.
 
 <br>
 
