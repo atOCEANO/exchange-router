@@ -10,7 +10,7 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
-    build_step,
+    build_step, count_decimals,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -451,9 +451,7 @@ class KucoinAdapter(BaseExchange):
 
     @staticmethod
     def _precision(value: str) -> int:
-        if not value or "." not in str(value):
-            return 0
-        return len(str(value).split(".")[1].rstrip("0"))
+        return count_decimals(value) or 0
 
 
     async def _make_request(self, method: str, base: str, endpoint: str, params: Optional[Dict] = None) -> Any:
