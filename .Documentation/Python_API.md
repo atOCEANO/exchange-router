@@ -40,6 +40,7 @@ The return surface follows one rule:
 | Time series (candles, trades, agg_trades, funding_rate, open_interest, liquidations, long_short_ratio) | `pandas.DataFrame`, datetime index, sorted oldest-first, flat stable columns |
 | Point snapshot (ticker, book_ticker, mark_price, symbol_info) | `Row`, a flat `dict` with attribute access and a `.raw` wire-dict escape hatch |
 | Order book | one `DataFrame` with columns `side, price, qty` |
+| Margin tiers | one `DataFrame` with a plain row index, one row per tier |
 | Batch (`*_many`) | `BatchResult`, behaves like a dict over the symbols that returned |
 | Discovery (exchanges, market_types, capabilities, markets) | `dict` / `list` |
 
@@ -280,6 +281,23 @@ ob.attrs["qty_unit"]    # "base"
 <br>
 <br>
 
+## Margin tiers
+
+`get_margin_tiers` returns an exchange's tier table for one perpetual: a `DataFrame` with a plain row index and the columns `up_to, max_leverage, maintenance_margin_rate, initial_margin_rate, maintenance_deduction`, one row per tier in rising order. `quote`, `up_to_unit`, and `timestamp` are in `df.attrs`. `up_to_unit` says whether `up_to` is a position value in the quote asset (`"quote"`), an amount of the base coin (`"base"`) or a contract count (`"contract"`), and `timestamp` is when the router read the table from the exchange. The rates are fractions of a position's value, and `maintenance_deduction` comes off the position's value times `maintenance_margin_rate`, in that value's unit: the quote asset on a linear market, the coin on an inverse one. A `"contract"` count converts through the `contract_size` that `get_symbol_info` gives. An open last tier's `up_to` is `NaN`, and so is any value the exchange does not serve.
+
+```python
+tiers = client.get_margin_tiers("bybit", "linear", "BTCUSDT")
+
+tiers.attrs["up_to_unit"]          # "quote"
+tiers.iloc[0].up_to                # 300000.0
+tiers.iloc[0].max_leverage         # 150.0
+```
+
+Spot markets, and Binance, Kraken and KuCoin, raise `NotSupported`, as does a service older than 3.2.0, which the message names by its version. A listed symbol whose exchange serves no table returns the empty frame with its columns and a warning. On a market handle the same call is `m.margin_tiers()`. Where each exchange reads its tiers is in [Exchange Notes](Exchange_Notes.md#margin-tiers).
+
+<br>
+<br>
+
 ## Provenance across a concat
 
 `df.attrs` does not survive `pd.concat`. When you stitch frames from several venues and need per-row provenance, `with_provenance` promotes the constants to columns first:
@@ -320,7 +338,7 @@ df.attrs["warnings"]
 # ['open_interest binance/linear/BTCUSDT: 2 of 30 rows have usd=NaN (join missed; native is populated)']
 ```
 
-What warns: open-interest rows with `NaN` `usd`, fewer rows than requested on a paginated route, a mark price with no index or no funding, an opaque long/short scope (the account columns are `NaN`), trades with null ids, a funding cycle that changed mid-window, a non-USD quote currency, and an empty response.
+What warns: open-interest rows with `NaN` `usd`, fewer rows than requested on a paginated route, a mark price with no index or no funding, an opaque long/short scope (the account columns are `NaN`), trades with null ids, a funding cycle that changed mid-window, a non-USD quote currency, a margin tiers table with no tiers, and an empty response.
 
 <br>
 <br>
@@ -406,7 +424,7 @@ The router raises a small typed tree, so failures are programmable without parsi
 | `NotFound` | `404`, an unknown exchange | both |
 | `RateLimited` | `429` from the service | `service` only |
 | `UpstreamUnavailable` | `503`, carries `.retry_after` | both |
-| `NotSupported` | the route is not exposed on this exchange and market, caught before the request, or a server `501` | both |
+| `NotSupported` | the route is not exposed on this exchange and market, caught before the request, a server `501`, or a service older than the route (`margin_tiers` before 3.2.0) | both |
 | `RouterUnreachable` | transport failure, or retries exhausted | `service` only |
 | `SchemaMismatch` | the SDK and the service disagree on the wire contract; carries `.sdk_schema` and `.service_schema` | `service` only |
 | `RouterError` | any other status the server returns (for example `500` or a `502` upstream-shape failure), carrying `.status` | both |
@@ -496,6 +514,8 @@ Signatures are for the sync `Router`. `AsyncRouter` is identical with `await`, a
 
 **Order book (returns a `DataFrame`).** `get_orderbook(exchange, market_type, symbol, depth=20)`.
 
+**Margin tiers (returns a `DataFrame`).** `get_margin_tiers(exchange, market_type, symbol)`, on linear and inverse markets where the exchange serves tiers. It is not a series, so no `*_many` method or `fetch_many` route takes it.
+
 **Series (return DataFrames).**
 
 ```python
@@ -516,7 +536,7 @@ get_long_short_ratio(exchange, market_type, symbol, period="5m", limit=30, start
 
 **Provenance helper.** `with_provenance(df)` returns a copy with `exchange`, `symbol`, `quote`, and `unit` promoted to columns.
 
-`verbose` overrides the router default for that call on every series method, on `get_ticker`, `get_book_ticker`, `get_mark_price` and `get_orderbook`, and on every `*_many` method; `get_symbol_info` does not take it. On `get_ticker` and `get_book_ticker` it changes nothing visible today, since their only warning path is the preflight and the sole preflight warning is the orderbook depth snap.
+`verbose` overrides the router default for that call on every series method, on `get_ticker`, `get_book_ticker`, `get_mark_price`, `get_orderbook` and `get_margin_tiers`, and on every `*_many` method; `get_symbol_info` does not take it. On `get_ticker` and `get_book_ticker` it changes nothing visible today, since their only warning path is the preflight and the sole preflight warning is the orderbook depth snap.
 
 <br>
 <br>

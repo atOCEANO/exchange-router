@@ -27,8 +27,17 @@
 
 ## Migration
 
-Four hops, newest first. `schema_version` has been 3 throughout: no field has been renamed, removed or retyped, so code written against an older release keeps parsing what a newer one sends. 3.1.0 adds two fields and corrects five values; the hops before it change the Python surface.
+Five hops, newest first. `schema_version` has been 3 throughout: no field has been renamed, removed or retyped, so code written against an older release keeps parsing what a newer one sends. 3.2.0 adds a route, and 3.1.0 two fields and five corrected values; the hops before them change the Python surface.
 
+<br>
+
+## 3.1.x to 3.2.0
+
+**One route is added, and nothing is renamed or removed.** `GET /{exchange}/{market_type}/margin_tiers/{symbol}` serves an exchange's margin tiers, read in Python with `get_margin_tiers(...)` or `m.margin_tiers()` as a `DataFrame`, and every market's capability block gains `margin_tiers`. Bybit, OKX and Hyperliquid serve it on their perpetuals; spot markets and Binance, Kraken and KuCoin answer `501`.
+
+**An older service has no such route.** A 3.1.x or older service answers the path with a bare `404`. The 3.2.0 SDK, finding no `margin_tiers` block in that service's capabilities, raises `NotSupported` naming the service's version before it asks. Every other method reads an older service as before.
+
+<br>
 <br>
 
 ## 3.0.x to 3.1.0

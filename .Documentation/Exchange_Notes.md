@@ -79,6 +79,23 @@ A step built from two exchange numbers is their decimal product, converted to a 
 
 <br>
 
+### Margin tiers
+
+`/margin_tiers` serves an exchange's table of how leverage falls and margin rises as a position grows, on the perpetuals of Bybit, OKX and Hyperliquid.
+
+| Exchange | Source | `up_to_unit` | Left `null` |
+| :--- | :--- | :--- | :--- |
+| Binance | none, the route answers `501` | | |
+| Bybit | `risk-limit` for the symbol | `quote` on linear, `base` on inverse | `maintenance_deduction` on the first tier, which Bybit leaves blank |
+| OKX | `position-tiers` for the swap's family, the cross-margin table | `base` on linear (`maxSz` contracts times `ctVal`), `contract` on inverse | `maintenance_deduction`, which OKX does not send |
+| Kraken | none, the route answers `501` | | |
+| KuCoin | none, the route answers `501` | | |
+| Hyperliquid | `marginTables` in the `metaAndAssetCtxs` response the instrument list is read from | `quote` | both rates and `maintenance_deduction`, which Hyperliquid does not serve |
+
+A Bybit or OKX table is read the first time it is asked for and kept 24 hours; Hyperliquid's arrive with its instrument list and refresh with it. Hyperliquid numbers its single-tier tables below 50 and lists only the tiered ones, 50 and above: an asset on a single-tier table, which most are, answers one open tier at the leverage Hyperliquid serves for the asset, and an asset whose tiered table is missing from the response fails rather than answering one tier. Binance's keyless table sits behind its website rather than in the API it documents, Kraken publishes several tables per instrument and which one applies depends on the account, and KuCoin applies a separate rule under cross margin, so the three stay off ([0022](Decisions.md)).
+
+<br>
+
 ### Data fidelity rule
 
 The router never invents data. When an upstream omits a field, the router surfaces the gap honestly rather than guessing:

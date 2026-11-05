@@ -70,6 +70,7 @@ The CLI in `__main__.py` invokes `runner.run(...)`, which executes a fixed top-o
 | `probes/snapshot.py` | `SnapshotProbe` + ticker / book / mark check helpers | 125 |
 | `probes/orderbook.py` | `OrderBookProbe` (multi-depth, ordering, freshness) | 130 |
 | `probes/trades.py` | `TradesProbe` (multi-limit, uniqueness, ordering) | 140 |
+| `probes/margin_tiers.py` | `MarginTiersProbe` (shape, rising bounds, an open tier only last, rates) | 110 |
 | `probes/paginated.py` | `PaginatedProbe` (recent + 5 sub-probes covering limit checks and anchored windows) | 275 |
 | `probes/websocket.py` | `WebSocketProbe` + `WS_CHANNEL_MODEL` registry | 180 |
 | `probes/info.py` | `InfoProbe` (reads `/markets/{symbol}`, name `markets:detail`) | 145 |
@@ -115,6 +116,12 @@ Probed at every declared depth in `caps.depths` that falls within `[1, 100]`, or
 ### Trades
 
 Probed at `[1, min(100, max_limit), max_limit]`. Asserts ascending timestamps (router contract), unique `id` values, every `side in {"buy","sell"}`, `len <= limit`.
+
+<br>
+
+### Margin tiers
+
+Probed on every market whose `margin_tiers` block declares `rest: True`, for the market's probe symbol. Pydantic shape, then hard FAILs for an open tier before the last, an `up_to` that does not rise from tier to tier, a non-positive `max_leverage`, or a rate outside `(0, 1]`, and WARNs for a `max_leverage` that rises from one tier to the next, a maintenance rate above the initial rate, or a table with no tiers.
 
 <br>
 

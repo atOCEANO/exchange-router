@@ -125,7 +125,8 @@ All adapters must inherit from `BaseExchange` in `exchange_router/exchanges/base
 - [ ] **`native_symbol` Field:** Populate `native_symbol` on every `SymbolInfo` object with the raw exchange symbol before normalization.
 - [ ] **`funding` Field:** Set `SymbolInfo.funding = None` on spot, `build_funding_convention("discrete")` on discrete-funding perps, and `build_funding_convention("continuous")` on continuous-funding perps.
 - [ ] **`tick_size` and `qty_step` Fields:** Set them from the exchange's own price step and quantity step, the quantity step in `qty_unit` (on a contract-denominated linear market, the lot times the contract's value). Build each with `base.build_step`, or `base.build_step_from_decimals` where the exchange states a count of decimals; both take the exchange's numbers as they arrive and give `None` for any that do not make a positive, finite step, so a step the exchange leaves out or sends malformed reads `null` without stopping the instrument list.
-- [ ] **`build_*` constructors:** Every record-construction site (Trade, AggTrade, Liquidation, BookTicker, Ticker, Candle, MarkPrice, OpenInterest, FundingRate) must go through the matching `base.build_*` helper. Do not construct nested value objects (`QtyValue`, `VolumeValue`, `OiValue`, `FundingCurrent`, `FundingHistorical`) by hand.
+- [ ] **`get_margin_tiers` (optional):** Override it where the exchange's documented API serves, without a key, one table that applies to every account ([0022](Decisions.md)), and set the `margin_tiers` block's `rest` to `True` on those markets; the base method answers `501` everywhere else. Return the tiers in the exchange's rising order and say through `up_to_unit` how each `up_to` reads. A table fetched on demand goes through `self._margin_table(key, fetch)`, whose `fetch` returns the built `MarginTier` list so that a table that will not parse counts as a failed refresh; it keeps the table 24 hours under its own lock and serves the old one when a refresh fails; never fill it at warm-up, and leave a rate the exchange does not serve `null` rather than deriving it.
+- [ ] **`build_*` constructors:** Every record-construction site (Trade, AggTrade, Liquidation, BookTicker, Ticker, Candle, MarkPrice, OpenInterest, FundingRate) must go through the matching `base.build_*` helper. Do not construct nested value objects (`QtyValue`, `VolumeValue`, `OiValue`, `FundingCurrent`, `FundingHistorical`, `MarginTier`) by hand; `build_margin_tier` reads a blank bound, rate or deduction as `null`, and `max_leverage` is required.
 - [ ] **`quote` field at row level:** Every record that carries quote-currency values reads `quote = info.quote_asset` from the adapter's SymbolInfo cache and passes it at the row level. Look up once per route handler / WS stream and reuse.
 - [ ] **Internal `_funding_interval_cache`:** Discrete-funding adapters maintain a per-symbol `cycle_ms` cache. Shape varies: Binance, Bybit, KuCoin use `Dict[MarketType, Dict[str, int]]` keyed by model symbol; OKX uses `Dict[str, int]` keyed by upstream `inst_id`. Populate it during `_fetch_exchange_info` (or as a warm step in `_warm()` for adapters that need per-symbol upstream calls); read it from MarkPrice and FundingRate constructors. SymbolInfo's `funding` block carries only the categorical `kind`, never `cycle_ms`.
 - [ ] **Internal `_contract_multiplier_cache` (contract-denominated upstreams only):** When the upstream sizes linear markets in contracts (KuCoin `multiplier`, OKX `ctVal`), keep the per-symbol multiplier in an adapter-internal `_contract_multiplier_cache: Dict[MarketType, Dict[str, float]]` populated during `_fetch_exchange_info`, and convert every contract-denominated linear surface to base units with it: data rows and `SymbolInfo.min_qty` / `max_qty` / `quantity_precision` / `qty_step`. `SymbolInfo.contract_size` stays `null` on linear per the schema; it carries the quote notional per contract on inverse only.
@@ -223,6 +224,10 @@ def _build_capabilities(self) -> Dict[str, Any]:
                     "retention_ms": None,
                     "intervals":    None,
                 },
+                "margin_tiers": {
+                    "rest": False,
+                    "ws":   False,
+                },
             },
             MarketType.LINEAR: { ... },   # full block, no factored variables
             MarketType.INVERSE: { ... },  # full block, no factored variables
@@ -230,7 +235,7 @@ def _build_capabilities(self) -> Dict[str, Any]:
     }
 ```
 
-The canonical route order across every adapter is `ticker, book_ticker, mark_price, orderbook, trades, agg_trades, candles, funding_rate, open_interest, liquidations, long_short_ratio`.
+The canonical route order across every adapter is `ticker, book_ticker, mark_price, orderbook, trades, agg_trades, candles, funding_rate, open_interest, liquidations, long_short_ratio, margin_tiers`.
 
 <br>
 
@@ -249,6 +254,7 @@ Each route type defines its own field set. Declare every field for every adapter
 | `open_interest` | `rest`, `ws`, `paginated`, `max_limit`, `retention_ms`, `intervals` |
 | `liquidations` | `rest`, `ws`, `paginated`, `max_limit`, `retention_ms`, `completeness` |
 | `long_short_ratio` | `rest`, `ws`, `paginated`, `max_limit`, `retention_ms`, `intervals` |
+| `margin_tiers` | `rest`, `ws` |
 
 <br>
 

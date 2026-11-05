@@ -58,7 +58,7 @@ Every test body in the suite runs against both backends and asserts the same fra
 
 The router uses an abstract base contract (`BaseExchange`). Each exchange is an isolated adapter that implements it; the routing core never needs to know which exchange it is talking to. The loader in `exchange_router/exchanges/__init__.py` scans the directory at startup, instantiates every `BaseExchange` subclass it finds, and registers them in `EXCHANGE_REGISTRY`. Adding a new exchange is a matter of dropping a compliant adapter into that directory and restarting.
 
-The wire contract is pinned to an integer `schema_version` field returned at `GET /`; the full record shapes live in [HTTP Reference](HTTP_Reference.md#response-shapes). Adapters never construct nested value objects by hand: they call shared `build_*` helpers in `exchange_router/exchanges/base.py` (`build_qty_value`, `build_volume_value`, `build_oi_value`, `build_funding_current`, `build_funding_historical`, `build_funding_convention`). This keeps the conversion logic in one place and the adapter authoring cost low.
+The wire contract is pinned to an integer `schema_version` field returned at `GET /`; the full record shapes live in [HTTP Reference](HTTP_Reference.md#response-shapes). Adapters never construct nested value objects by hand: they call shared `build_*` helpers in `exchange_router/exchanges/base.py` (`build_qty_value`, `build_volume_value`, `build_oi_value`, `build_funding_current`, `build_funding_historical`, `build_funding_convention`, `build_margin_tier`). This keeps the conversion logic in one place and the adapter authoring cost low.
 
 Before deploying outside localhost, see [Security and Exposure](#security-and-exposure).
 
@@ -183,7 +183,7 @@ The check is never made inside the constructor, which cannot await a round trip,
 The router is designed to run as a single container per exchange IP. A few consequences follow from that.
 
 * **Rate limit state is in-memory.** Each router instance tracks its own backoff timestamps and per-adapter locks. Running two router instances behind a load balancer that both hit the same exchange from the same IP will double-count request weight and risk an IP ban. If you need horizontal scaling, shard exchanges across instances rather than replicating them.
-* **No persistence.** The service holds no database and no on-disk state, and historical data is always pulled from upstream on demand. In memory it keeps each exchange's instrument metadata, most of it refreshed every 24h, a few short-lived upstream snapshots and the backoff state above; a restart drops all of that along with in-flight requests and WebSocket sessions.
+* **No persistence.** The service holds no database and no on-disk state, and historical data is always pulled from upstream on demand. In memory it keeps each exchange's instrument metadata, most of it refreshed every 24h; the margin tier tables it has read, each kept 24h; a few short-lived upstream snapshots; and the backoff state above. A restart drops all of that along with in-flight requests and WebSocket sessions.
 * **No built-in observability.** The router logs to stdout via Python's `logging` module. Metrics and traces are not emitted. If you need them, wrap the service at the edge (reverse proxy, sidecar) or add them directly to the adapter layer.
 * **CORS is open.** `allow_origins=["*"]` is set so any local client can talk to the router during development. If you expose the router beyond localhost, put it behind a proxy that enforces origin checks.
 

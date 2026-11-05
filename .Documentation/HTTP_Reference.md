@@ -109,6 +109,7 @@ Every quantitative record (Trade, Candle, OpenInterest, etc.) carries nested val
 | `GET` | `/{exchange}/{market_type}/funding_rate/{symbol}` | Historical funding rates. | `start`, `limit` |
 | `GET` | `/{exchange}/{market_type}/open_interest/{symbol}` | Open interest history. On `linear` markets the route joins matching candles to populate the USD basis; on `inverse` it uses `contract_size` directly. | `period`, `start`, `limit` |
 | `GET` | `/{exchange}/{market_type}/long_short_ratio/{symbol}` | Long/short account distribution. | `period`, `start`, `limit` |
+| `GET` | `/{exchange}/{market_type}/margin_tiers/{symbol}` | Margin tiers: the leverage cap and margin rates a position gets at each size. | None |
 
 <br>
 
@@ -145,6 +146,9 @@ Every quantitative record carries one or more categorical discriminator fields t
 | `account_scope` | LongShortRatio | `"top_traders"` | Only top-trader accounts per the upstream's classification. |
 |  |  | `"all_accounts"` | Every account at the venue. |
 |  |  | `"opaque"` | Upstream exposes only the ratio; `long_account` and `short_account` will be null. |
+| `up_to_unit` | MarginTiers | `"quote"` | Each tier's `up_to` is a position value in the quote asset. |
+|  |  | `"base"` | `up_to` is an amount of the base coin. |
+|  |  | `"contract"` | `up_to` is a contract count. |
 | `side` | Trade / AggTrade | `"buy"` / `"sell"` | Taker (aggressor) side. Universal across venues. |
 |  | Liquidation | `"buy"` / `"sell"` | The liquidation order's book side, the opposite of the liquidated position's side: a long being liquidated produces `"sell"`. |
 
@@ -484,6 +488,35 @@ On linear markets, the route handler fetches matching candles after the OI rows 
 
 No `quote` field; this metric is dimensionless. `account_scope` carries the upstream's aggregation level: `"top_traders"`, `"all_accounts"`, or `"opaque"` when no breakdown is exposed. Per-exchange specifics live in [Exchange Notes](Exchange_Notes.md). Cross-exchange comparisons require matching scope.
 
+**Margin Tiers** &nbsp;•&nbsp; `GET /margin_tiers/{symbol}` &nbsp;•&nbsp; *linear/inverse only*
+```json
+{
+  "symbol": "BTCUSDT",
+  "market_type": "linear",
+  "quote": "USDT",
+  "up_to_unit": "quote",
+  "tiers": [
+    {
+      "up_to": 300000.0,
+      "max_leverage": 150.0,
+      "maintenance_margin_rate": 0.0033,
+      "initial_margin_rate": 0.0066,
+      "maintenance_deduction": null
+    },
+    {
+      "up_to": 2000000.0,
+      "max_leverage": 100.0,
+      "maintenance_margin_rate": 0.005,
+      "initial_margin_rate": 0.01,
+      "maintenance_deduction": 510.0
+    }
+  ],
+  "timestamp": 1793808120000
+}
+```
+
+The first two of Bybit `BTCUSDT`'s 35 tiers. A tier covers positions up to its `up_to`, read through `up_to_unit`, and an open last tier has `up_to` null. The rates are fractions of a position's value, and `maintenance_deduction` comes off the position's value times `maintenance_margin_rate`, in that value's unit: the quote asset on a linear market, the coin on an inverse one. A `contract` count converts through the `contract_size` that `/markets/{symbol}` gives. A value the exchange does not serve is null, as Bybit's first deduction and every Hyperliquid rate are. `timestamp` is when the router read the table from the exchange; a table is kept for 24 hours, so a cached answer says how old it is. A listed symbol whose exchange serves no table answers `"tiers": []`. Which exchanges serve tiers, and where each reads them, is in [Exchange Notes](Exchange_Notes.md#margin-tiers).
+
 <br>
 
 ### HTTP Status Codes
@@ -528,9 +561,9 @@ The router never masks upstream error detail. If the underlying exchange returns
 **Common causes by code:**
 
 * **400** reached an adapter and was rejected. Usually an unknown symbol for this exchange or market type (Kraken spot uses legacy codes like `XBTUSDT`, not `BTCUSDT`; check `GET /{exchange}/{market_type}/markets` for the canonical list), or a parameter out of range (`limit` or `depth` below 1, or an `interval` / `period` the venue does not declare; check `GET /{exchange}/capabilities`).
-* **404** means the exchange name in the path is not registered: a typo, or an adapter that failed to load at startup (check the router's stdout for `Failed to load adapter`).
+* **404** means the exchange name in the path is not registered: a typo, or an adapter that failed to load at startup (check the router's stdout for `Failed to load adapter`). On `margin_tiers`, a 404 whose body is `{"detail": "Not Found"}` comes from a service older than 3.2.0, which has no such route; the SDK raises `NotSupported` naming the service's version.
 * **500** means an adapter bug or an unexpected error escaped the request loop. A reproducible 500 is a bug report.
-* **501** means the route is not supported on this exchange and market, per the capability map: for example `funding_rate` or `mark_price` on spot, `liquidations` on KuCoin or Kraken, `long_short_ratio` on Bybit spot or any spot market.
+* **501** means the route is not supported on this exchange and market, per the capability map: for example `funding_rate` or `mark_price` on spot, `liquidations` on KuCoin or Kraken, `long_short_ratio` on Bybit spot or any spot market, `margin_tiers` on any spot market and on Binance, Kraken and KuCoin.
 * **502** means the upstream answered but the body could not be normalized into the schema, usually a shape drift on the venue side. The `detail` carries the validation error.
 * **503** means the upstream is throttling or has banned the IP and the wait exceeds the adapter's fail-fast threshold (30s on Bybit and KuCoin, 60s on OKX), or the retry budget was exhausted on any adapter. The request was valid; retry after the `Retry-After` window. Binance and Kraken do not fail fast on an active cooldown; they sleep and retry, and surface `503` only once the retry budget is exhausted.
 

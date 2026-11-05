@@ -87,7 +87,7 @@ Public market data from every registered exchange adapter, normalized to one sch
 
 * **No orders.** Read-only. There are no order-placement, cancellation, position-management, or transfer endpoints.
 * **No account access.** No authentication, no API keys, no account-state queries. Every endpoint is public market data.
-* **No persistence.** No database and no on-disk state, and market data is fetched from upstream on demand. In memory it keeps each exchange's instrument metadata, most of it refreshed every 24h, a few short-lived upstream snapshots and each adapter's backoff state, and a restart drops all of that along with in-flight requests and WebSocket sessions.
+* **No persistence.** No database and no on-disk state, and market data is fetched from upstream on demand. In memory it keeps each exchange's instrument metadata, most of it refreshed every 24h; the margin tier tables it has read, each kept 24h; a few short-lived upstream snapshots; and each adapter's backoff state. A restart drops all of that along with in-flight requests and WebSocket sessions.
 * **No historical archive.** History is fetched from upstream on demand, bounded by each venue's own retention. The router never stores rows past the response.
 * **No inbound rate limiting.** Outbound rate-limit respect, which keeps the router from being banned by upstreams, is enforced per adapter. Inbound limits, quotas, and per-client throttling belong in a reverse proxy.
 * **No observability.** Logs go to stdout via Python `logging`. Metrics and traces are not emitted. Wrap the service at the edge if you need them.
@@ -120,6 +120,7 @@ Designed for localhost or a trusted network: no TLS termination, no authenticati
       <th style="padding: 12px; text-align: center;">Trades</th>
       <th style="padding: 12px; text-align: center;">OI / FR</th>
       <th style="padding: 12px; text-align: center;">L/S Ratio</th>
+      <th style="padding: 12px; text-align: center;">Tiers</th>
       <th style="padding: 12px; text-align: left;">WebSocket Streams</th>
     </tr>
   </thead>
@@ -136,6 +137,7 @@ Designed for localhost or a trusted network: no TLS termination, no authenticati
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
+      <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: left; font-size: 0.85em; max-width: 250px;">Ticker, Book Ticker, Trades, Agg Trades, Orderbook</td>
     </tr>
     <tr style="border-bottom: 1px solid #30363d;">
@@ -146,6 +148,7 @@ Designed for localhost or a trusted network: no TLS termination, no authenticati
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
+      <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: left; font-size: 0.85em; max-width: 250px;">Ticker, Book Ticker, Trades, Agg Trades, Orderbook, Mark Price, Liquidations</td>
     </tr>
     <tr style="border-bottom: 2px solid #30363d;">
@@ -156,6 +159,7 @@ Designed for localhost or a trusted network: no TLS termination, no authenticati
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
+      <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: left; font-size: 0.85em; max-width: 250px;">Ticker, Book Ticker, Trades, Agg Trades, Orderbook, Mark Price, Liquidations</td>
     </tr>
     <!-- Bybit -->
@@ -170,6 +174,7 @@ Designed for localhost or a trusted network: no TLS termination, no authenticati
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
+      <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: left; font-size: 0.85em; max-width: 250px;">Ticker, Book Ticker, Trades, Orderbook</td>
     </tr>
     <tr style="border-bottom: 1px solid #30363d;">
@@ -180,10 +185,12 @@ Designed for localhost or a trusted network: no TLS termination, no authenticati
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
+      <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: left; font-size: 0.85em; max-width: 250px;">Ticker, Book Ticker, Trades, Orderbook, Liquidations</td>
     </tr>
     <tr style="border-bottom: 2px solid #30363d;">
       <td style="padding: 8px 12px; opacity: 0.8;">Inverse</td>
+      <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
@@ -204,6 +211,7 @@ Designed for localhost or a trusted network: no TLS termination, no authenticati
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
+      <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: left; font-size: 0.85em; max-width: 250px;">Ticker, Book Ticker, Trades, Orderbook</td>
     </tr>
     <tr style="border-bottom: 1px solid #30363d;">
@@ -214,6 +222,7 @@ Designed for localhost or a trusted network: no TLS termination, no authenticati
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
+      <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: left; font-size: 0.85em; max-width: 250px;">Ticker, Book Ticker, Trades, Orderbook, Mark Price</td>
     </tr>
     <tr style="border-bottom: 2px solid #30363d;">
@@ -224,6 +233,7 @@ Designed for localhost or a trusted network: no TLS termination, no authenticati
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
+      <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: left; font-size: 0.85em; max-width: 250px;">Ticker, Book Ticker, Trades, Orderbook, Mark Price</td>
     </tr>
     <!-- OKX -->
@@ -238,6 +248,7 @@ Designed for localhost or a trusted network: no TLS termination, no authenticati
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
+      <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: left; font-size: 0.85em; max-width: 250px;">Ticker, Book Ticker, Trades, Orderbook</td>
     </tr>
     <tr style="border-bottom: 1px solid #30363d;">
@@ -248,10 +259,12 @@ Designed for localhost or a trusted network: no TLS termination, no authenticati
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
+      <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: left; font-size: 0.85em; max-width: 250px;">Ticker, Book Ticker, Trades, Orderbook, Mark Price, Liquidations</td>
     </tr>
     <tr style="border-bottom: 2px solid #30363d;">
       <td style="padding: 8px 12px; opacity: 0.8;">Inverse</td>
+      <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
@@ -272,6 +285,7 @@ Designed for localhost or a trusted network: no TLS termination, no authenticati
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
+      <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: left; font-size: 0.85em; max-width: 250px;">Ticker, Book Ticker, Trades, Orderbook</td>
     </tr>
     <tr style="border-bottom: 1px solid #30363d;">
@@ -282,6 +296,7 @@ Designed for localhost or a trusted network: no TLS termination, no authenticati
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
+      <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: left; font-size: 0.85em; max-width: 250px;">Ticker, Book Ticker, Trades, Orderbook, Mark Price</td>
     </tr>
     <tr style="border-bottom: 2px solid #30363d;">
@@ -291,6 +306,7 @@ Designed for localhost or a trusted network: no TLS termination, no authenticati
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
+      <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: left; font-size: 0.85em; max-width: 250px;">Ticker, Book Ticker, Trades, Orderbook, Mark Price</td>
     </tr>
@@ -306,6 +322,7 @@ Designed for localhost or a trusted network: no TLS termination, no authenticati
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
+      <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: left; font-size: 0.85em; max-width: 250px;">Ticker, Book Ticker, Trades, Orderbook</td>
     </tr>
     <tr style="border-bottom: 1px solid #30363d;">
@@ -316,10 +333,12 @@ Designed for localhost or a trusted network: no TLS termination, no authenticati
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
+      <td style="padding: 8px; text-align: center;">[x]</td>
       <td style="padding: 8px; text-align: left; font-size: 0.85em; max-width: 250px;">Ticker, Book Ticker, Trades, Orderbook, Mark Price</td>
     </tr>
     <tr style="border-bottom: 1px solid #30363d;">
       <td style="padding: 8px 12px; opacity: 0.8;">Inverse</td>
+      <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
       <td style="padding: 8px; text-align: center; opacity: 0.3;">[ ]</td>
