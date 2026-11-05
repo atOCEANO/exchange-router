@@ -5,6 +5,7 @@ from exchange_router.exchanges.base import (
     build_funding_convention,
     build_funding_current,
     build_funding_historical,
+    build_margin_tier,
     build_oi_value,
     build_qty_value,
     build_volume_value,
@@ -16,6 +17,7 @@ from exchange_router.models import (
     FundingRate,
     Liquidation,
     LongShortRatio,
+    MarginTiers,
     MarkPrice,
     MarketType,
     OpenInterest,
@@ -87,12 +89,13 @@ def _series(market_type: MarketType, intervals: Optional[List[str]] = None, pagi
 
 
 _SPOT_CAPS = {
-    "ticker":      _point(MarketType.SPOT, "ticker"),
-    "book_ticker": _point(MarketType.SPOT, "book_ticker"),
-    "orderbook":   {"rest": True, "ws": True, "depths": DEPTHS},
-    "trades":      _series(MarketType.SPOT),
-    "agg_trades":  _series(MarketType.SPOT, paginated=True),
-    "candles":     _series(MarketType.SPOT, intervals=INTERVALS, paginated=True),
+    "ticker":       _point(MarketType.SPOT, "ticker"),
+    "book_ticker":  _point(MarketType.SPOT, "book_ticker"),
+    "orderbook":    {"rest": True, "ws": True, "depths": DEPTHS},
+    "trades":       _series(MarketType.SPOT),
+    "agg_trades":   _series(MarketType.SPOT, paginated=True),
+    "candles":      _series(MarketType.SPOT, intervals=INTERVALS, paginated=True),
+    "margin_tiers": {"rest": False, "ws": False},
 }
 
 _LINEAR_CAPS = {
@@ -107,6 +110,7 @@ _LINEAR_CAPS = {
     "open_interest":     _series(MarketType.LINEAR, intervals=OI_PERIODS, paginated=True),
     "liquidations":      _series(MarketType.LINEAR),
     "long_short_ratio":  _series(MarketType.LINEAR, intervals=LSR_PERIODS),
+    "margin_tiers":      {"rest": True, "ws": False},
 }
 
 _INVERSE_CAPS = {
@@ -120,6 +124,7 @@ _INVERSE_CAPS = {
     "funding_rate":  _series(MarketType.INVERSE, paginated=True),
     "open_interest": _series(MarketType.INVERSE, intervals=OI_PERIODS, paginated=True),
     "liquidations":  {"rest": False, "ws": False},
+    "margin_tiers":  {"rest": True, "ws": False},
 }
 
 CAPABILITIES = {
@@ -195,6 +200,37 @@ class FakeExchange(BaseExchange):
             if info.symbol == symbol:
                 return info
         raise ValueError(f"symbol '{symbol}' is not listed on fake {market_type.value}")
+
+
+    async def get_margin_tiers(self, market_type: MarketType, symbol: str) -> MarginTiers:
+        if market_type == MarketType.SPOT:
+            return await super().get_margin_tiers(market_type, symbol)
+
+        self._known(market_type, symbol)
+        tiers = [] if symbol.startswith("ETH") else [
+            build_margin_tier(
+                up_to                   = 1_000_000.0,
+                max_leverage            = 100.0,
+                maintenance_margin_rate = 0.005,
+                initial_margin_rate     = 0.01,
+            ),
+            build_margin_tier(
+                up_to                   = None,
+                max_leverage            = 50.0,
+                maintenance_margin_rate = 0.01,
+                initial_margin_rate     = 0.02,
+                maintenance_deduction   = 5_000.0,
+            ),
+        ]
+
+        return MarginTiers(
+            symbol      = symbol,
+            market_type = market_type,
+            quote       = QUOTES[market_type],
+            up_to_unit  = "quote" if market_type == MarketType.LINEAR else "contract",
+            tiers       = tiers,
+            timestamp   = BASE_TS,
+        )
 
 
     async def get_ticker(self, market_type: MarketType, symbol: str) -> Ticker:

@@ -4,7 +4,7 @@ import pytest
 from fake_exchange import BASE_TS, CONTRACT_SIZE, FUNDING_CYCLE_MS, INTERVAL_MS
 from exchange_router import Router
 from exchange_router.backend import LocalBackend
-from exchange_router.errors import BadRequest
+from exchange_router.errors import BadRequest, NotSupported
 from exchange_router.models import MarketType
 from exchange_router.version import VERSION
 
@@ -122,6 +122,42 @@ async def test_orderbook_stacks_bids_then_asks_with_one_row_per_level(router, ma
     assert df.attrs["qty_unit"]   == unit
     assert df.attrs["quote"]      == quote
     assert df.attrs["exchange"]   == EX
+
+
+@pytest.mark.parametrize("market_type,symbol,quote,unit,size", DERIVATIVES, ids=DERIV_IDS)
+async def test_margin_tiers_come_back_in_rising_order_with_the_time_the_table_was_read(router, market_type, symbol, quote, unit, size):
+    df = await router.get_margin_tiers(EX, market_type, symbol)
+
+    assert list(df.columns) == ["up_to", "max_leverage", "maintenance_margin_rate", "initial_margin_rate", "maintenance_deduction"]
+    assert list(df.index)   == [0, 1]
+
+    assert df["up_to"].iloc[0] == 1_000_000.0
+    assert pd.isna(df["up_to"].iloc[1])
+    assert list(df["max_leverage"]) == [100.0, 50.0]
+    assert pd.isna(df["maintenance_deduction"].iloc[0])
+    assert df["maintenance_deduction"].iloc[1] == 5_000.0
+
+    assert df.attrs["up_to_unit"] == ("quote" if market_type == "linear" else "contract")
+    assert df.attrs["quote"]      == quote
+    assert df.attrs["timestamp"]  == BASE_TS
+    assert df.attrs["exchange"]   == EX
+    assert df.attrs["warnings"]   == []
+
+
+async def test_a_listed_symbol_with_no_table_gives_an_empty_frame_that_says_so(router):
+    df = await router.get_margin_tiers(EX, "linear", "ETHUSDT")
+
+    assert df.empty
+    assert list(df.columns)      == ["up_to", "max_leverage", "maintenance_margin_rate", "initial_margin_rate", "maintenance_deduction"]
+    assert df.attrs["warnings"]  == ["0 tiers returned for fake/linear/ETHUSDT margin_tiers"]
+
+
+async def test_margin_tiers_are_refused_on_spot_and_on_an_unlisted_symbol(router):
+    with pytest.raises(NotSupported):
+        await router.get_margin_tiers(EX, "spot", "BTCUSDT")
+
+    with pytest.raises(BadRequest):
+        await router.get_margin_tiers(EX, "linear", "NOPEUSDT")
 
 
 @pytest.mark.parametrize("market_type,symbol,quote,unit,size", MARKETS, ids=ALL_IDS)

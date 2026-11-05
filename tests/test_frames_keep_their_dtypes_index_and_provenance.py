@@ -83,6 +83,13 @@ async def test_with_provenance_moves_the_attrs_into_columns_without_losing_them(
     assert list(df.columns) == ["open", "high", "low", "close", "volume", "volume_usd"]
 
 
+async def test_with_provenance_carries_the_unit_a_tier_table_is_counted_in(router):
+    wide = with_provenance(await router.get_margin_tiers(EX, "inverse", "BTCUSD"))
+
+    assert list(wide["unit"])     == ["contract", "contract"]
+    assert list(wide["exchange"]) == [EX, EX]
+
+
 async def test_a_frame_survives_a_round_trip_through_a_copy(router):
     df = await router.get_candles(EX, "linear", "BTCUSDT", interval="1h", limit=4)
     assert df.copy().attrs == df.attrs
