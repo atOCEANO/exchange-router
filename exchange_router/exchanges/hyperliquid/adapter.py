@@ -155,6 +155,10 @@ class HyperliquidAdapter(BaseExchange):
                         "retention_ms": None,
                         "intervals":    None,
                     },
+                    "margin_tiers": {
+                        "rest": False,
+                        "ws":   False,
+                    },
                 },
                 MarketType.LINEAR: {
                     "ticker": {
@@ -225,6 +229,10 @@ class HyperliquidAdapter(BaseExchange):
                         "max_limit":    None,
                         "retention_ms": None,
                         "intervals":    None,
+                    },
+                    "margin_tiers": {
+                        "rest": False,
+                        "ws":   False,
                     },
                 },
             },

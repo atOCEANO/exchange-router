@@ -488,6 +488,56 @@ class OrderBook(BaseModel):
     )
 
 
+class MarginTier(BaseModel):
+    up_to: Optional[float] = Field(
+        None,
+        description="Position size where the tier ends, in up_to_unit. Null on an open last tier.",
+    )
+    max_leverage: float = Field(
+        ...,
+        description="Highest leverage the exchange allows for a position in this tier.",
+    )
+    maintenance_margin_rate: Optional[float] = Field(
+        None,
+        description="Maintenance margin as a fraction of position value. Null where the exchange does not serve it (Hyperliquid).",
+    )
+    initial_margin_rate: Optional[float] = Field(
+        None,
+        description="Initial margin as a fraction of position value. Null where the exchange does not serve it (Hyperliquid).",
+    )
+    maintenance_deduction: Optional[float] = Field(
+        None,
+        description="Amount taken off position value times maintenance_margin_rate to give the maintenance margin, in the position value's unit. Null where the exchange serves none, and on Bybit's first tier, which it leaves blank.",
+    )
+
+
+class MarginTiers(BaseModel):
+    symbol: str = Field(
+        ...,
+        description="Routing-facing symbol matching SymbolInfo.symbol.",
+    )
+    market_type: MarketType = Field(
+        ...,
+        description="Market provenance. Always 'linear' or 'inverse'.",
+    )
+    quote: str = Field(
+        ...,
+        description="Quote currency of the market.",
+    )
+    up_to_unit: Literal["quote", "base", "contract"] = Field(
+        ...,
+        description="How to read up_to: 'quote' is a position value in quote, 'base' an amount of the base asset, 'contract' a contract count.",
+    )
+    tiers: List[MarginTier] = Field(
+        ...,
+        description="The exchange's tiers in rising order. Empty when the exchange lists the symbol but serves no table for it.",
+    )
+    timestamp: int = Field(
+        ...,
+        description="When the router read the table from the exchange, in unix milliseconds; a table served from the cache keeps the time it was read.",
+    )
+
+
 class FundingRate(BaseModel):
     symbol: str = Field(
         ...,

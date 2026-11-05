@@ -143,6 +143,10 @@ class BybitAdapter(BaseExchange):
                         "retention_ms": None,
                         "intervals":    None,
                     },
+                    "margin_tiers": {
+                        "rest": False,
+                        "ws":   False,
+                    },
                 },
                 MarketType.LINEAR: {
                     "ticker": {
@@ -214,6 +218,10 @@ class BybitAdapter(BaseExchange):
                         "retention_ms": None,
                         "intervals":    ["5m", "15m", "30m", "1h", "4h", "1d"],
                     },
+                    "margin_tiers": {
+                        "rest": False,
+                        "ws":   False,
+                    },
                 },
                 MarketType.INVERSE: {
                     "ticker": {
@@ -284,6 +292,10 @@ class BybitAdapter(BaseExchange):
                         "max_limit":    None,
                         "retention_ms": None,
                         "intervals":    ["5m", "15m", "30m", "1h", "4h", "1d"],
+                    },
+                    "margin_tiers": {
+                        "rest": False,
+                        "ws":   False,
                     },
                 },
             },

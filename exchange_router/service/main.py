@@ -271,6 +271,12 @@ async def get_long_short_ratio(exchange: str, market_type: MarketType, symbol: s
     return await adapter.get_long_short_ratio(market_type, symbol, period, start, limit)
 
 
+@app.get("/{exchange}/{market_type}/margin_tiers/{symbol}")
+async def get_margin_tiers(exchange: str, market_type: MarketType, symbol: str):
+    adapter = validate_request(exchange, market_type)
+    return await adapter.get_margin_tiers(market_type, symbol)
+
+
 @app.websocket("/ws/{exchange}/{market_type}")
 async def websocket_endpoint(websocket: WebSocket, exchange: str, market_type: MarketType):
     adapter = get_adapter(exchange)

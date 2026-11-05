@@ -160,6 +160,10 @@ class KrakenAdapter(BaseExchange):
                         "retention_ms": None,
                         "intervals":    None,
                     },
+                    "margin_tiers": {
+                        "rest": False,
+                        "ws":   False,
+                    },
                 },
                 MarketType.LINEAR: {
                     "ticker": {
@@ -231,6 +235,10 @@ class KrakenAdapter(BaseExchange):
                         "retention_ms": None,
                         "intervals":    ["1m", "5m", "15m", "30m", "1h", "4h", "12h", "1d"],
                     },
+                    "margin_tiers": {
+                        "rest": False,
+                        "ws":   False,
+                    },
                 },
                 MarketType.INVERSE: {
                     "ticker": {
@@ -301,6 +309,10 @@ class KrakenAdapter(BaseExchange):
                         "max_limit":    None,
                         "retention_ms": None,
                         "intervals":    ["1m", "5m", "15m", "30m", "1h", "4h", "12h", "1d"],
+                    },
+                    "margin_tiers": {
+                        "rest": False,
+                        "ws":   False,
                     },
                 },
             },

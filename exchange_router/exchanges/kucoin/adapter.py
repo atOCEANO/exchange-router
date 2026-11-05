@@ -150,6 +150,10 @@ class KucoinAdapter(BaseExchange):
                         "retention_ms": None,
                         "intervals":    None,
                     },
+                    "margin_tiers": {
+                        "rest": False,
+                        "ws":   False,
+                    },
                 },
                 MarketType.LINEAR: {
                     "ticker": {
@@ -221,6 +225,10 @@ class KucoinAdapter(BaseExchange):
                         "retention_ms": None,
                         "intervals":    None,
                     },
+                    "margin_tiers": {
+                        "rest": False,
+                        "ws":   False,
+                    },
                 },
                 MarketType.INVERSE: {
                     "ticker": {
@@ -291,6 +299,10 @@ class KucoinAdapter(BaseExchange):
                         "max_limit":    None,
                         "retention_ms": None,
                         "intervals":    None,
+                    },
+                    "margin_tiers": {
+                        "rest": False,
+                        "ws":   False,
                     },
                 },
             },

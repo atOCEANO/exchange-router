@@ -17,6 +17,7 @@ COLUMNS: Dict[str, List[str]] = {
     "open_interest":    ["open_interest", "open_interest_usd"],
     "liquidations":     ["price", "qty", "qty_usd", "side"],
     "long_short_ratio": ["ratio", "long_account", "short_account"],
+    "margin_tiers":     ["up_to", "max_leverage", "maintenance_margin_rate", "initial_margin_rate", "maintenance_deduction"],
 }
 
 
@@ -284,6 +285,26 @@ def orderbook(data: Dict[str, Any], ctx: Dict[str, Any]) -> pd.DataFrame:
     return df
 
 
+def margin_tiers(data: Dict[str, Any], ctx: Dict[str, Any]) -> pd.DataFrame:
+    tiers    = data.get("tiers") or []
+    warnings = [] if tiers else [f"0 tiers returned for {ctx['exchange']}/{ctx['market_type']}/{ctx['symbol']} margin_tiers"]
+
+    df = _coerce(pd.DataFrame(tiers, columns=COLUMNS["margin_tiers"]))
+
+    df.attrs.update({
+        "exchange":       ctx["exchange"],
+        "market_type":    ctx["market_type"],
+        "symbol":         ctx["symbol"],
+        "quote":          data.get("quote"),
+        "up_to_unit":     data.get("up_to_unit"),
+        "timestamp":      data.get("timestamp"),
+        "schema_version": SCHEMA_VERSION,
+        "warnings":       warnings,
+    })
+
+    return df
+
+
 def with_provenance(df: pd.DataFrame) -> pd.DataFrame:
     attrs = dict(df.attrs)
     out   = df.copy()
@@ -291,7 +312,7 @@ def with_provenance(df: pd.DataFrame) -> pd.DataFrame:
     out["exchange"] = attrs.get("exchange")
     out["symbol"]   = attrs.get("symbol")
     out["quote"]    = attrs.get("quote")
-    out["unit"]     = attrs.get("volume_unit") or attrs.get("qty_unit") or attrs.get("oi_unit")
+    out["unit"]     = attrs.get("volume_unit") or attrs.get("qty_unit") or attrs.get("oi_unit") or attrs.get("up_to_unit")
 
     out.attrs.update(attrs)
 

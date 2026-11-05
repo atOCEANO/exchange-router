@@ -45,10 +45,11 @@ SERVICE_ROUTES = ("status", "version", "exchanges")
 EXCHANGE_ROUTES = ("capabilities", "market_types")
 
 POINT_METHODS = {
-    "ticker":      "get_ticker",
-    "book_ticker": "get_book_ticker",
-    "mark_price":  "get_mark_price",
-    "symbol_info": "get_symbol_info",
+    "ticker":       "get_ticker",
+    "book_ticker":  "get_book_ticker",
+    "mark_price":   "get_mark_price",
+    "symbol_info":  "get_symbol_info",
+    "margin_tiers": "get_margin_tiers",
 }
 
 SERIES_METHODS = {

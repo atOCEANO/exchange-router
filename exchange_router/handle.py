@@ -54,6 +54,10 @@ class _BaseMarket:
         return self._client.get_orderbook(self.exchange, self.market_type, self.symbol, depth, verbose)
 
 
+    def margin_tiers(self, verbose: Optional[bool] = None):
+        return self._client.get_margin_tiers(self.exchange, self.market_type, self.symbol, verbose)
+
+
     def info(self):
         return self._client.get_symbol_info(self.exchange, self.market_type, self.symbol)
 

@@ -275,6 +275,10 @@ class Router:
         return self._loop.run(self._core.get_orderbook(exchange, market_type, symbol, depth, verbose))
 
 
+    def get_margin_tiers(self, exchange: str, market_type: str, symbol: str, verbose: Optional[bool] = None) -> pd.DataFrame:
+        return self._loop.run(self._core.get_margin_tiers(exchange, market_type, symbol, verbose))
+
+
     def get_candles(self, exchange: str, market_type: str, symbol: str, interval: str = "1h", limit: int = 100, start: Optional[int] = None, verbose: Optional[bool] = None) -> pd.DataFrame:
         return self._loop.run(self._core.get_candles(exchange, market_type, symbol, interval, limit, start, verbose))
 

@@ -164,6 +164,10 @@ class BinanceAdapter(BaseExchange):
                         "retention_ms": None,
                         "intervals":    None,
                     },
+                    "margin_tiers": {
+                        "rest": False,
+                        "ws":   False,
+                    },
                 },
                 MarketType.LINEAR: {
                     "ticker": {
@@ -235,6 +239,10 @@ class BinanceAdapter(BaseExchange):
                         "retention_ms": 30 * 24 * 60 * 60 * 1000,
                         "intervals":    ["5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d"],
                     },
+                    "margin_tiers": {
+                        "rest": False,
+                        "ws":   False,
+                    },
                 },
                 MarketType.INVERSE: {
                     "ticker": {
@@ -305,6 +313,10 @@ class BinanceAdapter(BaseExchange):
                         "max_limit":    None,
                         "retention_ms": 30 * 24 * 60 * 60 * 1000,
                         "intervals":    ["5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d"],
+                    },
+                    "margin_tiers": {
+                        "rest": False,
+                        "ws":   False,
                     },
                 },
             },

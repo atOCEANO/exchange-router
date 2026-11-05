@@ -6,12 +6,13 @@ import time
 import httpx
 import orjson
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict, Any, Set, Union, AsyncGenerator, Callable, Awaitable, Iterable
+from typing import List, Optional, Dict, Any, Set, Tuple, Union, AsyncGenerator, Callable, Awaitable, Iterable
 from datetime import datetime
 from exchange_router.capabilities import route_block
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
     MarketType, SymbolInfo, FundingRate, OpenInterest, Liquidation, LongShortRatio,
+    MarginTier, MarginTiers,
     QtyValue, VolumeValue, OiValue, UsdBasis,
     FundingCurrent, FundingHistorical, FundingConvention,
 )
@@ -153,6 +154,21 @@ def count_decimals(value: Any) -> Optional[int]:
         return None
 
     return max(-exponent, 0)
+
+
+def _blank_as_none(value: Any) -> Any:
+    return None if value is None or value == "" else value
+
+
+def build_margin_tier(up_to: Any, max_leverage: Any, maintenance_margin_rate: Any = None,
+                      initial_margin_rate: Any = None, maintenance_deduction: Any = None) -> MarginTier:
+    return MarginTier(
+        up_to                   = _blank_as_none(up_to),
+        max_leverage            = max_leverage,
+        maintenance_margin_rate = _blank_as_none(maintenance_margin_rate),
+        initial_margin_rate     = _blank_as_none(initial_margin_rate),
+        maintenance_deduction   = _blank_as_none(maintenance_deduction),
+    )
 
 
 def validate_interval(adapter, market_type: MarketType, route: str, label: str, value: str) -> None:
@@ -450,6 +466,8 @@ class BaseExchange(ABC):
         self._info_cache: Dict[MarketType, Dict[str, SymbolInfo]] = {}
         self._info_cache_at: Dict[MarketType, float] = {}
         self._info_cache_lock = asyncio.Lock()
+        self._margin_cache: Dict[Any, Tuple[float, Any, int]] = {}
+        self._margin_locks: Dict[Any, asyncio.Lock] = {}
         self._warm_task: Optional[asyncio.Task] = None
 
 
@@ -630,6 +648,31 @@ class BaseExchange(ABC):
         return cache.get(model_symbol)
 
 
+    async def _margin_table(self, key: Any, fetch: Callable[[], Awaitable[Any]]) -> Tuple[Any, int]:
+        lock = self._margin_locks.setdefault(key, asyncio.Lock())
+
+        async with lock:
+            now    = time.monotonic()
+            cached = self._margin_cache.get(key)
+
+            if cached is not None and now - cached[0] < self.INFO_REFRESH_S:
+                return cached[1], cached[2]
+
+            try:
+                rows = await fetch()
+            except Exception:
+                if cached is None:
+                    raise
+                logger.warning(f"[{self.name}] margin tiers refresh failed for {key}; serving the cached table")
+                self._margin_cache[key] = (now - self.INFO_REFRESH_S + self.INFO_RETRY_S, cached[1], cached[2])
+                return cached[1], cached[2]
+
+            read_at = int(time.time() * 1000)
+            self._margin_cache[key] = (now, rows, read_at)
+
+            return rows, read_at
+
+
     @abstractmethod
     async def get_exchange_info(self, market_type: MarketType) -> List[SymbolInfo]:
         pass
@@ -718,3 +761,7 @@ class BaseExchange(ABC):
 
     async def get_long_short_ratio(self, market_type: MarketType, symbol: str, period: str = "5m", start_time: Optional[int] = None, limit: int = 30) -> List[LongShortRatio]:
         raise NotImplementedError(f"L/S Ratio not supported on {self.name} {market_type}")
+
+
+    async def get_margin_tiers(self, market_type: MarketType, symbol: str) -> MarginTiers:
+        raise NotImplementedError(f"Margin tiers not supported on {self.name} {market_type.value}")

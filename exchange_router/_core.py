@@ -6,7 +6,7 @@ import pandas as pd
 from . import frames
 from . import rows
 from .backend import Backend, RemoteBackend, is_retryable_stream_error
-from .capabilities import route_block
+from .capabilities import market_block, route_block
 from ._warnings import emit
 from .batch import BatchResult
 from .errors import BadRequest, NotFound, NotSupported, RouterError, SchemaMismatch
@@ -303,6 +303,24 @@ class AsyncCore:
 
         ctx = {"exchange": exchange, "market_type": market_type, "symbol": symbol}
         return frames.orderbook(data, ctx)
+
+
+    async def get_margin_tiers(self, exchange: str, market_type: str, symbol: str, verbose: Optional[bool] = None) -> pd.DataFrame:
+        v = self.verbose if verbose is None else verbose
+
+        market = market_block(await self._ensure_capabilities(exchange), market_type)
+        if self._mode == "service" and market and "margin_tiers" not in market:
+            version = await self.get_version()
+            raise NotSupported(f"margin_tiers is not served by {self.base_url}, which runs {version}; upgrade the service to 3.2.0 or newer")
+
+        await self._preflight(exchange, market_type, "margin_tiers", symbol=symbol, verbose=v)
+        data = await self._fetch("margin_tiers", exchange, market_type, symbol)
+
+        ctx = {"exchange": exchange, "market_type": market_type, "symbol": symbol}
+        df  = frames.margin_tiers(data, ctx)
+        emit(df.attrs["warnings"], v)
+
+        return df
 
 
     async def get_candles(self, exchange: str, market_type: str, symbol: str, interval: str = "1h", limit: int = 100, start: Optional[int] = None, verbose: Optional[bool] = None) -> pd.DataFrame:

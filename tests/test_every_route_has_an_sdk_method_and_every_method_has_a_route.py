@@ -29,6 +29,7 @@ ROUTE_TO_METHOD = {
     "/{exchange}/{market_type}/funding_rate/{symbol}":      "get_funding_rate",
     "/{exchange}/{market_type}/liquidations/{symbol}":      "get_liquidations",
     "/{exchange}/{market_type}/long_short_ratio/{symbol}":  "get_long_short_ratio",
+    "/{exchange}/{market_type}/margin_tiers/{symbol}":      "get_margin_tiers",
     "/ws/{exchange}/{market_type}":                         "stream",
 }
 
