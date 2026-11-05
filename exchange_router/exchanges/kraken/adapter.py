@@ -1372,7 +1372,7 @@ class KrakenAdapter(BaseExchange):
                     base_asset         = base_asset,
                     quote_asset        = quote_asset,
                     price_precision    = self._decimal_places(tick),
-                    quantity_precision = self._decimal_places(min_size or 0),
+                    quantity_precision = self._decimal_places(qty_step or 0),
                     min_qty            = min_size,
                     max_qty            = max_size,
                     min_notional       = None,
