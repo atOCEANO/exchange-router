@@ -1,10 +1,38 @@
+import decimal
 import time
-from typing import List
+from typing import Any, Dict, List, Optional, Tuple
 
 from exchange_router.models import SymbolInfo
 from tools.auditor.aggregator import ErrorType, ProbeResult
 
 from tools.auditor.probes.base import Probe, ProbeContext, fetch, validate_one
+
+
+def _decimals(value: float) -> int:
+    exponent = decimal.Decimal(str(value)).normalize().as_tuple().exponent
+    return max(-exponent, 0) if isinstance(exponent, int) else 0
+
+
+def _power_of_ten_up_to_one(value: float) -> bool:
+    number = decimal.Decimal(str(value)).normalize()
+    return number.as_tuple().digits == (1,) and number <= 1
+
+
+def _grid_mismatch(data: Dict[str, Any]) -> Optional[Tuple[str, Dict[str, Any]]]:
+    tick_size = data.get("tick_size")
+    qty_step  = data.get("qty_step")
+
+    if qty_step is not None and _power_of_ten_up_to_one(qty_step) and _decimals(qty_step) != data["quantity_precision"]:
+        return (
+            f"quantity_precision {data['quantity_precision']} does not match qty_step {qty_step}",
+            {"quantity_precision": data["quantity_precision"], "qty_step": qty_step},
+        )
+    if tick_size is not None and _decimals(tick_size) > data["price_precision"]:
+        return (
+            f"price_precision {data['price_precision']} is coarser than tick_size {tick_size}",
+            {"price_precision": data["price_precision"], "tick_size": tick_size},
+        )
+    return None
 
 
 class InfoProbe(Probe):
@@ -63,6 +91,16 @@ class InfoProbe(Probe):
                 message="negative precision",
                 evidence={"price_precision": data["price_precision"], "quantity_precision": data["quantity_precision"]},
             )]
+        tick_size = data.get("tick_size")
+        qty_step = data.get("qty_step")
+        if (tick_size is not None and tick_size <= 0) or (qty_step is not None and qty_step <= 0):
+            return [self.result(
+                ctx, self.name, started,
+                status="fail",
+                error_type=ErrorType.LOGIC,
+                message="non-positive tick_size or qty_step",
+                evidence={"tick_size": tick_size, "qty_step": qty_step},
+            )]
 
         qty_unit = data.get("qty_unit")
         contract_size = data.get("contract_size")
@@ -81,6 +119,17 @@ class InfoProbe(Probe):
                 error_type=ErrorType.SCHEMA,
                 message=f"unit contract broken: qty_unit={qty_unit!r}, contract_size={contract_size}; {rule}",
                 evidence={"qty_unit": qty_unit, "contract_size": contract_size, "market_type": ctx.market_type},
+            )]
+
+        mismatch = _grid_mismatch(data)
+        if mismatch:
+            msg, ev = mismatch
+            return [self.result(
+                ctx, self.name, started,
+                status="warn",
+                error_type=ErrorType.LOGIC,
+                message=msg,
+                evidence=ev,
             )]
 
         r = self.result(

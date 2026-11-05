@@ -72,7 +72,7 @@ The CLI in `__main__.py` invokes `runner.run(...)`, which executes a fixed top-o
 | `probes/trades.py` | `TradesProbe` (multi-limit, uniqueness, ordering) | 140 |
 | `probes/paginated.py` | `PaginatedProbe` (recent + 5 sub-probes covering limit checks and anchored windows) | 275 |
 | `probes/websocket.py` | `WebSocketProbe` + `WS_CHANNEL_MODEL` registry | 180 |
-| `probes/info.py` | `InfoProbe` (reads `/markets/{symbol}`, name `markets:detail`) | 95 |
+| `probes/info.py` | `InfoProbe` (reads `/markets/{symbol}`, name `markets:detail`) | 145 |
 | `probes/markets.py` | `MarketsProbe` (reads the lite `/markets` dict shape) | 90 |
 | `probes/capabilities.py` | `CapabilitiesConsistencyProbe` (drift detection) | 160 |
 | `probes/errors.py` | `ErrorPathProbe` (404/400 negative paths) | 60 |
@@ -174,7 +174,7 @@ Runs first. Unknown exchange (expects 404), bad market type (expects 400/422), b
 
 `MarketsProbe` reads the lite-list shape (`{exchange, market_type, count, markets: [...]}`), validates per-entry that `symbol` is uppercase with no slash and no duplicates, and that each entry carries the required `base_asset`, `quote_asset`, `qty_unit`, `funding` keys.
 
-`InfoProbe` (probe name `markets:detail`) reads the full `SymbolInfo` from `/markets/{symbol}` and asserts `min_qty <= max_qty` and non-negative precision on a sample. The runner's `_pick_symbol_for_market` helper extracts the symbol list from the `markets` array.
+`InfoProbe` (probe name `markets:detail`) reads the full `SymbolInfo` from `/markets/{symbol}` and asserts `min_qty <= max_qty`, non-negative precision and a positive `tick_size` and `qty_step` where they are set, on a sample. It warns when a `quantity_precision` disagrees with a `qty_step` that is a power of ten no bigger than one, or a `price_precision` is coarser than its `tick_size`, the check that catches a precision read from the wrong field. The runner's `_pick_symbol_for_market` helper extracts the symbol list from the `markets` array.
 
 <br>
 <br>
