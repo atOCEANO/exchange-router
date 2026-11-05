@@ -13,6 +13,7 @@ from tools.auditor.probes.capabilities import CapabilitiesConsistencyProbe
 from tools.auditor.probes.cross_route import CrossRouteConsistencyProbe
 from tools.auditor.probes.errors import ErrorPathProbe
 from tools.auditor.probes.info import InfoProbe
+from tools.auditor.probes.margin_tiers import MarginTiersProbe
 from tools.auditor.probes.markets import MarketsProbe
 from tools.auditor.probes.orderbook import OrderBookProbe
 from tools.auditor.probes.paginated import PaginatedProbe
@@ -46,6 +47,7 @@ def market_probes(caps_slice: Dict[str, Any]) -> List[Probe]:
 
     probes.append(OrderBookProbe())
     probes.append(TradesProbe())
+    probes.append(MarginTiersProbe())
 
     probes.append(PaginatedProbe("agg_trades",   AggTrade,    big_limit=BIG_LIMITS["agg_trades"]))
     probes.append(PaginatedProbe("funding_rate", FundingRate, big_limit=BIG_LIMITS["funding_rate"]))

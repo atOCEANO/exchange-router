@@ -1,7 +1,7 @@
 MARKET_ORDER = {"spot": 0, "linear": 1, "inverse": 2, "ALL": 3}
 
 
-ROUTE_DISPLAY_ORDER = ["markets", "info", "ticker", "book_ticker", "mark_price", "orderbook", "trades", "agg_trades", "candles", "funding_rate", "open_interest", "liquidations", "long_short_ratio"]
+ROUTE_DISPLAY_ORDER = ["markets", "info", "ticker", "book_ticker", "mark_price", "orderbook", "trades", "agg_trades", "candles", "funding_rate", "open_interest", "liquidations", "long_short_ratio", "margin_tiers"]
 
 
 PERIOD_ORDER = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"]

@@ -45,7 +45,7 @@ class CapabilitiesConsistencyProbe(Probe):
             r.sample = liq_caps
             out.append(r)
 
-        snapshot_routes = ["ticker", "book_ticker", "mark_price"]
+        snapshot_routes = ["ticker", "book_ticker", "mark_price", "margin_tiers"]
         list_routes = ["agg_trades", "candles", "funding_rate", "open_interest", "liquidations", "long_short_ratio"]
 
         for route in snapshot_routes + list_routes + ["trades", "orderbook"]:
