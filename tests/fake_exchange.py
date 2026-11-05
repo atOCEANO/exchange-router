@@ -182,6 +182,8 @@ class FakeExchange(BaseExchange):
                 qty_unit           = qty_unit_for(market_type),
                 contract_size      = contract_size_for(market_type),
                 funding            = build_funding_convention(funding) if funding else None,
+                tick_size          = 0.01,
+                qty_step           = 0.001,
             ))
 
         return out

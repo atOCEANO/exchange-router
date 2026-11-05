@@ -10,6 +10,7 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
+    build_step,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -1167,6 +1168,8 @@ class KucoinAdapter(BaseExchange):
                     qty_unit           = "base",
                     contract_size      = None,
                     funding            = None,
+                    tick_size          = build_step(s.get("priceIncrement")),
+                    qty_step           = build_step(s.get("baseIncrement")),
                 ))
             return results
 
@@ -1229,6 +1232,7 @@ class KucoinAdapter(BaseExchange):
                 qty_precision = self._precision(f"{float(raw_lot) * multiplier:.10f}")
             else:
                 qty_precision = self._precision(str(s.get("lotSize", "0")))
+            step_parts = [raw_lot, multiplier] if market_type == MarketType.LINEAR else [raw_lot]
 
             model_sym = self.get_model_symbol(api_sym, market_type)
             self._funding_interval_cache.setdefault(market_type, {})
@@ -1251,6 +1255,8 @@ class KucoinAdapter(BaseExchange):
                 qty_unit           = qty_unit,
                 contract_size      = contract_size,
                 funding            = build_funding_convention("discrete"),
+                tick_size          = build_step(s.get("tickSize")),
+                qty_step           = build_step(*step_parts),
             ))
         return results
 

@@ -177,11 +177,11 @@ class SymbolInfo(BaseModel):
     )
     price_precision: int = Field(
         ...,
-        description="Decimal places for price (not tick size). A symbol with a 0.5 tick is not expressible here.",
+        description="Decimal places for price (not tick size). A symbol with a 0.5 tick is not expressible here; the tick itself is tick_size.",
     )
     quantity_precision: int = Field(
         ...,
-        description="Decimal places for quantity (not step size).",
+        description="Decimal places for quantity (not step size). A step of 10 or more is not expressible here; the step itself is qty_step.",
     )
     min_qty: Optional[float] = Field(
         None,
@@ -197,7 +197,7 @@ class SymbolInfo(BaseModel):
     )
     qty_unit: Literal["base", "contract"] = Field(
         ...,
-        description="Unit that min_qty / max_qty are expressed in. 'base' on spot and linear, 'contract' on inverse.",
+        description="Unit that min_qty / max_qty / qty_step are expressed in. 'base' on spot and linear, 'contract' on inverse.",
     )
     contract_size: Optional[float] = Field(
         None,
@@ -206,6 +206,14 @@ class SymbolInfo(BaseModel):
     funding: Optional[FundingConvention] = Field(
         None,
         description="Funding convention categorical descriptor. Null on spot. {'kind': 'discrete'} on discrete-funding linear and inverse markets. {'kind': 'continuous'} on continuous-funding markets.",
+    )
+    tick_size: Optional[float] = Field(
+        None,
+        description="Price step an order's price must sit on, in quote_asset, as the exchange states it. Null where the exchange has no fixed tick (Hyperliquid holds a price to significant figures instead).",
+    )
+    qty_step: Optional[float] = Field(
+        None,
+        description="Quantity step an order's size must sit on, in qty_unit. Where an exchange counts a linear market in contracts (OKX, KuCoin), it is the exchange's lot times the contract's value, in the base asset like min_qty. Null when the exchange does not state one.",
     )
 
 

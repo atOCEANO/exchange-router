@@ -88,6 +88,15 @@ async def test_symbol_info_flattens_funding_and_keeps_the_qty_unit(router, marke
 
 
 @pytest.mark.parametrize("market_type,symbol,quote,unit,size", MARKETS, ids=ALL_IDS)
+async def test_symbol_info_carries_the_tick_and_the_step(router, market_type, symbol, quote, unit, size):
+    row = await router.get_symbol_info(EX, market_type, symbol)
+
+    assert row.tick_size == 0.01
+    assert row.qty_step  == 0.001
+    assert list(row)[-3:] == ["tick_size", "qty_step", "funding_kind"]
+
+
+@pytest.mark.parametrize("market_type,symbol,quote,unit,size", MARKETS, ids=ALL_IDS)
 async def test_markets_lists_every_symbol_in_the_lite_projection(router, market_type, symbol, quote, unit, size):
     data = await router.get_markets(EX, market_type)
 

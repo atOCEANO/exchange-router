@@ -9,7 +9,7 @@ from typing import List, AsyncGenerator, Dict, Any, Optional, Deque
 from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
-    build_funding_current, build_funding_historical, build_funding_convention,
+    build_funding_current, build_funding_historical, build_funding_convention, build_step,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -1220,6 +1220,7 @@ class OkxAdapter(BaseExchange):
                     qty_precision = self._precision(lot_raw)
             else:
                 qty_precision = self._precision(lot_raw)
+            step_parts = [lot_raw, s.get("ctVal")] if market_type == MarketType.LINEAR else [lot_raw]
 
             funding_block = None
             if market_type != MarketType.SPOT:
@@ -1243,6 +1244,8 @@ class OkxAdapter(BaseExchange):
                 qty_unit           = qty_unit,
                 contract_size      = contract_size,
                 funding            = funding_block,
+                tick_size          = build_step(s.get("tickSz")),
+                qty_step           = build_step(*step_parts),
             ))
         return results
 

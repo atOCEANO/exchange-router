@@ -100,6 +100,8 @@ def symbol_info_row(raw: Dict[str, Any]) -> Row:
     funding = raw.get("funding")
 
     flat = {k: v for k, v in raw.items() if k != "funding"}
+    flat.setdefault("tick_size", None)
+    flat.setdefault("qty_step", None)
     flat["funding_kind"] = funding.get("kind") if isinstance(funding, dict) else None
 
     return _wrap(flat, raw)

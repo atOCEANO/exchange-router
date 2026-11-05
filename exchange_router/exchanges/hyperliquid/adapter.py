@@ -9,6 +9,7 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
+    build_step_from_decimals,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -821,6 +822,8 @@ class HyperliquidAdapter(BaseExchange):
             qty_unit           = "base",
             contract_size      = None,
             funding            = build_funding_convention("discrete"),
+            tick_size          = None,
+            qty_step           = build_step_from_decimals(sz_dec),
         )
 
 
@@ -890,6 +893,8 @@ class HyperliquidAdapter(BaseExchange):
                 qty_unit           = "base",
                 contract_size      = None,
                 funding            = None,
+                tick_size          = None,
+                qty_step           = build_step_from_decimals(base_sz),
             ))
         return results
 

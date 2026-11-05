@@ -1,5 +1,7 @@
 import asyncio
+import decimal
 import logging
+import math
 import time
 import httpx
 import orjson
@@ -112,6 +114,33 @@ def build_funding_historical(kind: str, per_cycle: float, cycle_ms: int) -> Fund
 
 def build_funding_convention(kind: str) -> FundingConvention:
     return FundingConvention(kind=kind)
+
+
+def build_step(*parts: Any) -> Optional[float]:
+    try:
+        step = decimal.Decimal(1)
+        for part in parts:
+            step *= decimal.Decimal(str(part))
+        value = float(step)
+    except (ArithmeticError, TypeError, ValueError):
+        return None
+
+    if not math.isfinite(value) or value <= 0:
+        return None
+
+    return value
+
+
+def build_step_from_decimals(decimals: Any) -> Optional[float]:
+    if isinstance(decimals, bool) or (isinstance(decimals, float) and not decimals.is_integer()):
+        return None
+
+    try:
+        step = f"1e{-int(decimals)}"
+    except (ArithmeticError, TypeError, ValueError):
+        return None
+
+    return build_step(step)
 
 
 def validate_interval(adapter, market_type: MarketType, route: str, label: str, value: str) -> None:

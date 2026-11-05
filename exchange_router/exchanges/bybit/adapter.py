@@ -8,7 +8,7 @@ from typing import List, AsyncGenerator, Dict, Any, Optional
 from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
-    build_funding_current, build_funding_historical, build_funding_convention,
+    build_funding_current, build_funding_historical, build_funding_convention, build_step,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -865,6 +865,7 @@ class BybitAdapter(BaseExchange):
             max_qty: Optional[float] = None
             min_notional: Optional[float] = None
             lot = s.get("lotSizeFilter") or {}
+            step_field = "basePrecision" if market_type == MarketType.SPOT else "qtyStep"
             raw_min_qty = lot.get("minOrderQty")
             raw_max_qty = lot.get("maxOrderQty")
             raw_min_notional = lot.get("minNotionalValue")
@@ -909,6 +910,8 @@ class BybitAdapter(BaseExchange):
                 qty_unit           = qty_unit,
                 contract_size      = contract_size,
                 funding            = funding_block,
+                tick_size          = build_step(s.get("priceFilter", {}).get("tickSize")),
+                qty_step           = build_step(lot.get(step_field)),
             ))
         return results
 

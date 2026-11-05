@@ -8,7 +8,7 @@ from typing import List, AsyncGenerator, Dict, Any, Optional
 from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
-    build_funding_current, build_funding_historical, build_funding_convention,
+    build_funding_current, build_funding_historical, build_funding_convention, build_step,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -1033,6 +1033,8 @@ class BinanceAdapter(BaseExchange):
                 qty_unit=qty_unit,
                 contract_size=contract_size,
                 funding=funding_block,
+                tick_size=build_step(tick_size),
+                qty_step=build_step(step_size),
             ))
 
         return results

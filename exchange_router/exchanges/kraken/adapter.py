@@ -10,6 +10,7 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
+    build_step, build_step_from_decimals,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -1317,6 +1318,8 @@ class KrakenAdapter(BaseExchange):
                     qty_unit           = "base",
                     contract_size      = None,
                     funding            = None,
+                    tick_size          = build_step(v.get("tick_size")),
+                    qty_step           = build_step_from_decimals(v.get("lot_decimals")),
                 ))
         else:
             data = await self._make_request("GET", f"{self.futures_rest_url}/instruments")
@@ -1339,6 +1342,7 @@ class KrakenAdapter(BaseExchange):
                     min_size = None
                 if max_size is not None and max_size <= 0:
                     max_size = None
+                qty_step = build_step_from_decimals(v.get("contractValueTradePrecision"))
 
                 base_asset  = (v.get("baseCurrency") or "").upper()
                 quote_asset = (v.get("quoteCurrency") or "").upper()
@@ -1375,6 +1379,8 @@ class KrakenAdapter(BaseExchange):
                     qty_unit           = qty_unit,
                     contract_size      = contract_size,
                     funding            = build_funding_convention("continuous"),
+                    tick_size          = build_step(v.get("tickSize")),
+                    qty_step           = qty_step,
                 ))
         return results
 
