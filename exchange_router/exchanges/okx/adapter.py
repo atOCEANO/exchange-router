@@ -10,10 +10,12 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention, build_step,
+    build_margin_tier,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
     MarketType, SymbolInfo, OpenInterest, FundingRate, Liquidation, LongShortRatio,
+    MarginTiers,
 )
 
 
@@ -309,7 +311,7 @@ class OkxAdapter(BaseExchange):
                         "intervals":    ["5m", "1h", "1d"],
                     },
                     "margin_tiers": {
-                        "rest": False,
+                        "rest": True,
                         "ws":   False,
                     },
                 },
@@ -384,7 +386,7 @@ class OkxAdapter(BaseExchange):
                         "intervals":    ["5m", "1h", "1d"],
                     },
                     "margin_tiers": {
-                        "rest": False,
+                        "rest": True,
                         "ws":   False,
                     },
                 },
@@ -1277,6 +1279,49 @@ class OkxAdapter(BaseExchange):
         if market_type != MarketType.SPOT:
             await self._funding_interval_ms_for(api_symbol)
         return info
+
+
+    async def get_margin_tiers(self, market_type: MarketType, symbol: str) -> MarginTiers:
+        if market_type == MarketType.SPOT:
+            return await super().get_margin_tiers(market_type, symbol)
+
+        api_symbol = await self._resolve_symbol(symbol, market_type)
+        model_sym  = self.get_model_symbol(api_symbol, market_type)
+        info       = await self._info_for(market_type, model_sym)
+        if info is None:
+            raise ValueError(f"Symbol {symbol} not found on OKX {market_type.value}")
+
+        multiplier = await self._multiplier_for(market_type, model_sym)
+        if market_type == MarketType.LINEAR and multiplier is None:
+            raise ValueError(f"Contract multiplier unavailable for {model_sym} on OKX linear")
+
+        family = api_symbol.replace("-SWAP", "")
+        params = {"instType": "SWAP", "tdMode": "cross", "instFamily": family}
+
+        async def fetch():
+            tiers = []
+            for row in await self._make_request("GET", "/api/v5/public/position-tiers", params):
+                tier = build_margin_tier(
+                    up_to                   = row.get("maxSz"),
+                    max_leverage            = row.get("maxLever"),
+                    maintenance_margin_rate = row.get("mmr"),
+                    initial_margin_rate     = row.get("imr"),
+                )
+                if market_type == MarketType.LINEAR and tier.up_to is not None:
+                    tier.up_to = round(tier.up_to * multiplier, 12)
+                tiers.append(tier)
+            return tiers
+
+        tiers, read_at = await self._margin_table(f"{market_type.value} {family}", fetch)
+
+        return MarginTiers(
+            symbol      = model_sym,
+            market_type = market_type,
+            quote       = info.quote_asset,
+            up_to_unit  = "base" if market_type == MarketType.LINEAR else "contract",
+            tiers       = tiers,
+            timestamp   = read_at,
+        )
 
 
     async def stream_ticker(self, market_type: MarketType, symbol: str) -> AsyncGenerator[Ticker, None]:
