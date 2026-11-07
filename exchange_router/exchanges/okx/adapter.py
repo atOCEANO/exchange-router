@@ -510,17 +510,19 @@ class OkxAdapter(BaseExchange):
         try:
             data = await self._make_request("GET", "/api/v5/public/funding-rate", {"instId": inst_id})
         except Exception as e:
-            logger.warning(f"OKX funding-rate lookup failed for {inst_id}: {e}; assuming 8h default")
-            return 8 * 3_600_000
+            logger.warning(f"OKX funding-rate lookup failed for {inst_id}: {e}; the funding cycle stays unknown until the next read")
+            return None
         items = data if isinstance(data, list) else []
         if not items:
-            return 8 * 3_600_000
+            return None
         try:
             next_ms = int(items[0].get("nextFundingTime", 0))
             cur_ms = int(items[0].get("fundingTime", 0))
-            interval = next_ms - cur_ms if next_ms > cur_ms > 0 else 8 * 3_600_000
         except (TypeError, ValueError):
-            interval = 8 * 3_600_000
+            return None
+        if not next_ms > cur_ms > 0:
+            return None
+        interval = next_ms - cur_ms
         async with self._funding_interval_lock:
             self._funding_interval_cache[inst_id] = interval
         return interval

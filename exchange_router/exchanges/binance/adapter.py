@@ -923,7 +923,7 @@ class BinanceAdapter(BaseExchange):
         return await self._paginate_backwards(fetch_batch_backward, limit, 500)
 
 
-    async def _fetch_funding_overrides(self, market_type: MarketType) -> Dict[str, int]:
+    async def _fetch_funding_overrides(self, market_type: MarketType) -> Optional[Dict[str, int]]:
         if market_type == MarketType.SPOT:
             return {}
         base_url = self._get_rest_url(market_type)
@@ -931,8 +931,8 @@ class BinanceAdapter(BaseExchange):
         try:
             data = await self._make_request("GET", f"{base_url}{endpoint}")
         except Exception as e:
-            logger.warning(f"Binance fundingInfo fetch failed for {market_type}: {e}; falling back to default 8h cycle for every symbol")
-            return {}
+            logger.warning(f"Binance fundingInfo fetch failed for {market_type}: {e}; funding cycles stay unknown until the next read")
+            return None
         out: Dict[str, int] = {}
         for item in data or []:
             try:
@@ -1004,7 +1004,7 @@ class BinanceAdapter(BaseExchange):
             funding_interval_ms: Optional[int] = None
             funding_block = None
             if market_type != MarketType.SPOT:
-                funding_interval_ms = funding_overrides.get(s["symbol"], 8 * 3_600_000)
+                funding_interval_ms = funding_overrides.get(s["symbol"], 8 * 3_600_000) if funding_overrides is not None else None
                 funding_block = build_funding_convention("discrete")
 
             model_sym = self.get_model_symbol(s["symbol"], market_type)
@@ -1032,8 +1032,14 @@ class BinanceAdapter(BaseExchange):
 
 
     async def _funding_interval_ms_for(self, market_type: MarketType, model_symbol: str) -> Optional[int]:
-        await self._ensure_info_cache(market_type)
-        return self._funding_interval_cache.get(market_type, {}).get(model_symbol)
+        cache = await self._ensure_info_cache(market_type)
+        known = self._funding_interval_cache.setdefault(market_type, {})
+        if model_symbol not in known and model_symbol in cache and market_type != MarketType.SPOT:
+            overrides = await self._fetch_funding_overrides(market_type)
+            if overrides is not None:
+                for sym, info in cache.items():
+                    known[sym] = overrides.get(info.native_symbol, 8 * 3_600_000)
+        return known.get(model_symbol)
 
 
     async def get_exchange_info(self, market_type: MarketType) -> List[SymbolInfo]:
