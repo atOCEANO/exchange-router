@@ -1232,8 +1232,8 @@ class BybitAdapter(BaseExchange):
                     side_raw = d.get("S")
                     if side_raw is None:
                         continue
-                    side_norm = side_raw.lower()
-                    if side_norm not in ("buy", "sell"):
+                    side_norm = {"buy": "sell", "sell": "buy"}.get(side_raw.lower())
+                    if side_norm is None:
                         continue
                     price = float(d.get("p", 0))
                     yield Liquidation(
