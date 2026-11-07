@@ -9,6 +9,7 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention, build_step,
+    stamp_funding_cycles,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -794,14 +795,13 @@ class BinanceAdapter(BaseExchange):
         endpoint = "/fapi/v1/fundingRate" if market_type == MarketType.LINEAR else "/dapi/v1/fundingRate"
         api_symbol = self.get_api_symbol(symbol, market_type)
 
-        per_req = 1000
-        default_cadence_ms = 8 * 3_600_000
+        per_req    = 1000
+        longest_ms = 8 * 3_600_000
 
-        model_sym       = self.get_model_symbol(api_symbol, market_type)
-        info            = await self._info_for(market_type, model_sym)
-        quote           = info.quote_asset if info else ""
-        row_interval_ms = await self._funding_interval_ms_for(market_type, model_sym)
-        cycle_ms        = row_interval_ms if row_interval_ms is not None else default_cadence_ms
+        model_sym  = self.get_model_symbol(api_symbol, market_type)
+        info       = await self._info_for(market_type, model_sym)
+        quote      = info.quote_asset if info else ""
+        current_ms = await self._funding_interval_ms_for(market_type, model_sym)
 
         async def call(params: dict) -> List[FundingRate]:
             data = await self._make_request("GET", f"{base_url}{endpoint}", params=params)
@@ -812,53 +812,32 @@ class BinanceAdapter(BaseExchange):
                 rate        = build_funding_historical(
                     kind      = "discrete",
                     per_cycle = float(i["fundingRate"]),
-                    cycle_ms  = cycle_ms,
+                    cycle_ms  = current_ms or 0,
                 ),
                 timestamp   = self.normalize_timestamp(i["fundingTime"]),
             ) for i in data]
 
-        if start_time is not None:
-            params = {
-                "symbol":    api_symbol,
-                "limit":     min(limit, per_req),
-                "startTime": max(0, start_time - min(limit, per_req) * cycle_ms),
-                "endTime":   start_time,
-            }
-            return (await call(params))[-limit:]
+        async def span(start_ms: int, end_ms: int) -> List[FundingRate]:
+            rows: List[FundingRate] = []
+            cursor = start_ms
+            while True:
+                batch = await call({"symbol": api_symbol, "startTime": cursor, "endTime": end_ms, "limit": per_req})
+                rows.extend(batch)
+                if len(batch) < per_req:
+                    return rows
+                cursor = batch[-1].timestamp + 1
 
-        recent = await call({"symbol": api_symbol, "limit": min(limit, 200)})
-        if limit <= len(recent):
-            return recent[-limit:]
-
-        collected = list(recent)
-        seen = {r.timestamp for r in collected}
-
-        if len(recent) >= 2:
-            intervals = sorted(recent[i + 1].timestamp - recent[i].timestamp for i in range(len(recent) - 1))
-            cadence_ms = max(intervals[len(intervals) // 2], 60_000)
+        need = limit + 1
+        if start_time is None and need <= per_req:
+            rows = await call({"symbol": api_symbol, "limit": need})
         else:
-            cadence_ms = default_cadence_ms
+            end_ms = start_time if start_time is not None else int(time.time() * 1000)
+            reach  = need * longest_ms
+            rows   = await span(max(0, end_ms - reach), end_ms)
+            if len(rows) < need and end_ms - reach > 0:
+                rows = await span(max(0, end_ms - 8 * reach), end_ms)
 
-        safety_pages = 10
-        while len(collected) < limit and safety_pages > 0:
-            oldest_ts = min(r.timestamp for r in collected)
-            params = {
-                "symbol":    api_symbol,
-                "limit":     per_req,
-                "startTime": max(0, oldest_ts - per_req * cadence_ms),
-                "endTime":   oldest_ts - 1,
-            }
-            batch = await call(params)
-            new = [r for r in batch if r.timestamp not in seen]
-            if not new:
-                break
-            for r in new:
-                seen.add(r.timestamp)
-            collected.extend(new)
-            safety_pages -= 1
-
-        collected.sort(key=lambda x: x.timestamp)
-        return collected[-limit:]
+        return stamp_funding_cycles(rows, current_ms)[-limit:]
 
 
     async def get_open_interest(self, market_type: MarketType, symbol: str, period: str = "1h", start_time: Optional[int] = None, limit: int = 30) -> List[OpenInterest]:
