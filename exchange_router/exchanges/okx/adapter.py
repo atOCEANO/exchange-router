@@ -920,11 +920,11 @@ class OkxAdapter(BaseExchange):
             rate_raw = f.get("fundingRate")
             if rate_raw is not None:
                 funding_rate = float(rate_raw)
-            nft_raw = f.get("nextFundingTime") or 0
-            if nft_raw:
-                nft_norm = self.normalize_timestamp(nft_raw)
-                if nft_norm > 0:
-                    next_funding = nft_norm
+            due_raw = f.get("fundingTime") or 0
+            if due_raw:
+                due_norm = self.normalize_timestamp(due_raw)
+                if due_norm > 0:
+                    next_funding = due_norm
 
         index_price: Optional[float] = None
         try:
