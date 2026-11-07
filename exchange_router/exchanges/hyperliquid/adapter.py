@@ -214,7 +214,7 @@ class HyperliquidAdapter(BaseExchange):
                         "paginated":    False,
                         "max_limit":    1,
                         "retention_ms": None,
-                        "intervals":    ["5m", "15m", "30m", "1h", "4h", "1d"],
+                        "intervals":    None,
                     },
                     "liquidations": {
                         "rest":         False,
@@ -767,10 +767,6 @@ class HyperliquidAdapter(BaseExchange):
         if oi is None:
             raise ValueError(f"Hyperliquid returned no open interest for {coin}")
 
-        now_ms    = int(time.time() * 1000)
-        period_ms = self._interval_to_ms(period)
-        row_ts    = (now_ms // period_ms) * period_ms if period_ms > 0 else now_ms
-
         return [OpenInterest(
             symbol        = model_sym,
             market_type   = market_type,
@@ -783,7 +779,7 @@ class HyperliquidAdapter(BaseExchange):
                 candle_close    = None,
                 candle_close_ts = None,
             ),
-            timestamp     = row_ts,
+            timestamp     = int(time.time() * 1000),
         )]
 
 
