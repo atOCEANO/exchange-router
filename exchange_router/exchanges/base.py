@@ -113,6 +113,32 @@ def build_funding_historical(kind: str, per_cycle: float, cycle_ms: int) -> Fund
     )
 
 
+def stamp_funding_cycles(rows: List[FundingRate], current_ms: Optional[int]) -> List[FundingRate]:
+    rows = sorted(rows, key=lambda r: r.timestamp)
+    gaps = [None] + [round((b.timestamp - a.timestamp) / 1000) * 1000 for a, b in zip(rows, rows[1:])]
+
+    held: List[Optional[int]] = []
+    for i, gap in enumerate(gaps):
+        around = {gaps[i - 1] if i > 0 else None, gaps[i + 1] if i + 1 < len(gaps) else None}
+        held.append(gap if gap is not None and (gap == current_ms or gap in around) else None)
+
+    out: List[FundingRate] = []
+    for i, row in enumerate(rows):
+        cycle = held[i]
+        for distance in range(1, len(rows)):
+            if cycle is not None:
+                break
+            for j in (i + distance, i - distance):
+                if 0 <= j < len(rows) and held[j] is not None:
+                    cycle = held[j]
+                    break
+        cycle = cycle if cycle is not None else current_ms
+        if cycle is None:
+            raise ValueError(f"stamp_funding_cycles: the cycle of {row.symbol} at {row.timestamp} cannot be read from its neighbours and the venue states no current cycle")
+        out.append(row.model_copy(update={"rate": row.rate.model_copy(update={"cycle_ms": cycle})}))
+    return out
+
+
 def build_funding_convention(kind: str) -> FundingConvention:
     return FundingConvention(kind=kind)
 

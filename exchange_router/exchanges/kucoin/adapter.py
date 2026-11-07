@@ -10,7 +10,7 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
-    build_step, count_decimals,
+    build_step, count_decimals, stamp_funding_cycles,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -1030,8 +1030,7 @@ class KucoinAdapter(BaseExchange):
         model_sym         = self.get_model_symbol(api_symbol, market_type)
         info              = await self._info_for(market_type, model_sym)
         quote             = info.quote_asset if info else ""
-        cycle_ms          = await self._funding_interval_ms_for(market_type, model_sym)
-        cycle_ms          = cycle_ms if cycle_ms is not None else 8 * 3_600_000
+        current_ms        = await self._funding_interval_ms_for(market_type, model_sym)
         funding_window_ms = 8 * 60 * 60 * 1000
         per_req           = 100
 
@@ -1049,7 +1048,7 @@ class KucoinAdapter(BaseExchange):
                         rate        = build_funding_historical(
                             kind      = "discrete",
                             per_cycle = float(r.get("fundingRate") or 0),
-                            cycle_ms  = cycle_ms,
+                            cycle_ms  = current_ms or 0,
                         ),
                         timestamp   = ts,
                     ))
@@ -1065,9 +1064,12 @@ class KucoinAdapter(BaseExchange):
             params = {"symbol": api_symbol, "from": from_ms, "to": to_ms}
             return _parse(await self._make_request("GET", self.fut_rest_url, "/api/v1/contract/funding-rates", params))
 
-        if start_time is not None or limit > per_req:
-            return await self._paginate_backwards(fetch, limit, per_req)
-        return (await fetch(None, limit))[-limit:]
+        need = limit + 1
+        if start_time is not None or need > per_req:
+            rows = await self._paginate_backwards(fetch, need, per_req)
+        else:
+            rows = await fetch(None, need)
+        return stamp_funding_cycles(rows, current_ms)[-limit:]
 
 
     async def get_open_interest(self, market_type: MarketType, symbol: str, period: str = "1h", start_time: Optional[int] = None, limit: int = 30) -> List[OpenInterest]:

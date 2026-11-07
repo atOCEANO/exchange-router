@@ -10,7 +10,7 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention, build_step,
-    build_margin_tier,
+    build_margin_tier, stamp_funding_cycles,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -966,8 +966,7 @@ class OkxAdapter(BaseExchange):
         api_symbol = await self._resolve_symbol(symbol, market_type)
         per_req = 100
 
-        cycle_ms = await self._funding_interval_ms_for(api_symbol)
-        cycle_ms = cycle_ms if cycle_ms is not None else 8 * 3_600_000
+        current_ms = await self._funding_interval_ms_for(api_symbol)
 
         model_sym = self.get_model_symbol(api_symbol, market_type)
         info      = await self._info_for(market_type, model_sym)
@@ -981,7 +980,7 @@ class OkxAdapter(BaseExchange):
                 rate        = build_funding_historical(
                     kind      = "discrete",
                     per_cycle = float(r["fundingRate"]),
-                    cycle_ms  = cycle_ms,
+                    cycle_ms  = current_ms or 0,
                 ),
                 timestamp   = self.normalize_timestamp(r["fundingTime"]),
             ) for r in rows], key=lambda x: x.timestamp)
@@ -993,9 +992,12 @@ class OkxAdapter(BaseExchange):
                 p["after"] = str(anchor + 1)
             return _parse(await self._make_request("GET", "/api/v5/public/funding-rate-history", p), model_sym)
 
-        if start_time is not None or limit > per_req:
-            return await self._paginate_backwards(fetch_backward, limit, per_req)
-        return (await fetch_backward(None, limit))[-limit:]
+        need = limit + 1
+        if start_time is not None or need > per_req:
+            rows = await self._paginate_backwards(fetch_backward, need, per_req)
+        else:
+            rows = await fetch_backward(None, need)
+        return stamp_funding_cycles(rows, current_ms)[-limit:]
 
 
     async def get_open_interest(self, market_type: MarketType, symbol: str, period: str = "1h", start_time: Optional[int] = None, limit: int = 30) -> List[OpenInterest]:
