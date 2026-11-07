@@ -473,7 +473,9 @@ class OkxAdapter(BaseExchange):
 
 
     def _map_candle_interval(self, interval: str) -> str:
-        if interval in {"1h", "2h", "4h", "6h", "8h", "12h", "1d", "1w"}:
+        if interval in {"6h", "12h", "1d", "1w", "1M"}:
+            return f"{interval.upper()}utc"
+        if interval in {"1h", "2h", "4h", "8h"}:
             return interval.upper()
         return interval
 
@@ -1131,7 +1133,7 @@ class OkxAdapter(BaseExchange):
             raise NotImplementedError(f"{self.name} does not support long_short_ratio for {market_type.value}")
         ccy = self._base_ccy(symbol, market_type)
         model_sym = self.get_model_symbol(self.get_api_symbol(symbol, market_type), market_type)
-        bar = self._map_candle_interval(period)
+        bar = {"1h": "1H", "1d": "1D"}.get(period, period)
         per_req = 100
 
         def _parse(rows):
