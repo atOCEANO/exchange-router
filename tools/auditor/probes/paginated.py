@@ -101,9 +101,9 @@ class PaginatedProbe(Probe):
             if expect_empty_ok or self.allow_empty:
                 return None, self.result(
                     ctx, probe_name, started,
-                    status="warn",
-                    error_type=ErrorType.EMPTY,
-                    message="empty (upstream retention or quiet market)",
+                    status="skip",
+                    error_type=ErrorType.SKIPPED,
+                    message="an empty window; nothing to check",
                     evidence={"params": params},
                 )
             return None, self.result(
