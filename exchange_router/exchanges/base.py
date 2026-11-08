@@ -15,7 +15,7 @@ from exchange_router.models import (
     MarginTier, MarginTiers,
     QtyValue, VolumeValue, OiValue, NotionalBasis,
     FundingCurrent, FundingDeadline, FundingHistorical, FundingConvention,
-    QtyGrid, PriceTick, PriceSignificantFigures, Notional,
+    QtyUnit, QtyGrid, PriceTick, PriceSignificantFigures, Notional,
 )
 
 
@@ -70,6 +70,13 @@ def build_qty_value(native: float, qty_unit: str, contract_size: Optional[float]
         unit          = qty_unit,
         contract_size = contract_size if qty_unit == "contract" else None,
         notional      = notional,
+    )
+
+
+def build_qty_unit(unit: str, contract_size: Optional[float]) -> QtyUnit:
+    return QtyUnit(
+        unit          = unit,
+        contract_size = contract_size if unit == "contract" else None,
     )
 
 

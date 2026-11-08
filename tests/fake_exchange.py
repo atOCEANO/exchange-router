@@ -10,6 +10,7 @@ from exchange_router.exchanges.base import (
     build_oi_value,
     build_price_tick,
     build_qty_grid,
+    build_qty_unit,
     build_qty_value,
     build_volume_value,
 )
@@ -293,10 +294,11 @@ class FakeExchange(BaseExchange):
             symbol      = symbol,
             market_type = market_type,
             quote       = QUOTES[market_type],
+            qty         = build_qty_unit(qty_unit_for(market_type), contract_size_for(market_type)),
             bids        = bids,
             asks        = asks,
-            qty_unit    = qty_unit_for(market_type),
             timestamp   = BASE_TS,
+            time_source = "venue",
         )
 
 

@@ -286,15 +286,18 @@ def orderbook(data: Dict[str, Any], ctx: Dict[str, Any]) -> pd.DataFrame:
     df["price"] = pd.to_numeric(df["price"], errors="coerce")
     df["qty"]   = pd.to_numeric(df["qty"], errors="coerce")
 
+    qty = data.get("qty") or {}
     df.attrs.update({
-        "exchange":       ctx["exchange"],
-        "market_type":    ctx["market_type"],
-        "symbol":         ctx["symbol"],
-        "quote":          data.get("quote"),
-        "qty_unit":       data.get("qty_unit"),
-        "timestamp":      data.get("timestamp"),
-        "schema_version": SCHEMA_VERSION,
-        "warnings":       [],
+        "exchange":          ctx["exchange"],
+        "market_type":       ctx["market_type"],
+        "symbol":            ctx["symbol"],
+        "quote":             data.get("quote"),
+        "qty_unit":          qty.get("unit"),
+        "qty_contract_size": qty.get("contract_size"),
+        "timestamp":         data.get("timestamp"),
+        "time_source":       data.get("time_source"),
+        "schema_version":    SCHEMA_VERSION,
+        "warnings":          [],
     })
 
     return df

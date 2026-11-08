@@ -8,7 +8,7 @@ import logging
 from typing import List, AsyncGenerator, Dict, Any, Optional, Deque, Tuple
 from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
-    build_qty_value, build_volume_value, build_oi_value,
+    build_qty_unit, build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention, build_step,
     build_margin_tier, build_notional, build_price_tick, build_qty_grid,
     next_request_id, stamp_funding_cycles,
@@ -763,10 +763,11 @@ class OkxAdapter(BaseExchange):
             symbol      = model_sym,
             market_type = market_type,
             quote       = quote,
+            qty         = build_qty_unit(ob_qty_unit, info.qty.contract_size if info else None),
             bids        = bids_rows,
             asks        = asks_rows,
-            qty_unit    = ob_qty_unit,
             timestamp   = self.normalize_timestamp(b["ts"]),
+            time_source = "venue",
         )
 
 
@@ -1457,6 +1458,7 @@ class OkxAdapter(BaseExchange):
         else:
             qty_mult    = 1.0
             ob_qty_unit = "base"
+        qty = build_qty_unit(ob_qty_unit, info.qty.contract_size if info else None)
 
         bids: Dict[float, float] = {}
         asks: Dict[float, float] = {}
@@ -1500,10 +1502,11 @@ class OkxAdapter(BaseExchange):
                         symbol      = model_sym,
                         market_type = market_type,
                         quote       = quote,
+                        qty         = qty,
                         bids        = [[p, q] for p, q in sorted_bids],
                         asks        = [[p, q] for p, q in sorted_asks],
-                        qty_unit    = ob_qty_unit,
                         timestamp   = self.normalize_timestamp(b["ts"]),
+                        time_source = "venue",
                     )
             except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                 logger.warning(f"OKX orderbook {api_symbol} parse error mid-delta: {e!r}; ending stream so clients resync")

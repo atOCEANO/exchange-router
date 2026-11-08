@@ -573,21 +573,25 @@ class OrderBook(BaseModel):
         ...,
         description="Quote currency for prices in bids/asks.",
     )
+    qty: QtyUnit = Field(
+        ...,
+        description="What a level's size counts. On base, a level's notional is its price times its size; on contracts, its size times contract_size.",
+    )
     bids: List[List[float]] = Field(
         ...,
-        description="Array of [price, qty] pairs sorted best (highest) first. Price is in quote; qty is in qty_unit. Per-level USD is computed by the consumer as price * qty (intentionally not pre-computed to keep depth payloads small).",
+        description="Array of [price, size] pairs sorted best (highest) first. Price is in quote; size is in qty.unit.",
     )
     asks: List[List[float]] = Field(
         ...,
-        description="Array of [price, qty] pairs sorted best (lowest) first. Same units as bids.",
-    )
-    qty_unit: Literal["base", "contract"] = Field(
-        ...,
-        description="Unit covering qty on both bids and asks.",
+        description="Array of [price, size] pairs sorted best (lowest) first. Same units as bids.",
     )
     timestamp: int = Field(
         ...,
-        description="Depth snapshot time in unix milliseconds.",
+        description="Depth snapshot time in unix milliseconds, by the clock time_source names.",
+    )
+    time_source: str = Field(
+        ...,
+        description="Whose clock stamped the row. Known values: venue, the venue's own time for the snapshot; router, the router's clock when it read a venue that sends none. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
     )
 
 

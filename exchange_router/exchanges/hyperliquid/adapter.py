@@ -7,7 +7,7 @@ import logging
 from typing import List, AsyncGenerator, Dict, Any, Optional, Set, Tuple
 from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
-    build_qty_value, build_volume_value, build_oi_value,
+    build_qty_unit, build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
     build_step_from_decimals, build_margin_tier,
     build_notional, build_price_figures, build_qty_grid,
@@ -643,10 +643,11 @@ class HyperliquidAdapter(BaseExchange):
             symbol      = model_sym,
             market_type = market_type,
             quote       = quote,
+            qty         = build_qty_unit("base", None),
             bids        = [[float(l["px"]), float(l["sz"])] for l in levels[0][:depth]],
             asks        = [[float(l["px"]), float(l["sz"])] for l in levels[1][:depth]],
-            qty_unit    = "base",
             timestamp   = self.normalize_timestamp(data["time"]),
+            time_source = "venue",
         )
 
 
@@ -1125,10 +1126,11 @@ class HyperliquidAdapter(BaseExchange):
                     symbol      = model_sym,
                     market_type = market_type,
                     quote       = quote,
+                    qty         = build_qty_unit("base", None),
                     bids        = [[float(l["px"]), float(l["sz"])] for l in levels[0][:depth]],
                     asks        = [[float(l["px"]), float(l["sz"])] for l in levels[1][:depth]],
-                    qty_unit    = "base",
                     timestamp   = self.normalize_timestamp(d.get("time") or int(time.time() * 1000)),
+                    time_source = "venue" if d.get("time") else "router",
                 )
             except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                 logger.warning(f"Hyperliquid orderbook {coin} parse error: {e!r}; ending stream so clients resync")

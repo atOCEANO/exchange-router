@@ -8,7 +8,7 @@ import logging
 from typing import List, AsyncGenerator, Dict, Any, Optional, Tuple
 from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
-    build_qty_value, build_volume_value, build_oi_value,
+    build_qty_unit, build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
     build_notional, build_price_tick, build_qty_grid, build_step_from_decimals,
     next_request_id, venue_value,
@@ -929,7 +929,6 @@ class KrakenAdapter(BaseExchange):
             data = await self._make_request("GET", f"{self.spot_rest_url}/Depth", {"pair": api_symbol, "count": req_depth})
             pair_key = list(data.keys())[0]
             book = data[pair_key]
-            ts = float(book["bids"][0][2]) if book.get("bids") else time.time()
             bids = [[float(p), float(q)] for p, q, _ in book.get("bids", [])]
             asks = [[float(p), float(q)] for p, q, _ in book.get("asks", [])]
             bids.sort(key=lambda r: r[0], reverse=True)
@@ -938,14 +937,16 @@ class KrakenAdapter(BaseExchange):
                 symbol      = model_sym,
                 market_type = market_type,
                 quote       = quote,
+                qty         = build_qty_unit("base", None),
                 bids        = bids[:req_depth],
                 asks        = asks[:req_depth],
-                qty_unit    = "base",
-                timestamp   = self.normalize_timestamp(ts),
+                timestamp   = int(time.time() * 1000),
+                time_source = "router",
             )
 
         data      = await self._make_request("GET", f"{self.futures_rest_url}/orderbook", {"symbol": api_symbol})
         server_ts = self.normalize_timestamp(data["serverTime"]) if data.get("serverTime") else int(time.time() * 1000)
+        unit      = "contract" if market_type == MarketType.INVERSE else "base"
 
         book = data.get("orderBook", {})
         bids = [[float(p), float(q)] for p, q in book.get("bids", [])]
@@ -956,10 +957,11 @@ class KrakenAdapter(BaseExchange):
             symbol      = model_sym,
             market_type = market_type,
             quote       = quote,
+            qty         = build_qty_unit(unit, info.qty.contract_size if info else None),
             bids        = bids[:req_depth],
             asks        = asks[:req_depth],
-            qty_unit    = "contract" if market_type == MarketType.INVERSE else "base",
             timestamp   = server_ts,
+            time_source = "venue" if data.get("serverTime") else "router",
         )
 
 
@@ -1608,16 +1610,19 @@ class KrakenAdapter(BaseExchange):
                             symbol      = model_sym,
                             market_type = market_type,
                             quote       = quote,
+                            qty         = build_qty_unit("base", None),
                             bids        = [[p, q] for p, q in sorted_bids],
                             asks        = [[p, q] for p, q in sorted_asks],
-                            qty_unit    = "base",
                             timestamp   = self.normalize_timestamp(item.get("timestamp", time.time())),
+                            time_source = "venue" if "timestamp" in item else "router",
                         )
                 except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                     logger.warning(f"Kraken orderbook {api_symbol} parse error mid-delta: {e!r}; ending stream so clients resync")
                     return
         else:
             payload = {"event": "subscribe", "feed": "book", "product_ids": [api_symbol]}
+            unit    = "contract" if market_type == MarketType.INVERSE else "base"
+            qty     = build_qty_unit(unit, info.qty.contract_size if info else None)
 
             bids: Dict[float, float] = {}
             asks: Dict[float, float] = {}
@@ -1656,10 +1661,11 @@ class KrakenAdapter(BaseExchange):
                         symbol      = model_sym,
                         market_type = market_type,
                         quote       = quote,
+                        qty         = qty,
                         bids        = [[p, q] for p, q in sorted_bids],
                         asks        = [[p, q] for p, q in sorted_asks],
-                        qty_unit    = "contract" if market_type == MarketType.INVERSE else "base",
                         timestamp   = self.normalize_timestamp(data.get("timestamp", time.time())),
+                        time_source = "venue" if "timestamp" in data else "router",
                     )
                 except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                     logger.warning(f"Kraken orderbook {api_symbol} parse error mid-delta: {e!r}; ending stream so clients resync")

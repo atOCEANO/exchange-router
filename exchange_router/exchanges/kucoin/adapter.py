@@ -8,7 +8,7 @@ import logging
 from typing import List, AsyncGenerator, Dict, Any, Optional, Tuple
 from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
-    build_qty_value, build_volume_value, build_oi_value,
+    build_qty_unit, build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
     build_notional, build_price_tick, build_qty_grid, build_step,
     next_request_id, stamp_funding_cycles, venue_value,
@@ -740,13 +740,15 @@ class KucoinAdapter(BaseExchange):
             data = await self._make_request("GET", self.spot_rest_url, endpoint, {"symbol": api_symbol})
             if not data:
                 raise ValueError(f"Orderbook not found for {api_symbol}")
-            ts = int(data.get("time") or time.time() * 1000)
+            stamped = data.get("time")
+            ts      = int(stamped or time.time() * 1000)
         else:
             endpoint = f"/api/v1/level2/depth{discrete_depth_bucket}"
             data = await self._make_request("GET", self.fut_rest_url, endpoint, {"symbol": api_symbol})
             if not data:
                 raise ValueError(f"Orderbook not found for {api_symbol}")
-            ts = self._ns_to_ms(data.get("ts") or int(time.time() * 1000))
+            stamped = data.get("ts")
+            ts      = self._ns_to_ms(stamped or int(time.time() * 1000))
 
         info       = await self._info_for(market_type, model_sym)
         quote      = info.quote if info else ""
@@ -769,10 +771,11 @@ class KucoinAdapter(BaseExchange):
             symbol      = model_sym,
             market_type = market_type,
             quote       = quote,
+            qty         = build_qty_unit(ob_qty_unit, info.qty.contract_size if info else None),
             bids        = [[float(p), float(q) * qty_mult] for p, q, *_ in data.get("bids", [])][:depth],
             asks        = [[float(p), float(q) * qty_mult] for p, q, *_ in data.get("asks", [])][:depth],
-            qty_unit    = ob_qty_unit,
             timestamp   = ts,
+            time_source = "venue" if stamped else "router",
         )
 
 
@@ -1483,19 +1486,21 @@ class KucoinAdapter(BaseExchange):
         else:
             qty_mult = 1.0
             qty_unit = "base"
+        qty = build_qty_unit(qty_unit, info.qty.contract_size if info else None)
 
         async for msg in self._ws_connect(market_type, topic):
             try:
-                d  = msg.get("data") or {}
-                ts = d.get("timestamp") or d.get("ts") or d.get("time") or 0
+                d       = msg.get("data") or {}
+                stamped = d.get("timestamp") or d.get("ts") or d.get("time")
                 yield OrderBook(
                     symbol      = model_sym,
                     market_type = market_type,
                     quote       = quote,
+                    qty         = qty,
                     bids        = [[float(p), float(q) * qty_mult] for p, q, *_ in d.get("bids", [])][:depth],
                     asks        = [[float(p), float(q) * qty_mult] for p, q, *_ in d.get("asks", [])][:depth],
-                    qty_unit    = qty_unit,
-                    timestamp   = self._ns_to_ms(ts),
+                    timestamp   = self._ns_to_ms(stamped or int(time.time() * 1000)),
+                    time_source = "venue" if stamped else "router",
                 )
             except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                 logger.warning(f"KuCoin orderbook {api_symbol} malformed frame skipped: {e!r}")

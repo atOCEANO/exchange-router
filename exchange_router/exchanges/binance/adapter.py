@@ -7,7 +7,7 @@ import logging
 from typing import List, AsyncGenerator, Dict, Any, Optional, Tuple
 from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
-    build_qty_value, build_volume_value, build_oi_value,
+    build_qty_unit, build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention, build_step,
     build_notional, build_price_tick, build_qty_grid,
     next_request_id, stamp_funding_cycles, venue_value,
@@ -604,20 +604,23 @@ class BinanceAdapter(BaseExchange):
         discrete_depth_bucket = next((d for d in ob_caps["depths"] if d >= depth), ob_caps["max_depth"])
 
         data = await self._make_request("GET", f"{base_url}{path}", params={"symbol": api_symbol, "limit": discrete_depth_bucket})
-        ts = data.get("E") or data.get("T") or int(time.time() * 1000)
+        stamped = data.get("E") or data.get("T")
+        ts      = stamped or int(time.time() * 1000)
 
         model_sym = self.get_model_symbol(api_symbol, market_type)
         info      = await self._info_for(market_type, model_sym)
         quote     = info.quote if info else ""
+        unit      = "contract" if market_type == MarketType.INVERSE else "base"
 
         return OrderBook(
             symbol      = model_sym,
             market_type = market_type,
             quote       = quote,
+            qty         = build_qty_unit(unit, info.qty.contract_size if info else None),
             bids        = [[float(p), float(q)] for p, q in data["bids"][:depth]],
             asks        = [[float(p), float(q)] for p, q in data["asks"][:depth]],
-            qty_unit    = "contract" if market_type == MarketType.INVERSE else "base",
             timestamp   = self.normalize_timestamp(ts),
+            time_source = "venue" if stamped else "router",
         )
 
 
@@ -1147,20 +1150,22 @@ class BinanceAdapter(BaseExchange):
         info  = await self._info_for(market_type, model_sym)
         quote = info.quote if info else ""
 
-        qty_unit = "contract" if market_type == MarketType.INVERSE else "base"
+        unit = "contract" if market_type == MarketType.INVERSE else "base"
+        qty  = build_qty_unit(unit, info.qty.contract_size if info else None)
         async for data in self._ws_connect(market_type, [topic]):
             try:
-                bids = data.get("bids") or data.get("b") or []
-                asks = data.get("asks") or data.get("a") or []
-                ts   = data.get("E") or data.get("T") or int(time.time() * 1000)
+                bids    = data.get("bids") or data.get("b") or []
+                asks    = data.get("asks") or data.get("a") or []
+                stamped = data.get("E") or data.get("T")
                 yield OrderBook(
                     symbol      = model_sym,
                     market_type = market_type,
                     quote       = quote,
+                    qty         = qty,
                     bids        = [[float(p), float(q)] for p, q in bids],
                     asks        = [[float(p), float(q)] for p, q in asks],
-                    qty_unit    = qty_unit,
-                    timestamp   = self.normalize_timestamp(ts),
+                    timestamp   = self.normalize_timestamp(stamped or int(time.time() * 1000)),
+                    time_source = "venue" if stamped else "router",
                 )
             except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                 logger.warning(f"Binance orderbook {s_norm} malformed frame skipped: {e!r}")
