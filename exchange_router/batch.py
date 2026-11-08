@@ -1,7 +1,8 @@
+from collections.abc import Mapping
 from typing import Any, Dict, Iterator, List, Tuple
 
 
-class BatchResult:
+class BatchResult(Mapping):
 
     def __init__(self,
                  ok: Dict[str, Any],
@@ -23,10 +24,6 @@ class BatchResult:
         return merged
 
 
-    def items(self) -> Iterator[Tuple[str, Any]]:
-        return iter(self.data().items())
-
-
     def __iter__(self) -> Iterator[str]:
         return iter(self.data())
 
@@ -37,10 +34,6 @@ class BatchResult:
 
     def __len__(self) -> int:
         return len(self.data())
-
-
-    def __contains__(self, symbol: str) -> bool:
-        return symbol in self.data()
 
 
     def summary(self) -> str:
