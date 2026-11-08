@@ -324,10 +324,11 @@ def with_provenance(df: pd.DataFrame) -> pd.DataFrame:
     attrs = dict(df.attrs)
     out   = df.copy()
 
-    out["exchange"] = attrs.get("exchange")
-    out["symbol"]   = attrs.get("symbol")
-    out["quote"]    = attrs.get("quote")
-    out["unit"]     = attrs.get("volume_unit") or attrs.get("qty_unit") or attrs.get("oi_unit") or attrs.get("up_to_unit")
+    out["exchange"]    = attrs.get("exchange")
+    out["market_type"] = attrs.get("market_type")
+    out["symbol"]      = attrs.get("symbol")
+    out["quote"]       = attrs.get("quote")
+    out["unit"]        = attrs.get("volume_unit") or attrs.get("qty_unit") or attrs.get("oi_unit") or attrs.get("up_to_unit")
 
     out.attrs.update(attrs)
 
