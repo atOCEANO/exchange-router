@@ -31,6 +31,17 @@ class UpstreamUnavailableError(AdapterError):
         self.retry_after = retry_after
 
 
+class UpstreamDataError(AdapterError):
+    pass
+
+
+def venue_value(record: Dict[str, Any], key: str, what: str) -> Any:
+    value = record.get(key)
+    if value is None or value == "":
+        raise UpstreamDataError(f"{what} arrived without {key}")
+    return value
+
+
 def build_qty_value(native: float, qty_unit: str, contract_size: Optional[float], price: float) -> QtyValue:
     if qty_unit == "contract":
         if contract_size is None:

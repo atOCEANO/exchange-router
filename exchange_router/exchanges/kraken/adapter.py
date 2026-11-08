@@ -10,7 +10,7 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
-    build_step, build_step_from_decimals, count_decimals,
+    build_step, build_step_from_decimals, count_decimals, venue_value,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -1205,7 +1205,7 @@ class KrakenAdapter(BaseExchange):
                 quote       = quote,
                 rate        = build_funding_historical(
                     kind      = "continuous",
-                    per_cycle = float(r.get("relativeFundingRate", 0)),
+                    per_cycle = float(venue_value(r, "relativeFundingRate", f"Kraken funding of {api_symbol} at {ts}")),
                     cycle_ms  = 3_600_000,
                 ),
                 timestamp   = ts,
@@ -1374,7 +1374,8 @@ class KrakenAdapter(BaseExchange):
                         except (TypeError, ValueError):
                             contract_size = None
                     if contract_size is None:
-                        contract_size = 1.0
+                        logger.warning(f"Kraken lists {v['symbol']} without a contract size; it stays out of the market list until Kraken sends one")
+                        continue
 
                 results.append(SymbolInfo(
                     symbol             = self.get_model_symbol(v["symbol"], market_type),
@@ -1621,7 +1622,7 @@ class KrakenAdapter(BaseExchange):
                     elif feed == "book" and "side" in data and "price" in data:
                         if not bootstrapped:
                             continue
-                        p, q = float(data["price"]), float(data.get("qty", 0))
+                        p, q = float(data["price"]), float(data["qty"])
                         side = data.get("side", "").lower()
                         book = bids if side == "buy" else asks if side == "sell" else None
                         if book is None:
@@ -1689,8 +1690,8 @@ class KrakenAdapter(BaseExchange):
                                 continue
                             yield _mk_trade(
                                 trade_id   = str(t.get("trade_id", t.get("timestamp", time.time()))),
-                                price      = float(t.get("price", 0)),
-                                qty_native = float(t.get("qty", 0)),
+                                price      = float(t["price"]),
+                                qty_native = float(t["qty"]),
                                 side_norm  = side_norm,
                                 ts         = t.get("timestamp", time.time()),
                             )
@@ -1711,7 +1712,7 @@ class KrakenAdapter(BaseExchange):
                         yield _mk_trade(
                             trade_id   = str(data.get("uid", data.get("time"))),
                             price      = float(data["price"]),
-                            qty_native = float(data.get("qty", 0)),
+                            qty_native = float(data["qty"]),
                             side_norm  = side_norm,
                             ts         = data.get("time", time.time()),
                         )
@@ -1727,7 +1728,7 @@ class KrakenAdapter(BaseExchange):
                             yield _mk_trade(
                                 trade_id   = str(t.get("uid", t.get("time"))),
                                 price      = float(t["price"]),
-                                qty_native = float(t.get("qty", 0)),
+                                qty_native = float(t["qty"]),
                                 side_norm  = side_norm,
                                 ts         = t.get("time", time.time()),
                             )

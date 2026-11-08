@@ -23,6 +23,7 @@ from .errors import (
 )
 from .exchanges import EXCHANGE_REGISTRY, get_adapter, load_exchanges
 from .exchanges.base import (
+    UpstreamDataError,
     UpstreamUnavailableError,
     join_open_interest_basis,
     symbol_info_to_lite,
@@ -73,7 +74,7 @@ def error_for_fault(exc: Exception) -> RouterError:
     if isinstance(exc, UpstreamUnavailableError):
         return UpstreamUnavailable(str(exc), 503, getattr(exc, "retry_after", None))
 
-    if isinstance(exc, ValidationError):
+    if isinstance(exc, (ValidationError, UpstreamDataError)):
         return RouterError(str(exc), 502)
 
     if isinstance(exc, NotImplementedError):

@@ -10,7 +10,7 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
-    build_step, count_decimals, stamp_funding_cycles,
+    build_step, count_decimals, stamp_funding_cycles, venue_value,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -782,8 +782,9 @@ class KucoinAdapter(BaseExchange):
                 return None
             raw_id   = raw.get("tradeId") or raw.get("sequence")
             trade_id = str(raw_id) if raw_id else None
-            price    = float(raw["price"])
-            size_raw = float(raw["size"])
+            what     = f"KuCoin trade {trade_id} on {api_symbol}"
+            price    = float(venue_value(raw, "price", what))
+            size_raw = float(venue_value(raw, "size", what))
 
             if market_type == MarketType.INVERSE:
                 native = size_raw
@@ -811,7 +812,7 @@ class KucoinAdapter(BaseExchange):
                     price         = price,
                 ),
                 side        = side_norm,
-                timestamp   = self._ns_to_ms(raw.get(ts_key) or int(time.time() * 1000)),
+                timestamp   = self._ns_to_ms(venue_value(raw, ts_key, what)),
             )
 
         if market_type == MarketType.SPOT:
@@ -1004,7 +1005,7 @@ class KucoinAdapter(BaseExchange):
             symbol      = model_sym,
             market_type = market_type,
             quote       = quote,
-            mark_price  = float(m.get("value") or 0),
+            mark_price  = float(venue_value(m, "value", f"KuCoin mark price of {api_symbol}")),
             index_price = idx_price,
             funding     = funding_block,
             timestamp   = ts,
@@ -1035,7 +1036,7 @@ class KucoinAdapter(BaseExchange):
                         quote       = quote,
                         rate        = build_funding_historical(
                             kind      = "discrete",
-                            per_cycle = float(r.get("fundingRate") or 0),
+                            per_cycle = float(venue_value(r, "fundingRate", f"KuCoin funding of {api_symbol} at {ts}")),
                             cycle_ms  = current_ms or 0,
                         ),
                         timestamp   = ts,
@@ -1084,7 +1085,7 @@ class KucoinAdapter(BaseExchange):
                     ts = int(r.get("ts") or 0)
                     if ts <= 0:
                         continue
-                    raw = float(r.get("openInterest") or 0)
+                    raw = float(venue_value(r, "openInterest", f"KuCoin open interest of {api_symbol} at {ts}"))
                     if is_inverse:
                         native_value  = raw
                         oi_unit_local = "contract"
@@ -1196,7 +1197,10 @@ class KucoinAdapter(BaseExchange):
             qty_unit = "contract" if market_type == MarketType.INVERSE else "base"
             contract_size: Optional[float] = None
             if market_type == MarketType.INVERSE:
-                contract_size = multiplier if multiplier is not None else 1.0
+                if multiplier is None:
+                    logger.warning(f"KuCoin lists {api_sym} without a multiplier; it stays out of the market list until KuCoin sends one")
+                    continue
+                contract_size = multiplier
 
             funding_interval_ms: Optional[int] = None
             granularity_raw = s.get("fundingRateGranularity")
@@ -1513,7 +1517,7 @@ class KucoinAdapter(BaseExchange):
                     if side_norm not in ("buy", "sell"):
                         continue
                     raw_id = d.get("tradeId") or d.get("sequence")
-                    price  = float(d.get("price") or 0)
+                    price  = float(d["price"])
                     yield Trade(
                         id          = str(raw_id) if raw_id else None,
                         symbol      = model_sym,
@@ -1521,13 +1525,13 @@ class KucoinAdapter(BaseExchange):
                         quote       = quote,
                         price       = price,
                         qty         = build_qty_value(
-                            native        = float(d.get("size") or 0),
+                            native        = float(d["size"]),
                             qty_unit      = unit,
                             contract_size = contract_size,
                             price         = price,
                         ),
                         side        = side_norm,
-                        timestamp   = self._ns_to_ms(d.get("time") or int(time.time() * 1000)),
+                        timestamp   = self._ns_to_ms(int(d["time"])),
                     )
                 except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                     logger.warning(f"KuCoin trades {api_symbol} malformed frame skipped: {e!r}")
@@ -1544,8 +1548,8 @@ class KucoinAdapter(BaseExchange):
                 if side_norm not in ("buy", "sell"):
                     continue
                 raw_id   = d.get("tradeId") or d.get("sequence")
-                price    = float(d.get("price") or 0)
-                size_raw = float(d.get("size") or 0)
+                price    = float(d["price"])
+                size_raw = float(d["size"])
                 if is_inverse:
                     native = size_raw
                     qty_unit_local = "contract"
@@ -1567,7 +1571,7 @@ class KucoinAdapter(BaseExchange):
                         price         = price,
                     ),
                     side        = side_norm,
-                    timestamp   = self._ns_to_ms(d.get("ts") or int(time.time() * 1000)),
+                    timestamp   = self._ns_to_ms(int(d["ts"])),
                 )
             except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                 logger.warning(f"KuCoin trades {api_symbol} malformed frame skipped: {e!r}")
@@ -1586,10 +1590,9 @@ class KucoinAdapter(BaseExchange):
         async for msg in self._ws_connect(market_type, topic):
             try:
                 d = msg.get("data") or {}
-                subject = msg.get("subject", "")
-                mark = float(d.get("markPrice") or 0)
-                if not mark and subject != "mark.index.price":
+                if d.get("markPrice") is None:
                     continue
+                mark = float(d["markPrice"])
                 next_ft_raw = d.get("nextFundingTime")
                 next_ft: Optional[int] = None
                 if next_ft_raw:

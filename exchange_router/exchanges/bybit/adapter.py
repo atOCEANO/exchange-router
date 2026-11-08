@@ -880,6 +880,11 @@ class BybitAdapter(BaseExchange):
             min_notional: Optional[float] = None
             lot = s.get("lotSizeFilter") or {}
             step_field = "basePrecision" if market_type == MarketType.SPOT else "qtyStep"
+            tick = (s.get("priceFilter") or {}).get("tickSize")
+            step = lot.get(step_field)
+            if not tick or not step:
+                logger.warning(f"Bybit lists {s['symbol']} without a tick size or a quantity step; it stays out of the market list until Bybit sends both")
+                continue
             notional_field = "minOrderAmt" if market_type == MarketType.SPOT else "minNotionalValue"
             raw_min_qty = lot.get("minOrderQty")
             raw_max_qty = lot.get("maxOrderQty")
@@ -920,16 +925,16 @@ class BybitAdapter(BaseExchange):
                 native_symbol      = s["symbol"],
                 base_asset         = s["baseCoin"],
                 quote_asset        = s["quoteCoin"],
-                price_precision    = self._precision(s.get("priceFilter", {}).get("tickSize", "0.01")),
-                quantity_precision = self._precision(lot.get(step_field, "0.001")),
+                price_precision    = self._precision(tick),
+                quantity_precision = self._precision(step),
                 min_qty            = min_qty,
                 max_qty            = max_qty,
                 min_notional       = min_notional,
                 qty_unit           = qty_unit,
                 contract_size      = contract_size,
                 funding            = funding_block,
-                tick_size          = build_step(s.get("priceFilter", {}).get("tickSize")),
-                qty_step           = build_step(lot.get(step_field)),
+                tick_size          = build_step(tick),
+                qty_step           = build_step(step),
             ))
         return results
 
@@ -1233,7 +1238,7 @@ class BybitAdapter(BaseExchange):
                     side_norm = {"buy": "sell", "sell": "buy"}.get(side_raw.lower())
                     if side_norm is None:
                         continue
-                    price = float(d.get("p", 0))
+                    price = float(d["p"])
                     yield Liquidation(
                         symbol      = self.get_model_symbol(d.get("s", api_symbol), market_type),
                         market_type = market_type,
@@ -1241,7 +1246,7 @@ class BybitAdapter(BaseExchange):
                         side        = side_norm,
                         price       = price,
                         qty         = build_qty_value(
-                            native        = float(d.get("v", 0)),
+                            native        = float(d["v"]),
                             qty_unit      = unit,
                             contract_size = contract_size,
                             price         = price,

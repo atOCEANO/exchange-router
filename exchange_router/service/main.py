@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 from exchange_router.capabilities import market_block, route_block
 from exchange_router.exchanges import EXCHANGE_REGISTRY, get_adapter, shutdown_exchanges, startup_exchanges
-from exchange_router.exchanges.base import UpstreamUnavailableError, join_open_interest_basis, symbol_info_to_lite, validate_interval
+from exchange_router.exchanges.base import UpstreamDataError, UpstreamUnavailableError, join_open_interest_basis, symbol_info_to_lite, validate_interval
 from exchange_router.models import MarketType
 from exchange_router.service.stream_manager import StreamManager
 from exchange_router.version import SCHEMA_VERSION, VERSION
@@ -54,6 +54,14 @@ async def upstream_unavailable_exception_handler(_request: Request, exc: Upstrea
         status_code=503,
         content={"error": "Upstream Unavailable", "detail": str(exc)},
         headers=headers,
+    )
+
+
+@app.exception_handler(UpstreamDataError)
+async def upstream_data_exception_handler(_request: Request, exc: UpstreamDataError):
+    return JSONResponse(
+        status_code=502,
+        content={"error": "Bad Upstream Response", "detail": str(exc)},
     )
 
 

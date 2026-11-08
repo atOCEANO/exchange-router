@@ -350,7 +350,7 @@ async def test_bybit_spot_reads_its_own_step_and_minimum_notional():
     assert linear["BTCUSDT"].min_notional == 5.0
 
 
-async def test_a_value_the_venue_leaves_blank_reads_null_and_keeps_the_instrument():
+async def test_a_blank_minimum_reads_null_and_a_blank_grid_leaves_the_instrument_out():
     blank_linear = copy.deepcopy(BYBIT_LINEAR)
     blank_linear["lotSizeFilter"]["qtyStep"] = ""
     blank_linear["priceFilter"] = {}
@@ -361,9 +361,7 @@ async def test_a_value_the_venue_leaves_blank_reads_null_and_keeps_the_instrumen
     linear = await listed(BybitAdapter(), MarketType.LINEAR, bybit([blank_linear]))
     spot   = await listed(BybitAdapter(), MarketType.SPOT, bybit([blank_spot]))
 
-    assert linear["BTCUSDT"].qty_step  is None
-    assert linear["BTCUSDT"].tick_size is None
-    assert linear["BTCUSDT"].min_qty   == 0.001
+    assert linear == {}
 
     assert spot["BTCUSDT"].min_notional is None
     assert spot["BTCUSDT"].qty_step     == 0.000001
