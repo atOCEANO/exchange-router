@@ -538,6 +538,7 @@ class HyperliquidAdapter(BaseExchange):
             market_type          = market_type,
             quote                = quote,
             price                = close,
+            price_source         = "mid" if ctx.get("midPx") else "mark",
             open_24h             = prev,
             high_24h             = high,
             low_24h              = low,
@@ -549,6 +550,7 @@ class HyperliquidAdapter(BaseExchange):
             ),
             price_change_percent = (close - prev) / prev * 100 if prev > 0 else 0.0,
             timestamp            = int(time.time() * 1000),
+            time_source          = "router",
         )
 
 
@@ -991,6 +993,7 @@ class HyperliquidAdapter(BaseExchange):
                     market_type          = market_type,
                     quote                = quote,
                     price                = close,
+                    price_source         = "mid" if ctx.get("midPx") else "mark",
                     open_24h             = prev,
                     high_24h             = high,
                     low_24h              = low,
@@ -1002,6 +1005,7 @@ class HyperliquidAdapter(BaseExchange):
                     ),
                     price_change_percent = (close - prev) / prev * 100 if prev > 0 else 0.0,
                     timestamp            = int(time.time() * 1000),
+                    time_source          = "router",
                 )
             except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                 logger.warning(f"Hyperliquid ticker {coin} malformed frame skipped: {e!r}")

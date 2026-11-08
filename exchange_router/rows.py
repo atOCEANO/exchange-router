@@ -35,6 +35,7 @@ def ticker_row(raw: Dict[str, Any]) -> Row:
         "market_type":          raw.get("market_type"),
         "quote":                raw.get("quote"),
         "price":                raw.get("price"),
+        "price_source":         raw.get("price_source"),
         "open_24h":             raw.get("open_24h"),
         "high_24h":             raw.get("high_24h"),
         "low_24h":              raw.get("low_24h"),
@@ -43,6 +44,7 @@ def ticker_row(raw: Dict[str, Any]) -> Row:
         "volume_24h_unit":      unit,
         "price_change_percent": raw.get("price_change_percent"),
         "timestamp":            raw.get("timestamp"),
+        "time_source":          raw.get("time_source"),
     }
 
     return _wrap(flat, raw)

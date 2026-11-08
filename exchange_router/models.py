@@ -315,40 +315,63 @@ class Ticker(BaseModel):
         ...,
         description="Quote currency for all price-denominated fields on this row, matching SymbolInfo.quote.",
     )
-    price: float = Field(
+    price: Optional[float] = Field(
         ...,
-        description="Last traded price in quote, or the current mid on a venue that publishes no last trade (Hyperliquid's asset context carries none, so price is midPx). Can lag on thinly-traded inverse markets; consult MarkPrice for current fair value.",
+        description="The price in quote that price_source names; null when the venue has no last trade. Can lag on thinly-traded inverse markets; consult MarkPrice for current fair value.",
     )
-    open_24h: float = Field(
+    price_source: str = Field(
         ...,
-        description="Price in quote 24 hours before timestamp, used as the open of the rolling 24h window.",
+        description="Where price comes from. Known values: last_trade; mid, the middle of the best bid and ask, on Hyperliquid, whose asset context carries no last trade; mark, the mark price, where Hyperliquid has no mid. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
     )
-    high_24h: float = Field(
+    open_24h: Optional[float] = Field(
         ...,
-        description="Highest price in quote over the rolling 24h window ending at timestamp.",
+        description="Price in quote 24 hours before timestamp, used as the open of the rolling 24h window; null whenever nothing traded in the window.",
     )
-    low_24h: float = Field(
+    high_24h: Optional[float] = Field(
         ...,
-        description="Lowest price in quote over the rolling 24h window ending at timestamp.",
+        description="Highest price in quote over the rolling 24h window ending at timestamp; null whenever nothing traded in the window.",
     )
-    volume_24h: VolumeValue = Field(
+    low_24h: Optional[float] = Field(
         ...,
-        description="Volume over the rolling 24h window, with its notional in quote; on base, notional_basis names the row's price and timestamp.",
+        description="Lowest price in quote over the rolling 24h window ending at timestamp; null whenever nothing traded in the window.",
     )
-    price_change_percent: float = Field(
+    volume_24h: Optional[VolumeValue] = Field(
         ...,
-        description="24h price change as a percent. 5.0 means +5%, not +0.05.",
+        description="Volume over the rolling 24h window, with its notional in quote; on base, notional_basis names the row's price and timestamp, and notional is null with price. Null when the exchange publishes no 24-hour statistics for a market that does not trade, as Binance does for a contract being settled.",
+    )
+    price_change_percent: Optional[float] = Field(
+        ...,
+        description="24h price change as a percent, 5.0 meaning +5%, not +0.05; null whenever nothing traded in the window.",
     )
     timestamp: int = Field(
         ...,
-        description="Server snapshot time in unix milliseconds. Some adapters fall back to router-receive time when the upstream endpoint omits a server timestamp.",
+        description="Snapshot time in unix milliseconds, by the clock time_source names.",
+    )
+    time_source: str = Field(
+        ...,
+        description="Whose clock stamped the row. Known values: venue, the venue's own time for the snapshot; router, the router's clock when it read a venue that sends none. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
     )
 
 
     @model_validator(mode="after")
+    def _nothing_traded_reads_null(self) -> "Ticker":
+        if not self.price:
+            self.price = None
+        if self.volume_24h is None or not self.volume_24h.native:
+            self.open_24h, self.high_24h, self.low_24h, self.price_change_percent = None, None, None, None
+        return self
+
+
+    @model_validator(mode="after")
     def _row_price_basis(self) -> "Ticker":
-        if self.volume_24h.notional_basis.method == "row_price":
-            self.volume_24h.notional_basis = NotionalBasis(method="row_price", price=self.price, ts=self.timestamp)
+        if self.volume_24h is not None and self.volume_24h.notional_basis.method == "row_price":
+            if self.price is None:
+                self.volume_24h.notional = None
+            self.volume_24h.notional_basis = NotionalBasis(
+                method = "row_price",
+                price  = self.price,
+                ts     = None if self.price is None else self.timestamp,
+            )
         return self
 
 

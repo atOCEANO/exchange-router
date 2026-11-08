@@ -654,6 +654,7 @@ class OkxAdapter(BaseExchange):
             market_type          = market_type,
             quote                = quote,
             price                = last,
+            price_source         = "last_trade",
             open_24h             = open_24h,
             high_24h             = float(t.get("high24h") or 0),
             low_24h              = float(t.get("low24h") or 0),
@@ -665,6 +666,7 @@ class OkxAdapter(BaseExchange):
             ),
             price_change_percent = pct,
             timestamp            = self.normalize_timestamp(t["ts"]),
+            time_source          = "venue",
         )
 
 
@@ -1362,6 +1364,7 @@ class OkxAdapter(BaseExchange):
                         market_type          = market_type,
                         quote                = quote,
                         price                = last,
+                        price_source         = "last_trade",
                         open_24h             = open_24h,
                         high_24h             = float(t.get("high24h") or 0),
                         low_24h              = float(t.get("low24h") or 0),
@@ -1373,6 +1376,7 @@ class OkxAdapter(BaseExchange):
                         ),
                         price_change_percent = pct,
                         timestamp            = self.normalize_timestamp(t["ts"]),
+                        time_source          = "venue",
                     )
             except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                 logger.warning(f"OKX ticker {api_symbol} malformed frame skipped: {e!r}")

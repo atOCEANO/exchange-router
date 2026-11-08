@@ -55,7 +55,8 @@ def day(row):
 async def test_no_trade_in_a_day_reads_as_no_range_beside_a_live_mid():
     manlet, = await tickers("MANLETUSDC")
 
-    assert day(manlet) == [0.0052505, 0.0055, 0.0, 0.0]
+    assert day(manlet) == [0.0052505, None, None, None]
+    assert manlet.price_source == "mid"
 
 
 async def test_a_mid_above_every_trade_is_not_the_days_high():

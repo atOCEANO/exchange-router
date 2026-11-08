@@ -519,7 +519,25 @@ class BinanceAdapter(BaseExchange):
 
         data = await self._make_request("GET", f"{base_url}{endpoint}", params={"symbol": api_symbol})
         if isinstance(data, list):
-            data = data[0]
+            data = data[0] if data else {}
+
+        if not data:
+            listed = await self._info_for(market_type, symbol)
+            if listed is not None and listed.status != "trading":
+                return Ticker(
+                    symbol               = symbol,
+                    market_type          = market_type,
+                    quote                = listed.quote,
+                    price                = None,
+                    price_source         = "last_trade",
+                    open_24h             = None,
+                    high_24h             = None,
+                    low_24h              = None,
+                    volume_24h           = None,
+                    price_change_percent = None,
+                    timestamp            = int(time.time() * 1000),
+                    time_source          = "router",
+                )
 
         model_sym = self.get_model_symbol(venue_value(data, "symbol", f"Binance's 24h ticker of {api_symbol}"), market_type)
         info      = await self._info_for(market_type, model_sym)
@@ -534,6 +552,7 @@ class BinanceAdapter(BaseExchange):
             market_type          = market_type,
             quote                = quote,
             price                = close_price,
+            price_source         = "last_trade",
             open_24h             = float(data["openPrice"]),
             high_24h             = float(data["highPrice"]),
             low_24h              = float(data["lowPrice"]),
@@ -545,6 +564,7 @@ class BinanceAdapter(BaseExchange):
             ),
             price_change_percent = float(data["priceChangePercent"]),
             timestamp            = self.normalize_timestamp(data["closeTime"]),
+            time_source          = "venue",
         )
 
 
@@ -1085,6 +1105,7 @@ class BinanceAdapter(BaseExchange):
                     market_type          = market_type,
                     quote                = quote,
                     price                = close_price,
+                    price_source         = "last_trade",
                     open_24h             = float(data["o"]),
                     high_24h             = float(data["h"]),
                     low_24h              = float(data["l"]),
@@ -1096,6 +1117,7 @@ class BinanceAdapter(BaseExchange):
                     ),
                     price_change_percent = float(data["P"]),
                     timestamp            = self.normalize_timestamp(data["E"]),
+                    time_source          = "venue",
                 )
             except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                 logger.warning(f"Binance ticker {s_norm} malformed frame skipped: {e!r}")

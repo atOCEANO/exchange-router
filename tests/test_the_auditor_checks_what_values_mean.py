@@ -49,7 +49,7 @@ def test_the_range_is_checked_only_where_the_price_is_a_last_trade():
 
     assert _ticker_checks(ticker, ctx("hyperliquid", "spot"))[0] == "pass"
     assert _ticker_checks(ticker, ctx("binance", "spot"))[0] == "warn"
-    assert _ticker_checks(dict(ticker, price=0.0), ctx("kraken", "spot"))[:3:2] == ("warn", "no last trade (price 0.0)")
+    assert _ticker_checks(dict(ticker, price=None), ctx("kraken", "spot"))[:3:2] == ("warn", "no last trade (price null)")
 
 
 def test_an_empty_side_warns_and_a_router_stamp_is_not_judged_for_age():

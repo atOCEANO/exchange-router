@@ -799,6 +799,7 @@ class KrakenAdapter(BaseExchange):
                 market_type          = market_type,
                 quote                = quote,
                 price                = c_price,
+                price_source         = "last_trade",
                 open_24h             = open_price,
                 high_24h             = float(t["h"][1]),
                 low_24h              = float(t["l"][1]),
@@ -810,6 +811,7 @@ class KrakenAdapter(BaseExchange):
                 ),
                 price_change_percent = ((c_price - open_price) / open_price) * 100 if open_price > 0 else 0,
                 timestamp            = int(time.time() * 1000),
+                time_source          = "router",
             )
 
         data       = await self._futures_tickers()
@@ -832,6 +834,7 @@ class KrakenAdapter(BaseExchange):
                     market_type          = market_type,
                     quote                = quote,
                     price                = last,
+                    price_source         = "last_trade",
                     open_24h             = open_24h,
                     high_24h             = float(t.get("high24h", 0)),
                     low_24h              = float(t.get("low24h", 0)),
@@ -843,6 +846,7 @@ class KrakenAdapter(BaseExchange):
                     ),
                     price_change_percent = pc,
                     timestamp            = server_ts,
+                    time_source          = "venue" if data.get("serverTime") else "router",
                 )
         raise ValueError(f"Symbol {api_symbol} not found")
 
@@ -1446,12 +1450,14 @@ class KrakenAdapter(BaseExchange):
                 try:
                     if data.get("type") in ["snapshot", "update"] and data.get("channel") == "ticker":
                         for item in data.get("data", []):
-                            last = float(item.get("last", 0))
+                            last    = float(item.get("last", 0))
+                            stamped = self.normalize_timestamp(item["timestamp"]) if item.get("timestamp") else 0
                             yield Ticker(
                                 symbol               = model_sym,
                                 market_type          = market_type,
                                 quote                = quote,
                                 price                = last,
+                                price_source         = "last_trade",
                                 open_24h             = last - float(item.get("change", 0)),
                                 high_24h             = float(item.get("high", 0)),
                                 low_24h              = float(item.get("low", 0)),
@@ -1462,7 +1468,8 @@ class KrakenAdapter(BaseExchange):
                                     close         = last,
                                 ),
                                 price_change_percent = float(item.get("change_pct", 0)),
-                                timestamp            = self.normalize_timestamp(item.get("timestamp", time.time())),
+                                timestamp            = stamped if stamped > 0 else int(time.time() * 1000),
+                                time_source          = "venue" if stamped > 0 else "router",
                             )
                 except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                     logger.warning(f"Kraken ticker {api_symbol} malformed frame skipped: {e!r}")
@@ -1481,6 +1488,7 @@ class KrakenAdapter(BaseExchange):
                             market_type          = market_type,
                             quote                = quote,
                             price                = last,
+                            price_source         = "last_trade",
                             open_24h             = open_24h,
                             high_24h             = float(data.get("high", 0)),
                             low_24h              = float(data.get("low", 0)),
@@ -1492,6 +1500,7 @@ class KrakenAdapter(BaseExchange):
                             ),
                             price_change_percent = pc,
                             timestamp            = self.normalize_timestamp(data.get("time", time.time())),
+                            time_source          = "venue" if "time" in data else "router",
                         )
                 except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                     logger.warning(f"Kraken ticker {api_symbol} malformed frame skipped: {e!r}")
@@ -1515,7 +1524,7 @@ class KrakenAdapter(BaseExchange):
                         for item in data.get("data", []):
                             bid_price = float(item.get("bid", 0))
                             ask_price = float(item.get("ask", 0))
-                            stamped   = self.normalize_timestamp(item.get("timestamp", time.time()))
+                            stamped   = self.normalize_timestamp(item["timestamp"]) if item.get("timestamp") else 0
                             yield BookTicker(
                                 symbol      = model_sym,
                                 market_type = market_type,

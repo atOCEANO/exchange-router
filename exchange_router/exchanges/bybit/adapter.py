@@ -523,6 +523,7 @@ class BybitAdapter(BaseExchange):
             market_type          = market_type,
             quote                = quote,
             price                = close,
+            price_source         = "last_trade",
             open_24h             = float(t["prevPrice24h"]),
             high_24h             = float(t["highPrice24h"]),
             low_24h              = float(t["lowPrice24h"]),
@@ -534,6 +535,7 @@ class BybitAdapter(BaseExchange):
             ),
             price_change_percent = float(t["price24hPcnt"]) * 100,
             timestamp            = self.normalize_timestamp(data.get("_envelope_ts") or int(time.time() * 1000)),
+            time_source          = "venue" if data.get("_envelope_ts") else "router",
         )
 
 
@@ -1057,6 +1059,7 @@ class BybitAdapter(BaseExchange):
                     market_type          = market_type,
                     quote                = quote,
                     price                = close_price,
+                    price_source         = "last_trade",
                     open_24h             = float(state.get("prevPrice24h") or 0),
                     high_24h             = float(state.get("highPrice24h") or 0),
                     low_24h              = float(state.get("lowPrice24h") or 0),
@@ -1068,6 +1071,7 @@ class BybitAdapter(BaseExchange):
                     ),
                     price_change_percent = float(state.get("price24hPcnt") or 0) * 100,
                     timestamp            = self.normalize_timestamp(msg.get("ts", time.time())),
+                    time_source          = "venue" if "ts" in msg else "router",
                 )
             except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                 logger.warning(f"Bybit ticker {api_symbol} malformed frame skipped: {e!r}")

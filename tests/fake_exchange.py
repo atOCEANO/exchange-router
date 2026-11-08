@@ -242,12 +242,14 @@ class FakeExchange(BaseExchange):
             market_type          = market_type,
             quote                = QUOTES[market_type],
             price                = 100.0,
+            price_source         = "last_trade",
             open_24h             = 95.0,
             high_24h             = 105.0,
             low_24h              = 94.0,
             volume_24h           = build_volume_value(1234.5, qty_unit_for(market_type), contract_size_for(market_type), 100.0),
             price_change_percent = 5.26,
             timestamp            = BASE_TS,
+            time_source          = "venue",
         )
 
 

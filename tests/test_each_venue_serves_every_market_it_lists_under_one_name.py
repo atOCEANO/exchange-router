@@ -1,3 +1,5 @@
+import types
+
 import pytest
 
 from exchange_router.exchanges.base import UpstreamDataError
@@ -126,12 +128,30 @@ async def test_binance_serves_a_halted_pair_and_lists_it_only_when_asked():
     assert await on(BinanceAdapter(), answer, read) == (["EOSUSDT"], ["BTCUSDT"], "halted", "USDT", ["BTCUSDT", "EOSUSDT"], ["EOSUSDT"])
 
 
-async def test_binance_refuses_the_empty_ticker_it_sends_for_a_settled_perpetual():
+async def binance_empty_ticker(symbol, status):
     async def answer(method, url, params=None):
         return {}
 
-    with pytest.raises(UpstreamDataError, match="24h ticker of OMGUSDT arrived without symbol"):
-        await on(BinanceAdapter(), answer, lambda a: a.get_ticker(MarketType.LINEAR, "OMGUSDT"))
+    async def listed(market_type, name):
+        return types.SimpleNamespace(quote="USDT", status=status)
+
+    async def read(adapter):
+        adapter._info_for = listed
+        return await adapter.get_ticker(MarketType.LINEAR, symbol)
+
+    return await on(BinanceAdapter(), answer, read)
+
+
+async def test_binance_answers_a_settled_perpetual_it_sends_no_ticker_for_with_nulls_on_the_routers_clock():
+    ticker = await binance_empty_ticker("OMGUSDT", "halted")
+
+    assert (ticker.price, ticker.open_24h, ticker.high_24h, ticker.low_24h, ticker.volume_24h, ticker.price_change_percent) == (None,) * 6
+    assert (ticker.symbol, ticker.quote, ticker.price_source, ticker.time_source) == ("OMGUSDT", "USDT", "last_trade", "router")
+
+
+async def test_binance_still_refuses_an_empty_ticker_for_a_market_that_trades():
+    with pytest.raises(UpstreamDataError, match="24h ticker of BTCUSDT arrived without symbol"):
+        await binance_empty_ticker("BTCUSDT", "trading")
 
 
 async def test_bybit_names_a_usdc_perpetual_by_base_and_quote_and_still_takes_its_own_name():

@@ -605,6 +605,7 @@ class KucoinAdapter(BaseExchange):
                 market_type          = market_type,
                 quote                = quote,
                 price                = last,
+                price_source         = "last_trade",
                 open_24h             = last - float(t.get("changePrice") or 0),
                 high_24h             = float(t.get("high") or 0),
                 low_24h              = float(t.get("low") or 0),
@@ -616,6 +617,7 @@ class KucoinAdapter(BaseExchange):
                 ),
                 price_change_percent = change_pct,
                 timestamp            = int(t.get("time") or int(time.time() * 1000)),
+                time_source          = "venue" if t.get("time") else "router",
             )
 
         c = await self._make_request("GET", self.fut_rest_url, f"/api/v1/contracts/{api_symbol}")
@@ -631,6 +633,7 @@ class KucoinAdapter(BaseExchange):
             market_type          = market_type,
             quote                = quote,
             price                = last,
+            price_source         = "last_trade",
             open_24h             = last - price_chg,
             high_24h             = float(c.get("highPrice") or 0),
             low_24h              = float(c.get("lowPrice") or 0),
@@ -642,6 +645,7 @@ class KucoinAdapter(BaseExchange):
             ),
             price_change_percent = float(c.get("priceChgPct") or 0) * 100,
             timestamp            = int(time.time() * 1000),
+            time_source          = "router",
         )
 
 
@@ -1326,6 +1330,7 @@ class KucoinAdapter(BaseExchange):
                         market_type          = market_type,
                         quote                = quote,
                         price                = last,
+                        price_source         = "last_trade",
                         open_24h             = float(d.get("open") or 0),
                         high_24h             = float(d.get("high") or 0),
                         low_24h              = float(d.get("low") or 0),
@@ -1337,6 +1342,7 @@ class KucoinAdapter(BaseExchange):
                         ),
                         price_change_percent = float(d.get("changeRate") or 0) * 100,
                         timestamp            = int(d.get("datetime") or int(time.time() * 1000)),
+                        time_source          = "venue" if d.get("datetime") else "router",
                     )
                 except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                     logger.warning(f"KuCoin ticker {api_symbol} malformed frame skipped: {e!r}")
@@ -1362,6 +1368,7 @@ class KucoinAdapter(BaseExchange):
                     market_type          = market_type,
                     quote                = quote,
                     price                = last,
+                    price_source         = "last_trade",
                     open_24h             = last - price_chg,
                     high_24h             = float(d.get("highPrice") or 0),
                     low_24h              = float(d.get("lowPrice") or 0),
@@ -1373,6 +1380,7 @@ class KucoinAdapter(BaseExchange):
                     ),
                     price_change_percent = float(d.get("priceChgPct") or 0) * 100,
                     timestamp            = self._ns_to_ms(d.get("ts") or d.get("datetime") or int(time.time() * 1000)),
+                    time_source          = "venue" if d.get("ts") or d.get("datetime") else "router",
                 )
             except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                 logger.warning(f"KuCoin ticker {api_symbol} malformed frame skipped: {e!r}")

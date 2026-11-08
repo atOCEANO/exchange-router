@@ -25,11 +25,11 @@ def _ticker_checks(d: dict, ctx: ProbeContext) -> Tuple[str, ErrorType, str, Dic
     low, high = d["low_24h"], d["high_24h"]
     vol_obj   = d.get("volume_24h") or {}
     vol_native = vol_obj.get("native", 0) if isinstance(vol_obj, dict) else 0
+    if price is None:
+        return "warn", ErrorType.LOGIC, "no last trade (price null)", {"price": price}
     if price < 0:
         return "fail", ErrorType.LOGIC, f"negative price {price}", {"price": price}
-    if price == 0:
-        return "warn", ErrorType.LOGIC, "no last trade (price 0.0)", {"price": price}
-    if ctx.exchange not in MID_PRICED and high > 0 and low > 0 and not (low <= price <= high):
+    if ctx.exchange not in MID_PRICED and high and low and not (low <= price <= high):
         return "warn", ErrorType.LOGIC, f"price {price} outside 24h range [{low}, {high}]", {"price": price, "low": low, "high": high}
     if vol_native < 0:
         return "fail", ErrorType.LOGIC, f"negative volume {vol_native}", {"volume": vol_native}
