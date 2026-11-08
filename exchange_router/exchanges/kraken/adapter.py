@@ -1726,11 +1726,11 @@ class KrakenAdapter(BaseExchange):
                             if side_norm not in ("buy", "sell"):
                                 continue
                             yield _mk_trade(
-                                trade_id   = str(t.get("trade_id", t.get("timestamp", time.time()))),
+                                trade_id   = str(t.get("trade_id", t["timestamp"])),
                                 price      = float(t["price"]),
                                 qty_native = float(t["qty"]),
                                 side_norm  = side_norm,
-                                ts         = t.get("timestamp", time.time()),
+                                ts         = t["timestamp"],
                             )
                 except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                     logger.warning(f"Kraken trades {api_symbol} malformed frame skipped: {e!r}")
@@ -1747,11 +1747,11 @@ class KrakenAdapter(BaseExchange):
                         if side_norm not in ("buy", "sell"):
                             continue
                         yield _mk_trade(
-                            trade_id   = str(data.get("uid", data.get("time"))),
+                            trade_id   = str(data.get("uid", data["time"])),
                             price      = float(data["price"]),
                             qty_native = float(data["qty"]),
                             side_norm  = side_norm,
-                            ts         = data.get("time", time.time()),
+                            ts         = data["time"],
                         )
                     elif feed == "trade_snapshot" and "trades" in data:
                         snapshot_trades = sorted(data["trades"], key=lambda t: t.get("time", 0))
@@ -1763,11 +1763,11 @@ class KrakenAdapter(BaseExchange):
                             if side_norm not in ("buy", "sell"):
                                 continue
                             yield _mk_trade(
-                                trade_id   = str(t.get("uid", t.get("time"))),
+                                trade_id   = str(t.get("uid", t["time"])),
                                 price      = float(t["price"]),
                                 qty_native = float(t["qty"]),
                                 side_norm  = side_norm,
-                                ts         = t.get("time", time.time()),
+                                ts         = t["time"],
                             )
                 except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                     logger.warning(f"Kraken trades {api_symbol} malformed frame skipped: {e!r}")
