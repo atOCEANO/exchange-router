@@ -63,6 +63,7 @@ async def test_the_deadline_is_the_settlement_that_charges_the_rate():
     finally:
         await adapter.shutdown()
 
-    assert mark.funding.valid_until_ts == 1_794_096_000_000
-    assert mark.funding.per_cycle      == 0.0001
-    assert mark.funding.cycle_ms       == 8 * 3_600_000
+    assert mark.funding.valid_until.ts   == 1_794_096_000_000
+    assert mark.funding.valid_until.kind == "settlement"
+    assert mark.funding.per_cycle        == 0.0001
+    assert mark.funding.cycle_ms         == 8 * 3_600_000

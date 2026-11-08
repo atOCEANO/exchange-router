@@ -788,10 +788,11 @@ class BinanceAdapter(BaseExchange):
         rate_raw      = data.get("lastFundingRate")
         if rate_raw is not None and cycle_ms is not None and next_ft is not None:
             funding_block = build_funding_current(
-                kind           = "discrete",
-                per_cycle      = float(rate_raw),
-                cycle_ms       = cycle_ms,
-                valid_until_ts = max(next_ft, ts + 1),
+                kind             = "discrete",
+                per_cycle        = float(rate_raw),
+                cycle_ms         = cycle_ms,
+                valid_until_ts   = max(next_ft, ts + 1),
+                valid_until_kind = "settlement" if next_ft > ts else "estimate",
             )
 
         return MarkPrice(
@@ -802,6 +803,7 @@ class BinanceAdapter(BaseExchange):
             index_price = float(data["indexPrice"]),
             funding     = funding_block,
             timestamp   = ts,
+            time_source = "venue",
         )
 
 
@@ -1253,10 +1255,11 @@ class BinanceAdapter(BaseExchange):
                 rate_raw      = data.get("r")
                 if rate_raw is not None and cycle_ms is not None and next_ft is not None:
                     funding_block = build_funding_current(
-                        kind           = "discrete",
-                        per_cycle      = float(rate_raw),
-                        cycle_ms       = cycle_ms,
-                        valid_until_ts = max(next_ft, ts + 1),
+                        kind             = "discrete",
+                        per_cycle        = float(rate_raw),
+                        cycle_ms         = cycle_ms,
+                        valid_until_ts   = max(next_ft, ts + 1),
+                        valid_until_kind = "settlement" if next_ft > ts else "estimate",
                     )
 
                 yield MarkPrice(
@@ -1267,6 +1270,7 @@ class BinanceAdapter(BaseExchange):
                     index_price = float(data["i"]),
                     funding     = funding_block,
                     timestamp   = ts,
+                    time_source = "venue",
                 )
             except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                 logger.warning(f"Binance mark_price {s_norm} malformed frame skipped: {e!r}")

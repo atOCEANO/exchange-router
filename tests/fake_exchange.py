@@ -271,15 +271,17 @@ class FakeExchange(BaseExchange):
         if market_type == MarketType.SPOT:
             raise NotImplementedError(f"Mark Price not supported on fake {market_type}")
 
-        kind = FUNDING_KIND[market_type]
+        kind     = FUNDING_KIND[market_type]
+        deadline = "settlement" if kind == "discrete" else "estimate"
         return MarkPrice(
             symbol      = symbol,
             market_type = market_type,
             quote       = QUOTES[market_type],
             mark_price  = 100.25,
             index_price = 100.2,
-            funding     = build_funding_current(kind, 0.0001, FUNDING_CYCLE_MS[market_type], BASE_TS + FUNDING_CYCLE_MS[market_type]),
+            funding     = build_funding_current(kind, 0.0001, FUNDING_CYCLE_MS[market_type], BASE_TS + FUNDING_CYCLE_MS[market_type], deadline),
             timestamp   = BASE_TS,
+            time_source = "venue",
         )
 
 

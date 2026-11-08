@@ -157,20 +157,20 @@ class SnapshotProbe(Probe):
         started = time.time()
         table   = DEADLINES.get((ctx.exchange, ctx.market_type))
         funding = data.get("funding") or {}
-        if table is None or not funding.get("valid_until_ts"):
+        if table is None or not (funding.get("valid_until") or {}).get("ts"):
             return self.result(ctx, name, started, status="skip", error_type=ErrorType.SKIPPED, message="no venue deadline to compare")
 
         _, info, _ = await fetch(ctx.client, f"/{ctx.exchange}/{ctx.market_type}/markets/{ctx.symbol}")
         native     = info.get("native_symbol") if isinstance(info, dict) else None
         url, params, path = table
-        router_ts  = funding["valid_until_ts"]
+        router_ts  = funding["valid_until"]["ts"]
         venue_ts   = dig(await venue_fetch(ctx.client, url, {k: v.format(native=native) for k, v in params.items()}), path)
         venue_ts   = int(venue_ts) if venue_ts not in (None, "") else None
         verdict    = deadline_verdict(router_ts, venue_ts, funding.get("cycle_ms") or 0)
 
         if verdict == "settled":
             _, again, _ = await fetch(ctx.client, f"/{ctx.exchange}/{ctx.market_type}/{self.route}/{ctx.symbol}")
-            router_ts   = ((again or {}).get("funding") or {}).get("valid_until_ts") or router_ts
+            router_ts   = (((again or {}).get("funding") or {}).get("valid_until") or {}).get("ts") or router_ts
             verdict     = "pass" if abs(router_ts - venue_ts) <= 1000 else "fail"
 
         evidence = {"router_valid_until_ts": router_ts, "venue_next_settlement": venue_ts, "native_symbol": native}

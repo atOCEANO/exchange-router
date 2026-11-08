@@ -956,10 +956,11 @@ class OkxAdapter(BaseExchange):
         funding_block = None
         if funding_rate is not None and cycle_ms is not None and next_funding is not None:
             funding_block = build_funding_current(
-                kind           = "discrete",
-                per_cycle      = funding_rate,
-                cycle_ms       = cycle_ms,
-                valid_until_ts = max(next_funding, ts + 1),
+                kind             = "discrete",
+                per_cycle        = funding_rate,
+                cycle_ms         = cycle_ms,
+                valid_until_ts   = max(next_funding, ts + 1),
+                valid_until_kind = "settlement" if next_funding > ts else "estimate",
             )
 
         return MarkPrice(
@@ -970,6 +971,7 @@ class OkxAdapter(BaseExchange):
             index_price = index_price,
             funding     = funding_block,
             timestamp   = ts,
+            time_source = "venue",
         )
 
 
@@ -1574,6 +1576,7 @@ class OkxAdapter(BaseExchange):
                         index_price = None,
                         funding     = None,
                         timestamp   = self.normalize_timestamp(m["ts"]),
+                        time_source = "venue",
                     )
             except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                 logger.warning(f"OKX mark_price {api_symbol} malformed frame skipped: {e!r}")

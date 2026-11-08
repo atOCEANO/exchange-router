@@ -1178,10 +1178,11 @@ class KrakenAdapter(BaseExchange):
                 funding_block = None
                 if rel_rate is not None:
                     funding_block = build_funding_current(
-                        kind           = "continuous",
-                        per_cycle      = rel_rate,
-                        cycle_ms       = 3_600_000,
-                        valid_until_ts = server_ts + 3_600_000,
+                        kind             = "continuous",
+                        per_cycle        = rel_rate,
+                        cycle_ms         = 3_600_000,
+                        valid_until_ts   = server_ts + 3_600_000,
+                        valid_until_kind = "estimate",
                     )
 
                 return MarkPrice(
@@ -1192,6 +1193,7 @@ class KrakenAdapter(BaseExchange):
                     index_price = idx_price,
                     funding     = funding_block,
                     timestamp   = server_ts,
+                    time_source = "venue" if data.get("serverTime") else "router",
                 )
         raise ValueError(f"Symbol {api_symbol} not found")
 
@@ -1778,10 +1780,11 @@ class KrakenAdapter(BaseExchange):
                     funding_block = None
                     if rel_rate is not None:
                         funding_block = build_funding_current(
-                            kind           = "continuous",
-                            per_cycle      = rel_rate,
-                            cycle_ms       = 3_600_000,
-                            valid_until_ts = ts + 3_600_000,
+                            kind             = "continuous",
+                            per_cycle        = rel_rate,
+                            cycle_ms         = 3_600_000,
+                            valid_until_ts   = ts + 3_600_000,
+                            valid_until_kind = "estimate",
                         )
 
                     yield MarkPrice(
@@ -1792,6 +1795,7 @@ class KrakenAdapter(BaseExchange):
                         index_price = idx_price,
                         funding     = funding_block,
                         timestamp   = ts,
+                        time_source = "venue" if "time" in data else "router",
                     )
             except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                 logger.warning(f"Kraken mark_price {api_symbol} malformed frame skipped: {e!r}")

@@ -14,7 +14,7 @@ from exchange_router.models import (
     MarketType, SymbolInfo, FundingRate, OpenInterest, Liquidation, LongShortRatio,
     MarginTier, MarginTiers,
     QtyValue, VolumeValue, OiValue, NotionalBasis,
-    FundingCurrent, FundingHistorical, FundingConvention,
+    FundingCurrent, FundingDeadline, FundingHistorical, FundingConvention,
     QtyGrid, PriceTick, PriceSignificantFigures, Notional,
 )
 
@@ -122,12 +122,12 @@ def build_oi_value(native: float, oi_unit: str, contract_size: Optional[float], 
     )
 
 
-def build_funding_current(kind: str, per_cycle: float, cycle_ms: int, valid_until_ts: int) -> FundingCurrent:
+def build_funding_current(kind: str, per_cycle: float, cycle_ms: int, valid_until_ts: int, valid_until_kind: str) -> FundingCurrent:
     return FundingCurrent(
-        kind           = kind,
-        per_cycle      = per_cycle,
-        cycle_ms       = cycle_ms,
-        valid_until_ts = valid_until_ts,
+        kind        = kind,
+        per_cycle   = per_cycle,
+        cycle_ms    = cycle_ms,
+        valid_until = FundingDeadline(kind=valid_until_kind, ts=valid_until_ts),
     )
 
 

@@ -71,6 +71,7 @@ def book_ticker_row(raw: Dict[str, Any]) -> Row:
 
 def mark_price_row(raw: Dict[str, Any]) -> Row:
     funding   = raw.get("funding") or {}
+    deadline  = funding.get("valid_until") or {}
     per_cycle = funding.get("per_cycle")
     cycle_ms  = funding.get("cycle_ms")
 
@@ -80,17 +81,19 @@ def mark_price_row(raw: Dict[str, Any]) -> Row:
         per_hour = None
 
     flat = {
-        "symbol":                 raw.get("symbol"),
-        "market_type":            raw.get("market_type"),
-        "quote":                  raw.get("quote"),
-        "mark_price":             raw.get("mark_price"),
-        "index_price":            raw.get("index_price"),
-        "funding_kind":           funding.get("kind"),
-        "funding_per_cycle":      per_cycle,
-        "funding_cycle_ms":       cycle_ms,
-        "funding_per_hour":       per_hour,
-        "funding_valid_until_ts": funding.get("valid_until_ts") if funding else None,
-        "timestamp":              raw.get("timestamp"),
+        "symbol":                   raw.get("symbol"),
+        "market_type":              raw.get("market_type"),
+        "quote":                    raw.get("quote"),
+        "mark_price":               raw.get("mark_price"),
+        "index_price":              raw.get("index_price"),
+        "funding_kind":             funding.get("kind"),
+        "funding_per_cycle":        per_cycle,
+        "funding_cycle_ms":         cycle_ms,
+        "funding_per_hour":         per_hour,
+        "funding_valid_until_ts":   deadline.get("ts"),
+        "funding_valid_until_kind": deadline.get("kind"),
+        "timestamp":                raw.get("timestamp"),
+        "time_source":              raw.get("time_source"),
     }
 
     return _wrap(flat, raw)

@@ -604,16 +604,19 @@ class HyperliquidAdapter(BaseExchange):
         ts = int(time.time() * 1000)
         if ":" in coin:
             valid_until = ts + cycle_ms
+            deadline    = "estimate"
         else:
             valid_until = ((ts // cycle_ms) + 1) * cycle_ms
+            deadline    = "settlement"
 
         funding = None
         if rate is not None:
             funding = build_funding_current(
-                kind           = "discrete",
-                per_cycle      = float(rate),
-                cycle_ms       = cycle_ms,
-                valid_until_ts = max(valid_until, ts + 1),
+                kind             = "discrete",
+                per_cycle        = float(rate),
+                cycle_ms         = cycle_ms,
+                valid_until_ts   = max(valid_until, ts + 1),
+                valid_until_kind = deadline if valid_until > ts else "estimate",
             )
 
         return MarkPrice(
@@ -624,6 +627,7 @@ class HyperliquidAdapter(BaseExchange):
             index_price = float(oracle) if oracle is not None else None,
             funding     = funding,
             timestamp   = ts,
+            time_source = "router",
         )
 
 
@@ -1054,8 +1058,10 @@ class HyperliquidAdapter(BaseExchange):
                 cycle_ms = self._FUNDING_CYCLE_MS
                 if ":" in coin:
                     valid_until = ts + cycle_ms
+                    deadline    = "estimate"
                 else:
                     valid_until = ((ts // cycle_ms) + 1) * cycle_ms
+                    deadline    = "settlement"
                 yield MarkPrice(
                     symbol      = model_sym,
                     market_type = market_type,
@@ -1063,12 +1069,14 @@ class HyperliquidAdapter(BaseExchange):
                     mark_price  = float(ctx["markPx"]),
                     index_price = float(ctx["oraclePx"]),
                     funding     = build_funding_current(
-                        kind           = "discrete",
-                        per_cycle      = float(ctx["funding"]),
-                        cycle_ms       = cycle_ms,
-                        valid_until_ts = max(valid_until, ts + 1),
+                        kind             = "discrete",
+                        per_cycle        = float(ctx["funding"]),
+                        cycle_ms         = cycle_ms,
+                        valid_until_ts   = max(valid_until, ts + 1),
+                        valid_until_kind = deadline if valid_until > ts else "estimate",
                     ),
                     timestamp   = ts,
+                    time_source = "router",
                 )
             except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                 logger.warning(f"Hyperliquid mark_price {coin} malformed frame skipped: {e!r}")

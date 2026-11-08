@@ -712,7 +712,8 @@ class BybitAdapter(BaseExchange):
         quote     = info.quote if info else ""
         cycle_ms  = await self._funding_interval_ms_for(market_type, model_sym)
 
-        ts          = self.normalize_timestamp(data.get("_envelope_ts") or int(time.time() * 1000))
+        stamped     = data.get("_envelope_ts")
+        ts          = self.normalize_timestamp(stamped or int(time.time() * 1000))
         next_ft_raw = t.get("nextFundingTime")
         next_ft: Optional[int] = None
         if next_ft_raw:
@@ -727,10 +728,11 @@ class BybitAdapter(BaseExchange):
         rate_raw      = t.get("fundingRate")
         if rate_raw is not None and cycle_ms is not None and next_ft is not None:
             funding_block = build_funding_current(
-                kind           = "discrete",
-                per_cycle      = float(rate_raw),
-                cycle_ms       = cycle_ms,
-                valid_until_ts = max(next_ft, ts + 1),
+                kind             = "discrete",
+                per_cycle        = float(rate_raw),
+                cycle_ms         = cycle_ms,
+                valid_until_ts   = max(next_ft, ts + 1),
+                valid_until_kind = "settlement" if next_ft > ts else "estimate",
             )
 
         return MarkPrice(
@@ -741,6 +743,7 @@ class BybitAdapter(BaseExchange):
             index_price = float(t["indexPrice"]),
             funding     = funding_block,
             timestamp   = ts,
+            time_source = "venue" if stamped else "router",
         )
 
 

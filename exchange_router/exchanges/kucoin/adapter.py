@@ -1010,15 +1010,17 @@ class KucoinAdapter(BaseExchange):
 
         idx_raw = m.get("indexPrice")
         idx_price: Optional[float] = float(idx_raw) if idx_raw is not None else None
-        ts = int(m.get("timePoint") or int(time.time() * 1000))
+        stamped = m.get("timePoint")
+        ts      = int(stamped or int(time.time() * 1000))
 
         funding_block = None
         if funding_rate is not None and cycle_ms is not None and next_funding is not None:
             funding_block = build_funding_current(
-                kind           = "discrete",
-                per_cycle      = funding_rate,
-                cycle_ms       = cycle_ms,
-                valid_until_ts = max(next_funding, ts + 1),
+                kind             = "discrete",
+                per_cycle        = funding_rate,
+                cycle_ms         = cycle_ms,
+                valid_until_ts   = max(next_funding, ts + 1),
+                valid_until_kind = "settlement" if next_funding > ts else "estimate",
             )
 
         return MarkPrice(
@@ -1029,6 +1031,7 @@ class KucoinAdapter(BaseExchange):
             index_price = idx_price,
             funding     = funding_block,
             timestamp   = ts,
+            time_source = "venue" if stamped else "router",
         )
 
 
@@ -1610,15 +1613,17 @@ class KucoinAdapter(BaseExchange):
                         pass
                 idx_raw  = d.get("indexPrice")
                 rate_raw = d.get("fundingRate")
-                ts       = self._ns_to_ms(d.get("timestamp") or d.get("ts") or int(time.time() * 1000))
+                stamped  = d.get("timestamp") or d.get("ts")
+                ts       = self._ns_to_ms(stamped or int(time.time() * 1000))
 
                 funding_block = None
                 if rate_raw is not None and cycle_ms is not None and next_ft is not None:
                     funding_block = build_funding_current(
-                        kind           = "discrete",
-                        per_cycle      = float(rate_raw),
-                        cycle_ms       = cycle_ms,
-                        valid_until_ts = max(next_ft, ts + 1),
+                        kind             = "discrete",
+                        per_cycle        = float(rate_raw),
+                        cycle_ms         = cycle_ms,
+                        valid_until_ts   = max(next_ft, ts + 1),
+                        valid_until_kind = "settlement" if next_ft > ts else "estimate",
                     )
 
                 yield MarkPrice(
@@ -1629,6 +1634,7 @@ class KucoinAdapter(BaseExchange):
                     index_price = float(idx_raw) if idx_raw is not None else None,
                     funding     = funding_block,
                     timestamp   = ts,
+                    time_source = "venue" if stamped else "router",
                 )
             except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                 logger.warning(f"KuCoin mark_price {api_symbol} malformed frame skipped: {e!r}")

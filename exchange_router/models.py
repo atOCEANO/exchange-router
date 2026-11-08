@@ -206,10 +206,21 @@ class Notional(BaseModel):
     )
 
 
-class FundingCurrent(BaseModel):
-    kind: Literal["discrete", "continuous"] = Field(
+class FundingDeadline(BaseModel):
+    kind: str = Field(
         ...,
-        description="Funding model. 'discrete' means per_cycle is the rate to be charged at valid_until_ts. 'continuous' means per_cycle is the rate accrued over each cycle_ms-length window; partial holds pay proportionally.",
+        description="What the deadline is. Known values: settlement, the moment per_cycle is charged, as the venue states it or its fixed schedule sets it; estimate, the router's reckoning where the venue does not say when its rate is next replaced. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
+    )
+    ts: int = Field(
+        ...,
+        description="The deadline, in unix milliseconds.",
+    )
+
+
+class FundingCurrent(BaseModel):
+    kind: str = Field(
+        ...,
+        description="Funding model. Known values: discrete, per_cycle is the rate to be charged at the settlement valid_until names; continuous, per_cycle is the rate accrued over each cycle_ms-length window, and partial holds pay in proportion. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
     )
     per_cycle: float = Field(
         ...,
@@ -219,9 +230,9 @@ class FundingCurrent(BaseModel):
         ...,
         description="Cycle length in milliseconds. On discrete: the settlement interval (e.g. 28_800_000 for 8h). On continuous: the sample-window length (3_600_000 for Kraken's hourly sampling).",
     )
-    valid_until_ts: int = Field(
+    valid_until: FundingDeadline = Field(
         ...,
-        description="Unix milliseconds at which this rate stops being the current one. On discrete: hard commitment, the exact next-settlement moment. On continuous: expected next-sample moment, a prediction not a commitment.",
+        description="When this rate stops being the current one, and what kind of deadline that is: a settlement on discrete markets that state or fix one, an estimate on continuous markets and where the venue does not say.",
     )
 
 
@@ -403,16 +414,20 @@ class MarkPrice(BaseModel):
     )
     timestamp: int = Field(
         ...,
-        description="Snapshot time in unix milliseconds, as reported by the exchange.",
+        description="Snapshot time in unix milliseconds, by the clock time_source names.",
+    )
+    time_source: str = Field(
+        ...,
+        description="Whose clock stamped the row. Known values: venue, the venue's own time for the snapshot; router, the router's clock when it read a venue that sends none. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
     )
 
 
     @model_validator(mode="after")
     def _funding_valid_until_after_timestamp(self) -> "MarkPrice":
         if self.funding is not None and self.funding.kind == "discrete":
-            if self.funding.valid_until_ts < self.timestamp:
+            if self.funding.valid_until.ts < self.timestamp:
                 raise ValueError(
-                    f"discrete funding.valid_until_ts ({self.funding.valid_until_ts}) must be >= timestamp ({self.timestamp})"
+                    f"discrete funding.valid_until.ts ({self.funding.valid_until.ts}) must be >= timestamp ({self.timestamp})"
                 )
         return self
 
