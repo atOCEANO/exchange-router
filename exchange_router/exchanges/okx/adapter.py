@@ -64,7 +64,7 @@ class OkxAdapter(BaseExchange):
         self._bucket_default = self._RateBucket(max_requests=18, window_s=2.0)
 
         self.rest_url = "https://www.okx.com"
-        self.ws_url = "wss://ws.okx.com:8443/ws/v5/public"
+        self.ws_url = "wss://ws.okx.com:443/ws/v5/public"
 
         self._spot_symbol_map: Dict[str, str] = {}
         self._spot_symbol_map_lock = asyncio.Lock()
