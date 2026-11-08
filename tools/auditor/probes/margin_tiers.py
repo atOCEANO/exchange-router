@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from exchange_router.models import MarginTiers
 from tools.auditor.aggregator import ErrorType, ProbeResult
 
-from tools.auditor.probes.base import Probe, ProbeContext, fetch, validate_one
+from tools.auditor.probes.base import Probe, ProbeContext, fetch, unknown_kind, validate_one
 
 
 def _table_fault(tiers: List[Dict[str, Any]]) -> Optional[Tuple[str, Dict[str, Any]]]:
@@ -99,6 +99,16 @@ class MarginTiersProbe(Probe):
                 error_type=ErrorType.LOGIC,
                 message=msg,
                 evidence=ev,
+            )]
+
+        kind = unknown_kind(data)
+        if kind:
+            return [self.result(
+                ctx, self.name, started,
+                status=kind[0],
+                error_type=kind[1],
+                message=kind[2],
+                evidence=kind[3],
             )]
 
         r = self.result(

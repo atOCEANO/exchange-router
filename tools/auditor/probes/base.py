@@ -126,6 +126,40 @@ def dig(data: Any, path: Tuple) -> Any:
     return data
 
 
+UNITS = ("base", "contract")
+
+BASES = ("row_price", "contract_size", "candle_close", "mark")
+
+KINDS = {
+    "status":                              ("trading", "halted", "pre_trading", "delisted"),
+    "price.kind":                          ("tick", "significant_figures"),
+    "price_source":                        ("last_trade", "mid", "mark"),
+    "qty.unit":                            UNITS,
+    "bid_qty.unit":                        UNITS,
+    "ask_qty.unit":                        UNITS,
+    "volume.unit":                         UNITS,
+    "volume_24h.unit":                     UNITS,
+    "open_interest.unit":                  UNITS,
+    "volume.notional_basis.method":        BASES,
+    "volume_24h.notional_basis.method":    BASES,
+    "open_interest.notional_basis.method": BASES,
+    "funding.kind":                        ("discrete", "continuous"),
+    "funding.valid_until.kind":            ("settlement", "estimate"),
+    "time_source":                         ("venue", "router"),
+    "up_to_unit":                          ("quote", "base", "contract"),
+    "account_scope":                       ("top_traders", "all_accounts", "opaque"),
+}
+
+
+def unknown_kind(data: Any) -> Optional[Tuple[str, ErrorType, str, Dict[str, Any]]]:
+    for row in data if isinstance(data, list) else [data]:
+        for path, known in KINDS.items():
+            value = dig(row, tuple(path.split(".")))
+            if value is not None and value not in known:
+                return "warn", ErrorType.LOGIC, f"{path} '{value}' is not a value the auditor knows", {path: value, "known": list(known)}
+    return None
+
+
 def validate_one(data: Any, model: Type[BaseModel]) -> Optional[Tuple[str, Dict[str, Any]]]:
     if not isinstance(data, dict):
         return f"{model.__name__}: expected dict, got {type(data).__name__}", {"got_type": type(data).__name__}

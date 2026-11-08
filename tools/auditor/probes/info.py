@@ -5,15 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from exchange_router.models import SymbolInfo
 from tools.auditor.aggregator import ErrorType, ProbeResult
 
-from tools.auditor.probes.base import Probe, ProbeContext, fetch, validate_one
-
-
-KINDS = {
-    "status":      ("trading", "halted", "pre_trading", "delisted"),
-    "price.kind":  ("tick", "significant_figures"),
-    "qty.unit":    ("base", "contract"),
-    "time_source": ("venue", "router"),
-}
+from tools.auditor.probes.base import Probe, ProbeContext, fetch, unknown_kind, validate_one
 
 
 def _decimals(value: float) -> int:
@@ -21,35 +13,19 @@ def _decimals(value: float) -> int:
     return max(-exponent, 0) if isinstance(exponent, int) else 0
 
 
-def _kind(data: Dict[str, Any], path: str) -> Any:
-    value: Any = data
-    for key in path.split("."):
-        value = value.get(key) if isinstance(value, dict) else None
-    return value
-
-
-def _unknown_kind(data: Dict[str, Any]) -> Optional[Tuple[str, Dict[str, Any]]]:
-    for path, known in KINDS.items():
-        value = _kind(data, path)
-        if value is not None and value not in known:
-            return (
-                f"{path} '{value}' is not a value the auditor knows",
-                {path: value, "known": list(known)},
-            )
-    return None
-
-
-def _grid_mismatch(data: Dict[str, Any]) -> Optional[Tuple[str, Dict[str, Any]]]:
+def _grid_mismatch(data: Dict[str, Any]) -> Optional[Tuple[str, ErrorType, str, Dict[str, Any]]]:
     price = data["price"]
     qty   = data["qty"]
 
     if price.get("kind") == "tick" and _decimals(price["tick"]) != price["decimals"]:
         return (
+            "warn", ErrorType.LOGIC,
             f"price.decimals {price['decimals']} does not match price.tick {price['tick']}",
             {"price": price},
         )
     if qty["step"] is not None and _decimals(qty["step"]) != qty["decimals"]:
         return (
+            "warn", ErrorType.LOGIC,
             f"qty.decimals {qty['decimals']} does not match qty.step {qty['step']}",
             {"qty": qty},
         )
@@ -140,17 +116,16 @@ class InfoProbe(Probe):
                 evidence={"qty": qty, "market_type": ctx.market_type},
             )]
 
-        for check in (_unknown_kind, _grid_mismatch):
-            found = check(data)
-            if found:
-                msg, ev = found
-                return [self.result(
-                    ctx, self.name, started,
-                    status="warn",
-                    error_type=ErrorType.LOGIC,
-                    message=msg,
-                    evidence=ev,
-                )]
+        found = unknown_kind(data) or _grid_mismatch(data)
+        if found:
+            s, et, msg, ev = found
+            return [self.result(
+                ctx, self.name, started,
+                status=s,
+                error_type=et,
+                message=msg,
+                evidence=ev,
+            )]
 
         r = self.result(
             ctx, self.name, started,

@@ -5,7 +5,7 @@ from exchange_router.models import OrderBook
 from tools.auditor.aggregator import ErrorType, ProbeResult
 
 from tools.auditor.probes.base import (
-    Probe, ProbeContext, fetch, judge_time, validate_one,
+    Probe, ProbeContext, fetch, judge_time, unknown_kind, validate_one,
 )
 
 
@@ -108,7 +108,7 @@ class OrderBookProbe(Probe):
                         evidence={"side": side, "idx": i, "price": p, "qty": q},
                     )
 
-        found = await judge_time(ctx, "orderbook", data)
+        found = unknown_kind(data) or await judge_time(ctx, "orderbook", data)
         if found:
             s, et, msg, ev = found
             return self.result(

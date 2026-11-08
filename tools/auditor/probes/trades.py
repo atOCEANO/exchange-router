@@ -6,7 +6,7 @@ from tools.auditor.aggregator import ErrorType, ProbeResult
 from tools.auditor.config import SAMPLE_MAX_ITEMS
 
 from tools.auditor.probes.base import (
-    Probe, ProbeContext, check_ascending_ts, fetch, validate_list,
+    Probe, ProbeContext, check_ascending_ts, fetch, unknown_kind, validate_list,
 )
 
 
@@ -114,6 +114,18 @@ class TradesProbe(Probe):
             )
 
         sample = data[:SAMPLE_MAX_ITEMS]
+
+        kind = unknown_kind(data)
+        if kind:
+            r = self.result(
+                ctx, probe_name, started,
+                status=kind[0],
+                error_type=kind[1],
+                message=kind[2],
+                evidence=kind[3],
+            )
+            r.sample = sample
+            return r
 
         if lim > 1 and n < lim:
             r = self.result(

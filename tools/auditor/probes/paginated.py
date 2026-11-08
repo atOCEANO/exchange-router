@@ -10,7 +10,7 @@ from tools.auditor.config import (
 from tools.auditor.aggregator import ErrorType, ProbeResult
 
 from tools.auditor.probes.base import (
-    Probe, ProbeContext, check_ascending_ts, fetch, now_ms, trade_stamps, validate_list,
+    Probe, ProbeContext, check_ascending_ts, fetch, now_ms, trade_stamps, unknown_kind, validate_list,
 )
 
 
@@ -194,11 +194,15 @@ class PaginatedProbe(Probe):
         if n < int(ceiling * THEORETICAL_MAX_RATIO):
             findings.append(f"got {n}/{big} (theoretical max {ceiling}, retention_ms={retention_ms})")
 
+        kind = unknown_kind(data)
         if findings:
             res.status = "fail" if "stale" in findings[0] else "warn"
             res.error_type = ErrorType.LOGIC
             res.message = " | ".join(findings)
             res.evidence.update({"count": n, "ceiling": ceiling, "age_s": age_s, "retention_ms": retention_ms})
+        elif kind:
+            res.status, res.error_type, res.message = kind[:3]
+            res.evidence.update(kind[3])
         else:
             res.message = f"got {n}/{big}, last age={age_s:.0f}s" + ("; no trade on the venue since the newest bar" if "newest_trade" in res.evidence else "")
             res.evidence.update({"count": n, "age_s": age_s, "ceiling": ceiling})

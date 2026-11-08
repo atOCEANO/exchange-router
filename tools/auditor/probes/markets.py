@@ -4,7 +4,7 @@ from typing import List
 from tools.auditor.aggregator import ErrorType, ProbeResult
 from tools.auditor.config import SAMPLE_MAX_ITEMS
 
-from tools.auditor.probes.base import Probe, ProbeContext, fetch
+from tools.auditor.probes.base import Probe, ProbeContext, fetch, unknown_kind
 
 
 class MarketsProbe(Probe):
@@ -77,6 +77,18 @@ class MarketsProbe(Probe):
                 error_type=ErrorType.LOGIC,
                 message=f"{len(dups)} duplicate symbols",
                 evidence={"duplicates": dups[:5]},
+            )
+            r.sample = sample
+            return [r]
+
+        kind = unknown_kind(entries)
+        if kind:
+            r = self.result(
+                ctx, self.name, started,
+                status=kind[0],
+                error_type=kind[1],
+                message=kind[2],
+                evidence=kind[3],
             )
             r.sample = sample
             return [r]

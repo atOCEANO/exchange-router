@@ -1,7 +1,7 @@
 import asyncio
 import json
 import time
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Tuple, Type
 
 import websockets
 from pydantic import BaseModel
@@ -13,7 +13,7 @@ from exchange_router.version import SCHEMA_VERSION
 from tools.auditor.config import API_URL, SAMPLE_MAX_ITEMS, WS_MIN_FRAMES, WS_OPEN_TIMEOUT, WS_TEST_DURATION
 from tools.auditor.aggregator import ErrorType, ProbeResult
 
-from tools.auditor.probes.base import Probe, ProbeContext, trade_stamps, validate_one
+from tools.auditor.probes.base import Probe, ProbeContext, trade_stamps, unknown_kind, validate_one
 
 
 WS_CHANNEL_MODEL: Dict[str, Type[BaseModel]] = {
@@ -66,6 +66,7 @@ class WebSocketProbe(Probe):
         subscribed_ms: Optional[float]  = None
         last_error: Optional[str]       = None
         bad_frame: Optional[Dict[str, Any]] = None
+        kind_flag: Optional[Tuple[str, ErrorType, str, Dict[str, Any]]] = None
 
         captured_frames: List[Dict[str, Any]] = []
 
@@ -115,6 +116,7 @@ class WebSocketProbe(Probe):
                             break
 
                     frames_received += 1
+                    kind_flag = kind_flag or unknown_kind(msg)
                     if len(captured_frames) < SAMPLE_MAX_ITEMS:
                         captured_frames.append({"arrival_ms": arrived, "frame": msg})
         except asyncio.TimeoutError:
@@ -213,6 +215,18 @@ class WebSocketProbe(Probe):
                 error_type=ErrorType.LOGIC,
                 message=f"got {frames_received}/{self.min_frames} frames (flaky stream or quiet market)",
                 evidence=evidence,
+                ended=ended,
+            )
+            r.sample = sample
+            return [r]
+
+        if kind_flag:
+            r = self.result(
+                ctx, self.name, started,
+                status=kind_flag[0],
+                error_type=kind_flag[1],
+                message=kind_flag[2],
+                evidence={**evidence, **kind_flag[3]},
                 ended=ended,
             )
             r.sample = sample

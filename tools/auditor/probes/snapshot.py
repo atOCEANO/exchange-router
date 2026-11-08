@@ -7,7 +7,7 @@ from tools.auditor.config import DEADLINES
 from tools.auditor.aggregator import ErrorType, ProbeResult
 
 from tools.auditor.probes.base import (
-    Probe, ProbeContext, dig, fetch, judge_time, validate_one, venue_fetch,
+    Probe, ProbeContext, dig, fetch, judge_time, unknown_kind, validate_one, venue_fetch,
 )
 
 
@@ -121,7 +121,7 @@ class SnapshotProbe(Probe):
 
         s, et, msg, ev = self.checks(data, ctx)
         if s == "pass":
-            s, et, msg, ev = await judge_time(ctx, self.route, data) or (s, et, msg, ev)
+            s, et, msg, ev = unknown_kind(data) or await judge_time(ctx, self.route, data) or (s, et, msg, ev)
         r = self.result(
             ctx, self.name, started,
             status=s,
