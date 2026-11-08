@@ -4,6 +4,7 @@ from exchange_router import AsyncRouter
 from exchange_router._warnings import RouterDataWarning
 from exchange_router.backend import Backend, FallbackBackend
 from exchange_router.errors import RouterUnreachable
+from exchange_router.version import SCHEMA_VERSION
 
 
 class Dead(Backend):
@@ -34,7 +35,7 @@ class Alive(Backend):
         self.calls += 1
 
         if route == "version":
-            return {"version": "9.9.9", "schema_version": 3}
+            return {"version": "9.9.9", "schema_version": SCHEMA_VERSION}
 
         if route == "exchanges":
             return {"count": 1, "exchanges": ["fake"]}

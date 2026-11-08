@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 
 from exchange_router import with_provenance
+from exchange_router.version import SCHEMA_VERSION
 
 
 EX = "fake"
@@ -37,7 +38,7 @@ async def test_every_series_frame_carries_the_same_provenance_keys(router, route
     assert df.attrs["exchange"]       == EX
     assert df.attrs["market_type"]    == "linear"
     assert df.attrs["symbol"]         == "BTCUSDT"
-    assert df.attrs["schema_version"] == 3
+    assert df.attrs["schema_version"] == SCHEMA_VERSION
     assert isinstance(df.attrs["warnings"], list)
 
 

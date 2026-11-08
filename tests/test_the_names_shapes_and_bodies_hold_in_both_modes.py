@@ -22,6 +22,7 @@ from exchange_router.exchanges.okx.adapter import OkxAdapter
 from exchange_router.funding import funding_paid
 from exchange_router.models import MarginTier, MarginTiers, MarketType
 from exchange_router.service import app
+from exchange_router.version import SCHEMA_VERSION
 
 from fake_exchange import FakeExchange
 
@@ -40,7 +41,7 @@ async def test_every_error_body_names_its_error_and_every_answer_its_schema():
     assert unknown.json() == {"error": "Not Found", "detail": "exchange 'nosuch' is not enabled; / lists the exchanges"}
     assert invalid.status_code == 400
     assert invalid.json() == {"error": "Invalid Request", "detail": "limit: must be 1 or more, got 0"}
-    assert [r.headers["Schema-Version"] for r in (unknown, invalid, fine)] == ["3", "3", "3"]
+    assert [r.headers["Schema-Version"] for r in (unknown, invalid, fine)] == [str(SCHEMA_VERSION)] * 3
 
 
 async def test_an_unreadable_answer_and_a_router_fault_each_name_their_error_and_schema(monkeypatch):
@@ -60,7 +61,7 @@ async def test_an_unreadable_answer_and_a_router_fault_each_name_their_error_and
         (502, {"error": "Bad Upstream Response", "detail": "'lastPrice'"}),
         (500, {"error": "Internal Server Error", "detail": "the router lost its place"}),
     ]
-    assert {a.headers["Schema-Version"] for a in answers} == {"3"}
+    assert {a.headers["Schema-Version"] for a in answers} == {str(SCHEMA_VERSION)}
 
 
 async def test_interval_and_end_read_as_period_and_start_in_both_modes(router):

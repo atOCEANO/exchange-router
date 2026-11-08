@@ -2,8 +2,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from .version import SCHEMA_VERSION
 
-SCHEMA_VERSION = 3
 
 USD_FAMILY = {"USD", "USDT", "USDC", "USDD", "TUSD", "FDUSD", "BUSD", "DAI", "PYUSD", "USDE", "USDP"}
 

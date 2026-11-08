@@ -7,6 +7,7 @@ from exchange_router import Router
 from exchange_router import exchanges as registry
 from exchange_router.backend import Backend, LocalBackend
 from exchange_router.errors import BadRequest
+from exchange_router.version import SCHEMA_VERSION
 
 from fake_exchange import FakeExchange
 
@@ -37,7 +38,7 @@ class LoopRecordingBackend(Backend):
     async def fetch(self, route, exchange=None, market_type=None, symbol=None, **params):
         self.loops.add(asyncio.get_running_loop())
         if route == "version":
-            return {"version": "3.0.1", "schema_version": 3}
+            return {"version": "3.0.1", "schema_version": SCHEMA_VERSION}
         if route == "exchanges":
             return {"exchanges": ["recorder"]}
         return {"market_types": {}}

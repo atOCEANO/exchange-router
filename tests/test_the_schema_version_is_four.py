@@ -13,8 +13,8 @@ async def wire():
         yield http
 
 
-def test_the_wire_contract_is_three():
-    assert SCHEMA_VERSION == 3
+def test_the_wire_contract_is_four():
+    assert SCHEMA_VERSION == 4
 
 
 def test_the_release_number_and_the_wire_contract_are_separate_values():

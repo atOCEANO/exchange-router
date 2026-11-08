@@ -11,6 +11,7 @@ from exchange_router.exchanges.kraken.adapter import KrakenAdapter
 from exchange_router.exchanges.kucoin.adapter import KucoinAdapter
 from exchange_router.exchanges.okx.adapter import OkxAdapter
 from exchange_router.service import app
+from exchange_router.version import SCHEMA_VERSION
 
 
 SERVED = {
@@ -28,7 +29,7 @@ class OlderService(Backend):
 
     async def fetch(self, route, exchange=None, market_type=None, symbol=None, **params):
         if route == "version":
-            return {"version": "3.1.0", "schema_version": 3}
+            return {"version": "3.1.0", "schema_version": SCHEMA_VERSION}
         if route == "exchanges":
             return {"count": 1, "exchanges": ["bybit"]}
         if route == "capabilities":

@@ -15,6 +15,7 @@ from exchange_router.exchanges.kraken.adapter import KrakenAdapter
 from exchange_router.exchanges.kucoin.adapter import KucoinAdapter
 from exchange_router.exchanges.okx.adapter import OkxAdapter
 from exchange_router.service.stream_manager import StreamManager
+from exchange_router.version import SCHEMA_VERSION
 
 
 BYBIT_REFUSAL = {"success": False, "ret_msg": "error:handler not found,topic:publicTrade.NOSUCHUSDT", "conn_id": "db294pd7qk6al3src5t0-aho64", "req_id": "r2", "op": "subscribe"}
@@ -251,7 +252,7 @@ class Unmatched(Backend):
     async def fetch(self, route, exchange=None, market_type=None, symbol=None, **params):
         self.calls.append(route)
         if route == "version":
-            return {"version": "9.9.9", "schema_version": 4}
+            return {"version": "9.9.9", "schema_version": SCHEMA_VERSION + 1}
         if route == "exchanges":
             return {"count": 1, "exchanges": ["fake"]}
         return {}

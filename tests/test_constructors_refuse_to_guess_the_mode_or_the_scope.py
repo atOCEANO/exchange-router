@@ -5,6 +5,7 @@ import pytest
 from exchange_router import AsyncRouter, Router
 from exchange_router.backend import LocalBackend
 from exchange_router.errors import BadRequest, NotFound
+from exchange_router.version import SCHEMA_VERSION
 
 
 @pytest.mark.parametrize("cls", [Router, AsyncRouter], ids=["sync", "async"])
@@ -84,7 +85,7 @@ def test_mode_is_readable_and_never_inferred():
 
 def test_the_schema_version_is_the_one_the_sdk_speaks():
     router = AsyncRouter.local(["fake"], verbose=False, backend=LocalBackend())
-    assert router.schema_version == 3
+    assert router.schema_version == SCHEMA_VERSION
 
 
 @pytest.mark.parametrize("cls", [Router, AsyncRouter], ids=["sync", "async"])

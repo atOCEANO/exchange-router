@@ -3,11 +3,12 @@ import pytest
 from exchange_router import AsyncRouter
 from exchange_router.backend import Backend
 from exchange_router.errors import NotFound, RouterError, RouterUnreachable, SchemaMismatch
+from exchange_router.version import SCHEMA_VERSION
 
 
 class StubService(Backend):
 
-    def __init__(self, schema=3, exchanges=("fake",), unreachable=False):
+    def __init__(self, schema=SCHEMA_VERSION, exchanges=("fake",), unreachable=False):
         self.schema      = schema
         self.exchanges   = list(exchanges)
         self.unreachable = unreachable
@@ -39,25 +40,34 @@ def build(**kwargs):
 
 
 def test_a_matching_schema_is_silent():
-    router, stub = build(schema=3)
-    assert router.schema_version == 3
+    router, stub = build(schema=SCHEMA_VERSION)
+    assert router.schema_version == SCHEMA_VERSION
 
 
 async def test_a_mismatch_is_fatal_and_names_both_numbers():
-    router, stub = build(schema=4)
+    router, stub = build(schema=SCHEMA_VERSION + 1)
 
     with pytest.raises(SchemaMismatch) as caught:
         await router.get_ticker("fake", "spot", "BTCUSDT")
 
     error = caught.value
-    assert error.sdk_schema     == 3
-    assert error.service_schema == 4
-    assert "schema 3" in str(error)
-    assert "schema 4" in str(error)
+    assert error.sdk_schema     == SCHEMA_VERSION
+    assert error.service_schema == SCHEMA_VERSION + 1
+    assert f"schema {SCHEMA_VERSION}" in str(error)
+    assert f"upgrade the SDK or pin the service to a schema {SCHEMA_VERSION} release" in str(error)
+
+
+async def test_an_older_service_is_told_apart_from_an_older_sdk():
+    router, stub = build(schema=SCHEMA_VERSION - 1)
+
+    with pytest.raises(SchemaMismatch) as caught:
+        await router.get_ticker("fake", "spot", "BTCUSDT")
+
+    assert f"upgrade the service or pin the SDK to a schema {SCHEMA_VERSION - 1} release" in str(caught.value)
 
 
 async def test_the_mismatch_surfaces_on_the_first_call_and_not_at_construction():
-    router, stub = build(schema=4)
+    router, stub = build(schema=SCHEMA_VERSION + 1)
 
     assert stub.calls == []
 
@@ -68,7 +78,7 @@ async def test_the_mismatch_surfaces_on_the_first_call_and_not_at_construction()
 
 
 async def test_the_same_mismatch_raises_again_rather_than_passing_the_second_time():
-    router, stub = build(schema=4)
+    router, stub = build(schema=SCHEMA_VERSION + 1)
 
     for _ in range(2):
         with pytest.raises(SchemaMismatch):
@@ -76,14 +86,14 @@ async def test_the_same_mismatch_raises_again_rather_than_passing_the_second_tim
 
 
 async def test_a_schema_mismatch_is_catchable_as_a_router_error():
-    router, stub = build(schema=4)
+    router, stub = build(schema=SCHEMA_VERSION + 1)
 
     with pytest.raises(RouterError):
         await router.get_ticker("fake", "spot", "BTCUSDT")
 
 
 async def test_the_handshake_costs_no_extra_round_trip_once_it_has_run():
-    router, stub = build(schema=3)
+    router, stub = build(schema=SCHEMA_VERSION)
 
     await router.get_ticker("fake", "spot", "BTCUSDT")
     first = stub.calls.count("version")
@@ -124,7 +134,7 @@ DISCOVERY = [
 
 @pytest.mark.parametrize("method, args", DISCOVERY)
 async def test_a_mismatch_arrives_even_when_the_first_call_is_a_discovery_route(method, args):
-    router, stub = build(schema=4)
+    router, stub = build(schema=SCHEMA_VERSION + 1)
 
     with pytest.raises(SchemaMismatch):
         await getattr(router, method)(*args)

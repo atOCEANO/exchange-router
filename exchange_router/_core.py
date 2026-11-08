@@ -138,10 +138,11 @@ class AsyncCore:
         theirs = data.get("schema_version")
 
         if theirs is not None and theirs != SCHEMA_VERSION:
+            advice = "upgrade the SDK or pin the service to" if theirs > SCHEMA_VERSION else "upgrade the service or pin the SDK to"
             self._handshake_error = SchemaMismatch(
                 f"this SDK speaks schema {SCHEMA_VERSION}, {self.base_url} speaks schema {theirs} "
-                f"(sdk {__version__}, service {data.get('version')}); upgrade the SDK or pin the "
-                f"service to a schema {SCHEMA_VERSION} release",
+                f"(sdk {__version__}, service {data.get('version')}); {advice} "
+                f"a schema {min(theirs, SCHEMA_VERSION)} release",
                 SCHEMA_VERSION,
                 theirs,
             )
