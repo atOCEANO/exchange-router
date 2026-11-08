@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import List, Literal, Optional
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 
 class MarketType(str, Enum):
@@ -215,6 +215,7 @@ class SymbolInfo(BaseModel):
         None,
         description="Quantity step an order's size must sit on, in qty_unit. Where an exchange counts a linear market in contracts (OKX, KuCoin), it is the exchange's lot times the contract's value, in the base asset like min_qty. Null when the exchange does not state one.",
     )
+    _trading: bool = PrivateAttr(default=True)
 
 
 class Ticker(BaseModel):

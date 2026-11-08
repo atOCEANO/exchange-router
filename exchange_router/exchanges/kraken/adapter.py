@@ -10,7 +10,7 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
-    build_step, build_step_from_decimals, count_decimals, venue_value,
+    build_step, build_step_from_decimals, count_decimals, mark_trading, venue_value,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -46,6 +46,7 @@ class KrakenAdapter(BaseExchange):
 
         self._spot_ws_map: Dict[str, str] = {}
         self._spot_ws_map_lock = asyncio.Lock()
+        self._spot_aliases: Dict[str, str] = {}
 
         self._hubs: Dict[str, StreamHub] = {}
         self._hubs_lock = asyncio.Lock()
@@ -1297,14 +1298,16 @@ class KrakenAdapter(BaseExchange):
     async def _fetch_exchange_info(self, market_type: MarketType) -> List[SymbolInfo]:
         results = []
         if market_type == MarketType.SPOT:
-            data = await self._make_request("GET", f"{self.spot_rest_url}/AssetPairs")
+            data    = await self._make_request("GET", f"{self.spot_rest_url}/AssetPairs")
+            aliases = {}
             for k, v in data.items():
                 if "." in k:
                     continue
-                if v.get("status") != "online":
-                    continue
                 wsname = v.get("wsname", "/")
                 base, quote = wsname.split("/") if "/" in wsname else (v.get("base", ""), v.get("quote", ""))
+                model_sym   = self.get_model_symbol(v.get("altname", k), market_type)
+                for alias in (k, wsname, self._to_v2_wsname(wsname)):
+                    aliases[self.normalize_symbol(alias)] = model_sym
 
                 raw_ordermin = v.get("ordermin")
                 raw_costmin = v.get("costmin")
@@ -1315,8 +1318,8 @@ class KrakenAdapter(BaseExchange):
                 if spot_min_notional is not None and spot_min_notional <= 0:
                     spot_min_notional = None
 
-                results.append(SymbolInfo(
-                    symbol             = self.get_model_symbol(v.get("altname", k), market_type),
+                results.append(mark_trading(SymbolInfo(
+                    symbol             = model_sym,
                     native_symbol      = v.get("altname", k),
                     base_asset         = base,
                     quote_asset        = quote,
@@ -1330,12 +1333,11 @@ class KrakenAdapter(BaseExchange):
                     funding            = None,
                     tick_size          = build_step(v.get("tick_size")),
                     qty_step           = build_step_from_decimals(v.get("lot_decimals")),
-                ))
+                ), v.get("status") == "online"))
+            self._spot_aliases = aliases
         else:
             data = await self._make_request("GET", f"{self.futures_rest_url}/instruments")
             for v in data.get("instruments", []):
-                if not v.get("tradeable"):
-                    continue
                 t = v.get("type", "")
                 sym = v.get("symbol", "")
                 if market_type == MarketType.INVERSE and (t != "futures_inverse" or not sym.startswith("PI_")):
@@ -1377,7 +1379,7 @@ class KrakenAdapter(BaseExchange):
                         logger.warning(f"Kraken lists {v['symbol']} without a contract size; it stays out of the market list until Kraken sends one")
                         continue
 
-                results.append(SymbolInfo(
+                results.append(mark_trading(SymbolInfo(
                     symbol             = self.get_model_symbol(v["symbol"], market_type),
                     native_symbol      = v["symbol"],
                     base_asset         = base_asset,
@@ -1392,17 +1394,21 @@ class KrakenAdapter(BaseExchange):
                     funding            = build_funding_convention("continuous"),
                     tick_size          = build_step(v.get("tickSize")),
                     qty_step           = qty_step,
-                ))
+                ), bool(v.get("tradeable"))))
         return results
 
 
+    def _alias(self, market_type: MarketType, symbol: str) -> Optional[str]:
+        return self._spot_aliases.get(self.normalize_symbol(symbol)) if market_type == MarketType.SPOT else None
+
+
     async def get_exchange_info(self, market_type: MarketType) -> List[SymbolInfo]:
-        cache = await self._ensure_info_cache(market_type)
+        cache = await self._trading_info(market_type)
         return list(cache.values())
 
 
     async def get_symbol_info(self, market_type: MarketType, symbol: str) -> SymbolInfo:
-        cache = await self._ensure_info_cache(market_type)
+        cache = await self._trading_info(market_type)
         model_sym = self.get_model_symbol(self.get_api_symbol(symbol, market_type), market_type)
         info = cache.get(model_sym)
         if info is None:

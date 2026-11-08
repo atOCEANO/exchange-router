@@ -42,6 +42,11 @@ def venue_value(record: Dict[str, Any], key: str, what: str) -> Any:
     return value
 
 
+def mark_trading(info: SymbolInfo, trading: bool) -> SymbolInfo:
+    info._trading = trading
+    return info
+
+
 def build_qty_value(native: float, qty_unit: str, contract_size: Optional[float], price: float) -> QtyValue:
     if qty_unit == "contract":
         if contract_size is None:
@@ -497,11 +502,13 @@ class StreamHub:
 class BaseExchange(ABC):
     INFO_REFRESH_S = 24 * 60 * 60
     INFO_RETRY_S   = 60 * 60
+    INFO_MISS_S    = 60
 
 
     def __init__(self):
         self._info_cache: Dict[MarketType, Dict[str, SymbolInfo]] = {}
         self._info_cache_at: Dict[MarketType, float] = {}
+        self._info_missed_at: Dict[MarketType, float] = {}
         self._info_cache_lock = asyncio.Lock()
         self._margin_cache: Dict[Any, Tuple[float, Any, int]] = {}
         self._margin_locks: Dict[Any, asyncio.Lock] = {}
@@ -515,6 +522,14 @@ class BaseExchange(ABC):
 
     def normalize_symbol(self, symbol: str) -> str:
         return symbol.replace("/", "").replace("-", "").upper()
+
+
+    def get_api_symbol(self, symbol: str, market_type: MarketType) -> str:
+        return self.normalize_symbol(symbol)
+
+
+    def get_model_symbol(self, api_symbol: str, market_type: MarketType) -> str:
+        return self.normalize_symbol(api_symbol)
 
 
     def normalize_timestamp(self, ts: Union[int, float, str]) -> int:
@@ -656,13 +671,13 @@ class BaseExchange(ABC):
         raise NotImplementedError(f"Exchange info fetch not implemented on {self.name}")
 
 
-    async def _ensure_info_cache(self, market_type: MarketType) -> Dict[str, SymbolInfo]:
+    async def _ensure_info_cache(self, market_type: MarketType, max_age_s: Optional[float] = None) -> Dict[str, SymbolInfo]:
         async with self._info_cache_lock:
             now     = time.monotonic()
             cached  = self._info_cache.get(market_type)
             elapsed = now - self._info_cache_at.get(market_type, 0.0)
 
-            if cached is not None and elapsed < self.INFO_REFRESH_S:
+            if cached is not None and elapsed < (self.INFO_REFRESH_S if max_age_s is None else max_age_s):
                 return cached
 
             try:
@@ -683,6 +698,37 @@ class BaseExchange(ABC):
     async def _info_for(self, market_type: MarketType, model_symbol: str) -> Optional[SymbolInfo]:
         cache = await self._ensure_info_cache(market_type)
         return cache.get(model_symbol)
+
+
+    async def _trading_info(self, market_type: MarketType) -> Dict[str, SymbolInfo]:
+        cache = await self._ensure_info_cache(market_type)
+        return {symbol: info for symbol, info in cache.items() if info._trading}
+
+
+    def _alias(self, market_type: MarketType, symbol: str) -> Optional[str]:
+        return None
+
+
+    def _listed_name(self, cache: Dict[str, SymbolInfo], market_type: MarketType, symbol: str) -> Optional[str]:
+        name = self.get_model_symbol(self.get_api_symbol(symbol, market_type), market_type)
+        if name in cache:
+            return name
+        alias = self._alias(market_type, symbol)
+        return alias if alias in cache else None
+
+
+    async def listed_symbol(self, market_type: MarketType, symbol: str) -> str:
+        cache = await self._ensure_info_cache(market_type)
+        name  = self._listed_name(cache, market_type, symbol)
+
+        if name is None and time.monotonic() - self._info_missed_at.get(market_type, float("-inf")) >= self.INFO_MISS_S:
+            self._info_missed_at[market_type] = time.monotonic()
+            cache = await self._ensure_info_cache(market_type, max_age_s=0)
+            name  = self._listed_name(cache, market_type, symbol)
+
+        if name is None:
+            raise ValueError(f"symbol '{symbol}' is not listed on {self.name} {market_type.value}; see /{self.name}/{market_type.value}/markets")
+        return name
 
 
     async def _margin_table(self, key: Any, fetch: Callable[[], Awaitable[Any]]) -> Tuple[Any, int]:

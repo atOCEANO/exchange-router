@@ -9,7 +9,7 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention, build_step,
-    stamp_funding_cycles,
+    mark_trading, stamp_funding_cycles,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -957,8 +957,6 @@ class BinanceAdapter(BaseExchange):
 
         for s in data["symbols"]:
             s_status = s.get("status") or s.get("contractStatus")
-            if s_status != "TRADING":
-                continue
             if market_type != MarketType.SPOT and s.get("contractType") not in ("PERPETUAL", "TRADIFI_PERPETUAL"):
                 continue
 
@@ -1011,7 +1009,7 @@ class BinanceAdapter(BaseExchange):
             if funding_interval_ms is not None:
                 self._funding_interval_cache[market_type][model_sym] = funding_interval_ms
 
-            results.append(SymbolInfo(
+            results.append(mark_trading(SymbolInfo(
                 symbol=model_sym,
                 native_symbol=s["symbol"],
                 base_asset=s["baseAsset"],
@@ -1026,7 +1024,7 @@ class BinanceAdapter(BaseExchange):
                 funding=funding_block,
                 tick_size=build_step(tick_size),
                 qty_step=build_step(step_size),
-            ))
+            ), s_status == "TRADING"))
 
         return results
 
@@ -1043,12 +1041,12 @@ class BinanceAdapter(BaseExchange):
 
 
     async def get_exchange_info(self, market_type: MarketType) -> List[SymbolInfo]:
-        cache = await self._ensure_info_cache(market_type)
+        cache = await self._trading_info(market_type)
         return list(cache.values())
 
 
     async def get_symbol_info(self, market_type: MarketType, symbol: str) -> SymbolInfo:
-        cache = await self._ensure_info_cache(market_type)
+        cache = await self._trading_info(market_type)
         model_sym = self.get_model_symbol(self.get_api_symbol(symbol, market_type), market_type)
         info = cache.get(model_sym)
         if info is None:

@@ -5,6 +5,10 @@ from typing import Dict, Optional, Set
 from fastapi import WebSocket
 
 
+def close_reason(text: str) -> str:
+    return text.encode("utf-8")[:123].decode("utf-8", "ignore")
+
+
 class StreamManager:
 
     def __init__(self):

@@ -447,6 +447,9 @@ class LocalBackend(Backend):
             if value is not None:
                 validate_interval(adapter, market_type, route, label, value)
 
+        if route != "symbol_info" and (route in POINT_METHODS or route in SERIES_METHODS or route == "orderbook"):
+            symbol = await adapter.listed_symbol(market_type, symbol)
+
         if route in POINT_METHODS:
             method = getattr(adapter, POINT_METHODS[route])
             return to_jsonable_python(await method(market_type, symbol))
@@ -544,6 +547,7 @@ class LocalBackend(Backend):
             )
 
         try:
+            symbol = await adapter.listed_symbol(mt, symbol)
             async for item in method(mt, symbol):
                 yield to_jsonable_python(item)
 

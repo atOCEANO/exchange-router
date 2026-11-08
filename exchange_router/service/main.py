@@ -11,7 +11,7 @@ from exchange_router.capabilities import market_block, route_block
 from exchange_router.exchanges import EXCHANGE_REGISTRY, get_adapter, shutdown_exchanges, startup_exchanges
 from exchange_router.exchanges.base import UpstreamDataError, UpstreamUnavailableError, join_open_interest_basis, symbol_info_to_lite, validate_interval
 from exchange_router.models import MarketType
-from exchange_router.service.stream_manager import StreamManager
+from exchange_router.service.stream_manager import StreamManager, close_reason
 from exchange_router.version import SCHEMA_VERSION, VERSION
 
 
@@ -106,6 +106,11 @@ def validate_request(exchange: str, market_type: MarketType = None):
     if market_type and market_type not in adapter.supported_market_types:
         raise HTTPException(status_code=400, detail=f"Market type '{market_type.value}' not supported on {exchange}")
     return adapter
+
+
+async def validate_market(exchange: str, market_type: MarketType, symbol: str):
+    adapter = validate_request(exchange, market_type)
+    return adapter, await adapter.listed_symbol(market_type, symbol)
 
 
 @app.get("/")
@@ -210,37 +215,37 @@ async def get_market_symbol(exchange: str, market_type: MarketType, symbol: str)
 
 @app.get("/{exchange}/{market_type}/ticker/{symbol}")
 async def get_ticker(exchange: str, market_type: MarketType, symbol: str):
-    adapter = validate_request(exchange, market_type)
+    adapter, symbol = await validate_market(exchange, market_type, symbol)
     return await adapter.get_ticker(market_type, symbol)
 
 
 @app.get("/{exchange}/{market_type}/book_ticker/{symbol}")
 async def get_book_ticker(exchange: str, market_type: MarketType, symbol: str):
-    adapter = validate_request(exchange, market_type)
+    adapter, symbol = await validate_market(exchange, market_type, symbol)
     return await adapter.get_book_ticker(market_type, symbol)
 
 
 @app.get("/{exchange}/{market_type}/mark_price/{symbol}")
 async def get_mark_price(exchange: str, market_type: MarketType, symbol: str):
-    adapter = validate_request(exchange, market_type)
+    adapter, symbol = await validate_market(exchange, market_type, symbol)
     return await adapter.get_mark_price(market_type, symbol)
 
 
 @app.get("/{exchange}/{market_type}/orderbook/{symbol}")
 async def get_orderbook(exchange: str, market_type: MarketType, symbol: str, depth: int = Query(20, ge=1)):
-    adapter = validate_request(exchange, market_type)
+    adapter, symbol = await validate_market(exchange, market_type, symbol)
     return await adapter.get_orderbook(market_type, symbol, depth)
 
 
 @app.get("/{exchange}/{market_type}/trades/{symbol}")
 async def get_trades(exchange: str, market_type: MarketType, symbol: str, limit: int = Query(100, ge=1)):
-    adapter = validate_request(exchange, market_type)
+    adapter, symbol = await validate_market(exchange, market_type, symbol)
     return await adapter.get_trades(market_type, symbol, limit)
 
 
 @app.get("/{exchange}/{market_type}/agg_trades/{symbol}")
 async def get_agg_trades(exchange: str, market_type: MarketType, symbol: str, start: Optional[int] = None, limit: int = Query(500, ge=1)):
-    adapter = validate_request(exchange, market_type)
+    adapter, symbol = await validate_market(exchange, market_type, symbol)
     return await adapter.get_agg_trades(market_type, symbol, start, limit)
 
 
@@ -248,6 +253,7 @@ async def get_agg_trades(exchange: str, market_type: MarketType, symbol: str, st
 async def get_candles(exchange: str, market_type: MarketType, symbol: str, interval: str = "1h", start: Optional[int] = None, limit: int = Query(100, ge=1)):
     adapter = validate_request(exchange, market_type)
     validate_interval(adapter, market_type, "candles", "Interval", interval)
+    symbol  = await adapter.listed_symbol(market_type, symbol)
     return await adapter.get_candles(market_type, symbol, interval, start, limit)
 
 
@@ -255,6 +261,7 @@ async def get_candles(exchange: str, market_type: MarketType, symbol: str, inter
 async def get_open_interest(exchange: str, market_type: MarketType, symbol: str, period: str = Query("1h"), start: Optional[int] = None, limit: int = Query(30, ge=1)):
     adapter = validate_request(exchange, market_type)
     validate_interval(adapter, market_type, "open_interest", "Period", period)
+    symbol  = await adapter.listed_symbol(market_type, symbol)
     oi_rows = await adapter.get_open_interest(market_type, symbol, period, start, limit)
 
     return await join_open_interest_basis(adapter, market_type, symbol, period, start, limit, oi_rows)
@@ -262,13 +269,13 @@ async def get_open_interest(exchange: str, market_type: MarketType, symbol: str,
 
 @app.get("/{exchange}/{market_type}/funding_rate/{symbol}")
 async def get_funding_rate(exchange: str, market_type: MarketType, symbol: str, start: Optional[int] = None, limit: int = Query(100, ge=1)):
-    adapter = validate_request(exchange, market_type)
+    adapter, symbol = await validate_market(exchange, market_type, symbol)
     return await adapter.get_funding_rate(market_type, symbol, start, limit)
 
 
 @app.get("/{exchange}/{market_type}/liquidations/{symbol}")
 async def get_liquidations(exchange: str, market_type: MarketType, symbol: str, start: Optional[int] = None, limit: int = Query(100, ge=1)):
-    adapter = validate_request(exchange, market_type)
+    adapter, symbol = await validate_market(exchange, market_type, symbol)
     return await adapter.get_liquidations(market_type, symbol, start, limit)
 
 
@@ -276,12 +283,13 @@ async def get_liquidations(exchange: str, market_type: MarketType, symbol: str, 
 async def get_long_short_ratio(exchange: str, market_type: MarketType, symbol: str, period: str = Query("5m"), start: Optional[int] = None, limit: int = Query(30, ge=1)):
     adapter = validate_request(exchange, market_type)
     validate_interval(adapter, market_type, "long_short_ratio", "Period", period)
+    symbol  = await adapter.listed_symbol(market_type, symbol)
     return await adapter.get_long_short_ratio(market_type, symbol, period, start, limit)
 
 
 @app.get("/{exchange}/{market_type}/margin_tiers/{symbol}")
 async def get_margin_tiers(exchange: str, market_type: MarketType, symbol: str):
-    adapter = validate_request(exchange, market_type)
+    adapter, symbol = await validate_market(exchange, market_type, symbol)
     return await adapter.get_margin_tiers(market_type, symbol)
 
 
@@ -300,7 +308,7 @@ async def websocket_endpoint(websocket: WebSocket, exchange: str, market_type: M
     try:
         data = await asyncio.wait_for(websocket.receive_json(), timeout=WS_HANDSHAKE_TIMEOUT_S)
         channel, symbol = data.get("channel"), data.get("symbol")
-        if not channel or not symbol:
+        if not isinstance(channel, str) or not isinstance(symbol, str) or not channel or not symbol:
             await websocket.close(code=1003)
             return
         if channel not in KNOWN_WS_CHANNELS:
@@ -309,6 +317,15 @@ async def websocket_endpoint(websocket: WebSocket, exchange: str, market_type: M
 
         if not route_block(adapter.get_capabilities(), market_type, channel).get("ws"):
             await websocket.close(code=1003, reason=f"channel {channel!r} not supported on {exchange}/{market_type.value}")
+            return
+
+        try:
+            symbol = await adapter.listed_symbol(market_type, symbol)
+        except ValueError as e:
+            await websocket.close(code=1008, reason=close_reason(str(e)))
+            return
+        except Exception as e:
+            await websocket.close(code=1011, reason=close_reason(str(e)))
             return
 
         key       = f"{exchange}:{market_type.value}:{channel}:{symbol}"

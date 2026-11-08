@@ -10,7 +10,7 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention, build_step,
-    build_margin_tier, stamp_funding_cycles,
+    build_margin_tier, mark_trading, stamp_funding_cycles,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -429,8 +429,6 @@ class OkxAdapter(BaseExchange):
             built: Dict[str, str] = {}
             quotes: set = set()
             for s in data or []:
-                if s.get("state") != "live":
-                    continue
                 native = s.get("instId")
                 base = s.get("baseCcy", "")
                 quote = s.get("quoteCcy", "")
@@ -1183,8 +1181,6 @@ class OkxAdapter(BaseExchange):
 
         results = []
         for s in data:
-            if s.get("state") != "live":
-                continue
             if market_type == MarketType.LINEAR and s.get("ctType") != "linear":
                 continue
             if market_type == MarketType.INVERSE and s.get("ctType") != "inverse":
@@ -1251,7 +1247,7 @@ class OkxAdapter(BaseExchange):
             if multiplier is not None:
                 self._contract_multiplier_cache[market_type][model_sym] = multiplier
 
-            results.append(SymbolInfo(
+            results.append(mark_trading(SymbolInfo(
                 symbol             = model_sym,
                 native_symbol      = api_sym,
                 base_asset         = base,
@@ -1266,17 +1262,17 @@ class OkxAdapter(BaseExchange):
                 funding            = funding_block,
                 tick_size          = build_step(s.get("tickSz")),
                 qty_step           = build_step(*step_parts),
-            ))
+            ), s.get("state") == "live"))
         return results
 
 
     async def get_exchange_info(self, market_type: MarketType) -> List[SymbolInfo]:
-        cache = await self._ensure_info_cache(market_type)
+        cache = await self._trading_info(market_type)
         return list(cache.values())
 
 
     async def get_symbol_info(self, market_type: MarketType, symbol: str) -> SymbolInfo:
-        cache = await self._ensure_info_cache(market_type)
+        cache = await self._trading_info(market_type)
         api_symbol = await self._resolve_symbol(symbol, market_type)
         model_sym = self.get_model_symbol(api_symbol, market_type)
         info = cache.get(model_sym)

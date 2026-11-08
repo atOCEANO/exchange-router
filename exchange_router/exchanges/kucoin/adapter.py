@@ -10,7 +10,7 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
-    build_step, count_decimals, stamp_funding_cycles, venue_value,
+    build_step, count_decimals, mark_trading, stamp_funding_cycles, venue_value,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -342,8 +342,6 @@ class KucoinAdapter(BaseExchange):
             built: Dict[str, str] = {}
             quotes: set = set()
             for s in data or []:
-                if not s.get("enableTrading"):
-                    continue
                 native = s.get("symbol")
                 base = s.get("baseCurrency", "")
                 quote = s.get("quoteCurrency", "")
@@ -367,6 +365,10 @@ class KucoinAdapter(BaseExchange):
         native = self._spot_symbol_map.get(flat)
         if native:
             return native
+        info = await self._info_for(market_type, flat)
+        if info is not None:
+            self._spot_symbol_map[flat] = info.native_symbol
+            return info.native_symbol
         raise ValueError(f"Symbol {symbol} not listed on KuCoin spot")
 
 
@@ -1140,8 +1142,6 @@ class KucoinAdapter(BaseExchange):
             data = await self._make_request("GET", self.spot_rest_url, "/api/v1/symbols")
             results = []
             for s in data or []:
-                if not s.get("enableTrading"):
-                    continue
                 api_sym = s["symbol"]
                 base_raw = s.get("baseCurrency")
                 quote_raw = s.get("quoteCurrency")
@@ -1159,7 +1159,7 @@ class KucoinAdapter(BaseExchange):
                     spot_max_qty = None
                 if spot_min_notional is not None and spot_min_notional <= 0:
                     spot_min_notional = None
-                results.append(SymbolInfo(
+                results.append(mark_trading(SymbolInfo(
                     symbol             = self.get_model_symbol(api_sym, market_type),
                     native_symbol      = api_sym,
                     base_asset         = base_raw,
@@ -1174,14 +1174,12 @@ class KucoinAdapter(BaseExchange):
                     funding            = None,
                     tick_size          = build_step(s.get("priceIncrement")),
                     qty_step           = build_step(s.get("baseIncrement")),
-                ))
+                ), bool(s.get("enableTrading"))))
             return results
 
         data = await self._make_request("GET", self.fut_rest_url, "/api/v1/contracts/active")
         results = []
         for s in data or []:
-            if s.get("status") != "Open":
-                continue
             is_inv = bool(s.get("isInverse"))
             if market_type == MarketType.LINEAR and is_inv:
                 continue
@@ -1249,7 +1247,7 @@ class KucoinAdapter(BaseExchange):
             if multiplier is not None:
                 self._contract_multiplier_cache[market_type][model_sym] = multiplier
 
-            results.append(SymbolInfo(
+            results.append(mark_trading(SymbolInfo(
                 symbol             = model_sym,
                 native_symbol      = api_sym,
                 base_asset         = fut_base,
@@ -1264,7 +1262,7 @@ class KucoinAdapter(BaseExchange):
                 funding            = build_funding_convention("discrete"),
                 tick_size          = build_step(s.get("tickSize")),
                 qty_step           = build_step(*step_parts),
-            ))
+            ), s.get("status") == "Open"))
         return results
 
 
@@ -1279,12 +1277,12 @@ class KucoinAdapter(BaseExchange):
 
 
     async def get_exchange_info(self, market_type: MarketType) -> List[SymbolInfo]:
-        cache = await self._ensure_info_cache(market_type)
+        cache = await self._trading_info(market_type)
         return list(cache.values())
 
 
     async def get_symbol_info(self, market_type: MarketType, symbol: str) -> SymbolInfo:
-        cache = await self._ensure_info_cache(market_type)
+        cache = await self._trading_info(market_type)
         api_symbol = await self._resolve_symbol(symbol, market_type)
         model_sym = self.get_model_symbol(api_symbol, market_type)
         info = cache.get(model_sym)

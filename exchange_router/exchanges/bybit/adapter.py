@@ -9,7 +9,7 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention, build_step,
-    build_margin_tier, stamp_funding_cycles,
+    build_margin_tier, mark_trading, stamp_funding_cycles,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -852,25 +852,25 @@ class BybitAdapter(BaseExchange):
             params["contractType"] = "InversePerpetual"
 
         instruments = []
-        cursor      = None
-        pages       = 0
-        while pages < 50:
-            if cursor:
-                params["cursor"] = cursor
-            data = await self._make_request("GET", "/v5/market/instruments-info", params)
-            instruments.extend(data["list"])
-            pages += 1
-            cursor = data.get("nextPageCursor")
-            if not cursor:
-                break
+        for status in ([None] if market_type == MarketType.SPOT else [None, "PreLaunch", "Delivering"]):
+            query  = dict(params, status=status) if status else dict(params)
+            cursor = None
+            pages  = 0
+            while pages < 50:
+                if cursor:
+                    query["cursor"] = cursor
+                data = await self._make_request("GET", "/v5/market/instruments-info", query)
+                instruments.extend(data["list"])
+                pages += 1
+                cursor = data.get("nextPageCursor")
+                if not cursor:
+                    break
 
-        if cursor:
-            logger.warning(f"Bybit instruments-info stopped at the {pages}-page cap with a cursor still set")
+            if cursor:
+                logger.warning(f"Bybit instruments-info stopped at the {pages}-page cap with a cursor still set")
 
         results = []
         for s in instruments:
-            if s["status"] != "Trading":
-                continue
             if market_type == MarketType.LINEAR and s.get("contractType") != "LinearPerpetual":
                 continue
             if market_type == MarketType.INVERSE and s.get("contractType") != "InversePerpetual":
@@ -920,7 +920,7 @@ class BybitAdapter(BaseExchange):
             if funding_interval_ms is not None:
                 self._funding_interval_cache[market_type][s["symbol"]] = funding_interval_ms
 
-            results.append(SymbolInfo(
+            results.append(mark_trading(SymbolInfo(
                 symbol             = s["symbol"],
                 native_symbol      = s["symbol"],
                 base_asset         = s["baseCoin"],
@@ -935,7 +935,7 @@ class BybitAdapter(BaseExchange):
                 funding            = funding_block,
                 tick_size          = build_step(tick),
                 qty_step           = build_step(step),
-            ))
+            ), s["status"] == "Trading"))
         return results
 
 
@@ -945,12 +945,12 @@ class BybitAdapter(BaseExchange):
 
 
     async def get_exchange_info(self, market_type: MarketType) -> List[SymbolInfo]:
-        cache = await self._ensure_info_cache(market_type)
+        cache = await self._trading_info(market_type)
         return list(cache.values())
 
 
     async def get_symbol_info(self, market_type: MarketType, symbol: str) -> SymbolInfo:
-        cache = await self._ensure_info_cache(market_type)
+        cache = await self._trading_info(market_type)
         model_sym = self.get_model_symbol(self.get_api_symbol(symbol, market_type), market_type)
         info = cache.get(model_sym)
         if info is None:
@@ -962,8 +962,10 @@ class BybitAdapter(BaseExchange):
         if market_type == MarketType.SPOT:
             return await super().get_margin_tiers(market_type, symbol)
 
-        info       = await self.get_symbol_info(market_type, symbol)
         api_symbol = self.get_api_symbol(symbol, market_type)
+        info       = await self._info_for(market_type, self.get_model_symbol(api_symbol, market_type))
+        if info is None:
+            raise ValueError(f"Symbol {symbol} not found on Bybit {market_type.value}")
         params     = {"category": self._get_category(market_type), "symbol": api_symbol}
 
         async def fetch():

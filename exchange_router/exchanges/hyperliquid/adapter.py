@@ -9,7 +9,7 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
-    build_step_from_decimals, build_margin_tier,
+    build_step_from_decimals, build_margin_tier, mark_trading,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -789,9 +789,7 @@ class HyperliquidAdapter(BaseExchange):
 
         results = []
         seen    = set()
-        for u in universe:
-            if u.get("isDelisted"):
-                continue
+        for u in sorted(universe, key=lambda u: bool(u.get("isDelisted"))):
             coin      = u["name"]
             sz_dec    = int(u["szDecimals"])
             model_sym = self.get_model_symbol(coin, market_type)
@@ -801,7 +799,7 @@ class HyperliquidAdapter(BaseExchange):
             seen.add(model_sym)
 
             self._funding_interval_cache[market_type][model_sym] = self._FUNDING_CYCLE_MS
-            results.append(self._linear_symbol_info(model_sym, coin, coin, sz_dec))
+            results.append(mark_trading(self._linear_symbol_info(model_sym, coin, coin, sz_dec), not u.get("isDelisted")))
 
         results.extend(await self._fetch_builder_info(market_type, seen, metas))
 
@@ -849,9 +847,7 @@ class HyperliquidAdapter(BaseExchange):
                 data       = await self._make_request("metaAndAssetCtxs", {"type": "metaAndAssetCtxs", "dex": dex})
                 universe   = data[0]["universe"]
                 metas[dex] = data[0]
-                for u in universe:
-                    if u.get("isDelisted"):
-                        continue
+                for u in sorted(universe, key=lambda u: bool(u.get("isDelisted"))):
                     native    = u["name"]
                     base      = native.split(":", 1)[1] if ":" in native else native
                     sz_dec    = int(u["szDecimals"])
@@ -862,7 +858,7 @@ class HyperliquidAdapter(BaseExchange):
                     seen.add(model_sym)
 
                     self._funding_interval_cache[market_type][model_sym] = self._FUNDING_CYCLE_MS
-                    results.append(self._linear_symbol_info(model_sym, native, base, sz_dec))
+                    results.append(mark_trading(self._linear_symbol_info(model_sym, native, base, sz_dec), not u.get("isDelisted")))
             except Exception as e:
                 logger.warning(f"Hyperliquid builder dex {dex} skipped: {e!r}")
                 continue
@@ -904,12 +900,12 @@ class HyperliquidAdapter(BaseExchange):
 
 
     async def get_exchange_info(self, market_type: MarketType) -> List[SymbolInfo]:
-        cache = await self._ensure_info_cache(market_type)
+        cache = await self._trading_info(market_type)
         return list(cache.values())
 
 
     async def get_symbol_info(self, market_type: MarketType, symbol: str) -> SymbolInfo:
-        cache     = await self._ensure_info_cache(market_type)
+        cache     = await self._trading_info(market_type)
         model_sym = self.get_model_symbol(self.get_api_symbol(symbol, market_type), market_type)
         info      = cache.get(model_sym)
         if info is None:
