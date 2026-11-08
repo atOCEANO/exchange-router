@@ -10,32 +10,32 @@ class _BaseMarket:
         self.symbol      = symbol
 
 
-    def candles(self, interval: str = "1h", limit: int = 100, start: Optional[int] = None, verbose: Optional[bool] = None, end: Optional[int] = None):
-        return self._client.get_candles(self.exchange, self.market_type, self.symbol, interval, limit, start, verbose, end)
+    def candles(self, interval: str = "1h", limit: int = 100, end: Optional[int] = None, verbose: Optional[bool] = None):
+        return self._client.get_candles(self.exchange, self.market_type, self.symbol, interval=interval, limit=limit, end=end, verbose=verbose)
 
 
     def trades(self, limit: int = 100, verbose: Optional[bool] = None):
-        return self._client.get_trades(self.exchange, self.market_type, self.symbol, limit, verbose)
+        return self._client.get_trades(self.exchange, self.market_type, self.symbol, limit=limit, verbose=verbose)
 
 
-    def agg_trades(self, limit: int = 500, start: Optional[int] = None, verbose: Optional[bool] = None, end: Optional[int] = None):
-        return self._client.get_agg_trades(self.exchange, self.market_type, self.symbol, limit, start, verbose, end)
+    def agg_trades(self, limit: int = 500, end: Optional[int] = None, verbose: Optional[bool] = None):
+        return self._client.get_agg_trades(self.exchange, self.market_type, self.symbol, limit=limit, end=end, verbose=verbose)
 
 
-    def funding_rate(self, limit: int = 100, start: Optional[int] = None, verbose: Optional[bool] = None, end: Optional[int] = None):
-        return self._client.get_funding_rate(self.exchange, self.market_type, self.symbol, limit, start, verbose, end)
+    def funding_rate(self, limit: int = 100, end: Optional[int] = None, verbose: Optional[bool] = None):
+        return self._client.get_funding_rate(self.exchange, self.market_type, self.symbol, limit=limit, end=end, verbose=verbose)
 
 
-    def open_interest(self, period: str = "1h", limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, interval: Optional[str] = None, end: Optional[int] = None):
-        return self._client.get_open_interest(self.exchange, self.market_type, self.symbol, period, limit, start, verbose, interval, end)
+    def open_interest(self, interval: Optional[str] = None, limit: int = 30, end: Optional[int] = None, verbose: Optional[bool] = None):
+        return self._client.get_open_interest(self.exchange, self.market_type, self.symbol, interval=interval, limit=limit, end=end, verbose=verbose)
 
 
-    def liquidations(self, limit: int = 100, start: Optional[int] = None, verbose: Optional[bool] = None, end: Optional[int] = None):
-        return self._client.get_liquidations(self.exchange, self.market_type, self.symbol, limit, start, verbose, end)
+    def liquidations(self, limit: int = 100, end: Optional[int] = None, verbose: Optional[bool] = None):
+        return self._client.get_liquidations(self.exchange, self.market_type, self.symbol, limit=limit, end=end, verbose=verbose)
 
 
-    def long_short_ratio(self, period: str = "5m", limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, interval: Optional[str] = None, end: Optional[int] = None):
-        return self._client.get_long_short_ratio(self.exchange, self.market_type, self.symbol, period, limit, start, verbose, interval, end)
+    def long_short_ratio(self, interval: Optional[str] = None, limit: int = 30, end: Optional[int] = None, verbose: Optional[bool] = None):
+        return self._client.get_long_short_ratio(self.exchange, self.market_type, self.symbol, interval=interval, limit=limit, end=end, verbose=verbose)
 
 
     def ticker(self, verbose: Optional[bool] = None):

@@ -17,12 +17,20 @@ from .version import SCHEMA_VERSION, __version__
 
 SERIES_ROUTES = ("candles", "trades", "agg_trades", "funding_rate", "open_interest", "liquidations", "long_short_ratio")
 
-SYMBOL_KINDS = {
-    "status":       ("trading", "halted", "pre_trading", "delisted"),
-    "price_kind":   ("tick", "significant_figures"),
-    "qty_unit":     ("base", "contract"),
-    "funding_kind": ("discrete", "continuous"),
-    "time_source":  ("venue", "router"),
+KINDS = {
+    "status":                   ("trading", "halted", "pre_trading", "delisted"),
+    "price_kind":               ("tick", "significant_figures"),
+    "price_source":             ("last_trade", "mid", "mark"),
+    "qty_unit":                 ("base", "contract"),
+    "volume_24h_unit":          ("base", "contract"),
+    "funding_kind":             ("discrete", "continuous"),
+    "funding_valid_until_kind": ("settlement", "estimate"),
+    "time_source":              ("venue", "router"),
+    "volume_unit":              ("base", "contract"),
+    "open_interest_unit":       ("base", "contract"),
+    "notional_basis":           ("row_price", "contract_size", "candle_close", "mark"),
+    "up_to_unit":               ("quote", "base", "contract"),
+    "account_scope":            ("top_traders", "all_accounts", "opaque"),
 }
 
 CLOSED = (
@@ -232,6 +240,7 @@ class AsyncCore:
 
         df, warnings = frames.build(route, rows, ctx)
         emit(warnings, v)
+        self._known(df.attrs, route, exchange, market_type, symbol, v, "the frame keeps it as sent")
 
         return df
 
@@ -269,10 +278,13 @@ class AsyncCore:
 
 
     async def get_symbol_info(self, exchange: str, market_type: str, symbol: str, verbose: Optional[bool] = None) -> rows.Row:
-        v   = self.verbose if verbose is None else verbose
-        row = rows.symbol_info_row(await self._fetch("symbol_info", exchange, market_type, symbol))
-        emit([f"symbol_info {exchange}/{market_type}/{symbol}: {key} '{row[key]}' is not a value this version knows; .raw holds the record as sent"
-              for key, known in SYMBOL_KINDS.items() if row[key] is not None and row[key] not in known], v)
+        v = self.verbose if verbose is None else verbose
+        return self._known(rows.symbol_info_row(await self._fetch("symbol_info", exchange, market_type, symbol)), "symbol_info", exchange, market_type, symbol, v)
+
+
+    def _known(self, row: Dict, route: str, exchange: str, market_type: str, symbol: str, verbose: bool, kept: str = ".raw holds the record as sent") -> Dict:
+        emit([f"{route} {exchange}/{market_type}/{symbol}: {key} '{row[key]}' is not a value this version knows; {kept}"
+              for key, known in KINDS.items() if row.get(key) is not None and row[key] not in known], verbose)
         return row
 
 
@@ -283,7 +295,7 @@ class AsyncCore:
         data = await self._fetch("ticker", exchange, market_type, symbol)
         emit([w for w in [frames._quote_warning(data.get("quote"), {"exchange": exchange, "market_type": market_type, "symbol": symbol}, "ticker")] if w], v)
 
-        return rows.ticker_row(data)
+        return self._known(rows.ticker_row(data), "ticker", exchange, market_type, symbol, v)
 
 
     async def get_book_ticker(self, exchange: str, market_type: str, symbol: str, verbose: Optional[bool] = None) -> rows.Row:
@@ -293,7 +305,7 @@ class AsyncCore:
         data = await self._fetch("book_ticker", exchange, market_type, symbol)
         emit([w for w in [frames._quote_warning(data.get("quote"), {"exchange": exchange, "market_type": market_type, "symbol": symbol}, "book_ticker")] if w], v)
 
-        return rows.book_ticker_row(data)
+        return self._known(rows.book_ticker_row(data), "book_ticker", exchange, market_type, symbol, v)
 
 
     async def get_mark_price(self, exchange: str, market_type: str, symbol: str, verbose: Optional[bool] = None) -> rows.Row:
@@ -309,7 +321,7 @@ class AsyncCore:
             warnings.append(f"mark_price {exchange}/{market_type}/{symbol}: funding is null (upstream omitted it)")
         emit(warnings, v)
 
-        return rows.mark_price_row(data)
+        return self._known(rows.mark_price_row(data), "mark_price", exchange, market_type, symbol, v)
 
 
     async def get_orderbook(self, exchange: str, market_type: str, symbol: str, depth: int = 20, verbose: Optional[bool] = None) -> pd.DataFrame:
@@ -319,7 +331,10 @@ class AsyncCore:
         data = await self._fetch("orderbook", exchange, market_type, symbol, depth=depth)
 
         ctx = {"exchange": exchange, "market_type": market_type, "symbol": symbol}
-        return frames.orderbook(data, ctx)
+        df  = frames.orderbook(data, ctx)
+        self._known(df.attrs, "orderbook", exchange, market_type, symbol, v, "the frame keeps it as sent")
+
+        return df
 
 
     async def get_margin_tiers(self, exchange: str, market_type: str, symbol: str, verbose: Optional[bool] = None) -> pd.DataFrame:
@@ -336,15 +351,15 @@ class AsyncCore:
         ctx = {"exchange": exchange, "market_type": market_type, "symbol": symbol}
         df  = frames.margin_tiers(data, ctx)
         emit(df.attrs["warnings"], v)
+        self._known(df.attrs, "margin_tiers", exchange, market_type, symbol, v, "the frame keeps it as sent")
 
         return df
 
 
-    async def get_candles(self, exchange: str, market_type: str, symbol: str, interval: str = "1h", limit: int = 100, start: Optional[int] = None, verbose: Optional[bool] = None, end: Optional[int] = None) -> pd.DataFrame:
-        start  = end if end is not None else start
+    async def get_candles(self, exchange: str, market_type: str, symbol: str, interval: str = "1h", limit: int = 100, end: Optional[int] = None, verbose: Optional[bool] = None) -> pd.DataFrame:
         params = {"interval": interval, "limit": limit}
-        if start is not None:
-            params["end"] = start
+        if end is not None:
+            params["end"] = end
 
         return await self._series("candles", exchange, market_type, symbol, params, interval, verbose)
 
@@ -353,55 +368,48 @@ class AsyncCore:
         return await self._series("trades", exchange, market_type, symbol, {"limit": limit}, None, verbose)
 
 
-    async def get_agg_trades(self, exchange: str, market_type: str, symbol: str, limit: int = 500, start: Optional[int] = None, verbose: Optional[bool] = None, end: Optional[int] = None) -> pd.DataFrame:
-        start  = end if end is not None else start
+    async def get_agg_trades(self, exchange: str, market_type: str, symbol: str, limit: int = 500, end: Optional[int] = None, verbose: Optional[bool] = None) -> pd.DataFrame:
         params = {"limit": limit}
-        if start is not None:
-            params["end"] = start
+        if end is not None:
+            params["end"] = end
 
         return await self._series("agg_trades", exchange, market_type, symbol, params, None, verbose)
 
 
-    async def get_funding_rate(self, exchange: str, market_type: str, symbol: str, limit: int = 100, start: Optional[int] = None, verbose: Optional[bool] = None, end: Optional[int] = None) -> pd.DataFrame:
-        start  = end if end is not None else start
+    async def get_funding_rate(self, exchange: str, market_type: str, symbol: str, limit: int = 100, end: Optional[int] = None, verbose: Optional[bool] = None) -> pd.DataFrame:
         params = {"limit": limit}
-        if start is not None:
-            params["end"] = start
+        if end is not None:
+            params["end"] = end
 
         return await self._series("funding_rate", exchange, market_type, symbol, params, None, verbose)
 
 
-    async def get_open_interest(self, exchange: str, market_type: str, symbol: str, period: Optional[str] = None, limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, interval: Optional[str] = None, end: Optional[int] = None) -> pd.DataFrame:
-        period = interval if interval is not None else period
-        start  = end if end is not None else start
+    async def get_open_interest(self, exchange: str, market_type: str, symbol: str, interval: Optional[str] = None, limit: int = 30, end: Optional[int] = None, verbose: Optional[bool] = None) -> pd.DataFrame:
         params = {"limit": limit}
-        if period is not None:
-            params["interval"] = period
-        if start is not None:
-            params["end"] = start
+        if interval is not None:
+            params["interval"] = interval
+        if end is not None:
+            params["end"] = end
 
-        return await self._series("open_interest", exchange, market_type, symbol, params, period, verbose)
+        return await self._series("open_interest", exchange, market_type, symbol, params, interval, verbose)
 
 
-    async def get_liquidations(self, exchange: str, market_type: str, symbol: str, limit: int = 100, start: Optional[int] = None, verbose: Optional[bool] = None, end: Optional[int] = None) -> pd.DataFrame:
-        start  = end if end is not None else start
+    async def get_liquidations(self, exchange: str, market_type: str, symbol: str, limit: int = 100, end: Optional[int] = None, verbose: Optional[bool] = None) -> pd.DataFrame:
         params = {"limit": limit}
-        if start is not None:
-            params["end"] = start
+        if end is not None:
+            params["end"] = end
 
         return await self._series("liquidations", exchange, market_type, symbol, params, None, verbose)
 
 
-    async def get_long_short_ratio(self, exchange: str, market_type: str, symbol: str, period: Optional[str] = None, limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, interval: Optional[str] = None, end: Optional[int] = None) -> pd.DataFrame:
-        period = interval if interval is not None else period
-        start  = end if end is not None else start
+    async def get_long_short_ratio(self, exchange: str, market_type: str, symbol: str, interval: Optional[str] = None, limit: int = 30, end: Optional[int] = None, verbose: Optional[bool] = None) -> pd.DataFrame:
         params = {"limit": limit}
-        if period is not None:
-            params["interval"] = period
-        if start is not None:
-            params["end"] = start
+        if interval is not None:
+            params["interval"] = interval
+        if end is not None:
+            params["end"] = end
 
-        return await self._series("long_short_ratio", exchange, market_type, symbol, params, period, verbose)
+        return await self._series("long_short_ratio", exchange, market_type, symbol, params, interval, verbose)
 
 
     async def fetch_many(self, route: str, exchange: str, market_type: str, symbols: List[str], verbose: Optional[bool] = None, max_concurrent: int = 8, **kwargs) -> BatchResult:

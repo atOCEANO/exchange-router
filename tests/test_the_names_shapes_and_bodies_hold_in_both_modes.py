@@ -1,3 +1,4 @@
+import inspect
 import threading
 import warnings
 from collections.abc import Mapping
@@ -6,7 +7,7 @@ import httpx
 import pandas as pd
 import pytest
 
-from exchange_router import ExchangeRouterClient
+from exchange_router import AsyncRouter, ExchangeRouterClient, Router
 from exchange_router import exchanges as registry
 from exchange_router import frames, router as sync_router
 from exchange_router._warnings import RouterDataWarning
@@ -64,12 +65,13 @@ async def test_an_unreadable_answer_and_a_router_fault_each_name_their_error_and
     assert {a.headers["Schema-Version"] for a in answers} == {str(SCHEMA_VERSION)}
 
 
-async def test_interval_and_end_read_as_period_and_start_in_both_modes(router):
-    by_old = await router.get_open_interest("fake", "linear", "BTCUSDT", period="5m", limit=3, start=1_700_000_000_000)
-    by_new = await router.get_open_interest("fake", "linear", "BTCUSDT", limit=3, interval="5m", end=1_700_000_000_000)
+async def test_interval_and_end_are_the_only_spellings_in_both_modes(router):
+    read = await router.get_open_interest("fake", "linear", "BTCUSDT", limit=3, interval="5m", end=1_700_000_000_000)
 
-    assert by_new.equals(by_old)
-    assert by_new.attrs["interval"] == "5m"
+    assert read.attrs["interval"] == "5m"
+    for name in ("get_candles", "get_agg_trades", "get_funding_rate", "get_open_interest", "get_liquidations", "get_long_short_ratio", "candles_many", "open_interest_many", "long_short_ratio_many"):
+        for cls in (AsyncRouter, Router):
+            assert {"period", "start"}.isdisjoint(inspect.signature(getattr(cls, name)).parameters), name
 
     async with service() as client:
         aliased = await client.get("/fake/linear/open_interest/BTCUSDT", params={"interval": "5m", "limit": 3})
@@ -86,7 +88,8 @@ def test_an_empty_frame_is_built_like_a_full_one():
 
     assert isinstance(df.index, pd.DatetimeIndex) and str(df.index.tz) == "UTC" and df.index.name == "datetime"
     assert list(df.dtypes) == ["float64", "float64"]
-    assert {"quote", "interval", "oi_unit", "open_interest_unit", "contract_size", "notional_basis"} <= set(df.attrs)
+    assert {"quote", "interval", "open_interest_unit", "contract_size", "notional_basis", "time_source"} <= set(df.attrs)
+    assert "oi_unit" not in df.attrs
 
 
 def test_an_empty_funding_frame_has_a_full_ones_dtypes():
@@ -98,10 +101,11 @@ def test_an_empty_funding_frame_has_a_full_ones_dtypes():
     assert dict(empty.dtypes) == dict(full.dtypes)
 
 
-async def test_provenance_keeps_the_market_type_and_open_interest_names_its_unit_both_ways(router):
-    df = await router.get_open_interest("fake", "linear", "BTCUSDT", period="1h", limit=2)
+async def test_provenance_keeps_the_market_type_and_open_interest_names_its_unit(router):
+    df = await router.get_open_interest("fake", "linear", "BTCUSDT", interval="1h", limit=2)
 
-    assert df.attrs["open_interest_unit"] == df.attrs["oi_unit"] == "base"
+    assert df.attrs["open_interest_unit"] == "base"
+    assert set(frames.with_provenance(df)["unit"]) == {"base"}
     assert set(frames.with_provenance(df)["market_type"]) == {"linear"}
 
 

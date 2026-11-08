@@ -29,7 +29,7 @@ ATTRS: Dict[str, List[str]] = {
     "trades":           ["quote", "qty_unit", "contract_size"],
     "agg_trades":       ["quote", "qty_unit", "contract_size"],
     "funding_rate":     ["quote", "funding_kind"],
-    "open_interest":    ["quote", "interval", "oi_unit", "open_interest_unit", "contract_size", "notional_basis", "time_source"],
+    "open_interest":    ["quote", "interval", "open_interest_unit", "contract_size", "notional_basis", "time_source"],
     "liquidations":     ["quote", "qty_unit", "contract_size"],
     "long_short_ratio": ["interval", "account_scope"],
 }
@@ -204,8 +204,7 @@ def _open_interest(rows: List[Dict], ctx: Dict[str, Any]) -> Tuple[pd.DataFrame,
     attrs = _base_attrs(ctx)
     attrs["quote"]              = _const(df, "quote")
     attrs["interval"]           = _const(df, "interval")
-    attrs["oi_unit"]            = _const(df, "open_interest_unit")
-    attrs["open_interest_unit"] = attrs["oi_unit"]
+    attrs["open_interest_unit"] = _const(df, "open_interest_unit")
     attrs["contract_size"]      = _const(df, "open_interest_contract_size")
     attrs["notional_basis"]     = _const(df, "open_interest_notional_basis_method")
     attrs["time_source"]        = _const(df, "time_source")
@@ -333,7 +332,7 @@ def with_provenance(df: pd.DataFrame) -> pd.DataFrame:
     out["market_type"] = attrs.get("market_type")
     out["symbol"]      = attrs.get("symbol")
     out["quote"]       = attrs.get("quote")
-    out["unit"]        = attrs.get("volume_unit") or attrs.get("qty_unit") or attrs.get("oi_unit") or attrs.get("up_to_unit")
+    out["unit"]        = attrs.get("volume_unit") or attrs.get("qty_unit") or attrs.get("open_interest_unit") or attrs.get("up_to_unit")
 
     out.attrs.update(attrs)
 

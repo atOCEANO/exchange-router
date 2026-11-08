@@ -26,9 +26,9 @@ async def test_an_interval_outside_the_capability_list_is_a_bad_request(router):
         await router.get_candles(EX, "spot", "BTCUSDT", interval="3s", limit=5)
 
 
-async def test_a_period_outside_the_capability_list_is_a_bad_request(router):
+async def test_an_open_interest_interval_outside_the_capability_list_is_a_bad_request(router):
     with pytest.raises(BadRequest):
-        await router.get_open_interest(EX, "linear", "BTCUSDT", period="3s", limit=5)
+        await router.get_open_interest(EX, "linear", "BTCUSDT", interval="3s", limit=5)
 
 
 async def test_a_route_the_market_does_not_implement_is_not_supported(router):

@@ -12,9 +12,9 @@ SERIES_CALLS = [
     ("trades",           lambda r: r.get_trades(EX, "linear", "BTCUSDT", limit=4)),
     ("agg_trades",       lambda r: r.get_agg_trades(EX, "linear", "BTCUSDT", limit=4)),
     ("funding_rate",     lambda r: r.get_funding_rate(EX, "linear", "BTCUSDT", limit=4)),
-    ("open_interest",    lambda r: r.get_open_interest(EX, "linear", "BTCUSDT", period="1h", limit=4)),
+    ("open_interest",    lambda r: r.get_open_interest(EX, "linear", "BTCUSDT", interval="1h", limit=4)),
     ("liquidations",     lambda r: r.get_liquidations(EX, "linear", "BTCUSDT", limit=4)),
-    ("long_short_ratio", lambda r: r.get_long_short_ratio(EX, "linear", "BTCUSDT", period="1h", limit=4)),
+    ("long_short_ratio", lambda r: r.get_long_short_ratio(EX, "linear", "BTCUSDT", interval="1h", limit=4)),
 ]
 
 SERIES_IDS = [name for name, _ in SERIES_CALLS]

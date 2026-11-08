@@ -228,7 +228,7 @@ async def test_funding_rate_reports_both_conventions_and_a_per_hour_column(route
 @pytest.mark.parametrize("market_type,symbol,quote,unit,size", DERIVATIVES, ids=DERIV_IDS)
 @pytest.mark.parametrize("period", ["5m", "1h"])
 async def test_open_interest_is_spaced_by_its_period(router, market_type, symbol, quote, unit, size, period):
-    df = await router.get_open_interest(EX, market_type, symbol, period=period, limit=5)
+    df = await router.get_open_interest(EX, market_type, symbol, interval=period, limit=5)
 
     assert list(df.columns) == ["open_interest", "open_interest_notional"]
     assert len(df) == 5
@@ -247,7 +247,7 @@ async def test_liquidations_are_linear_only_and_carry_a_side(router):
 
 @pytest.mark.parametrize("period", ["5m", "1h"])
 async def test_long_short_ratio_reports_both_account_sides(router, period):
-    df = await router.get_long_short_ratio(EX, "linear", "BTCUSDT", period=period, limit=3)
+    df = await router.get_long_short_ratio(EX, "linear", "BTCUSDT", interval=period, limit=3)
 
     assert list(df.columns) == ["ratio", "long_account", "short_account"]
     assert len(df) == 3

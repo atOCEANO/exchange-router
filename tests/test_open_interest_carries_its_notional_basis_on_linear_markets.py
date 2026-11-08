@@ -76,7 +76,7 @@ async def test_an_inverse_market_needs_no_join_because_the_contract_carries_the_
 
 
 async def test_the_sdk_frame_reports_the_same_notionals_the_wire_does(router):
-    df       = await router.get_open_interest(EX, "linear", "BTCUSDT", period=PERIOD, limit=LIMIT)
+    df       = await router.get_open_interest(EX, "linear", "BTCUSDT", interval=PERIOD, limit=LIMIT)
     notional = list(df["open_interest_notional"])
 
     assert notional[0] != notional[0]
