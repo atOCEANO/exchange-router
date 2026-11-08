@@ -831,6 +831,8 @@ class HyperliquidAdapter(BaseExchange):
     async def _fetch_builder_info(self, market_type: MarketType, seen: Set[str], metas: Dict[str, Any]) -> List[SymbolInfo]:
         try:
             dexs = await self._make_request("perpDexs", {"type": "perpDexs"})
+        except UpstreamUnavailableError:
+            raise
         except Exception as e:
             logger.warning(f"Hyperliquid perpDexs fetch failed; serving primary linear only: {e!r}")
             return []
@@ -859,6 +861,8 @@ class HyperliquidAdapter(BaseExchange):
 
                     self._funding_interval_cache[market_type][model_sym] = self._FUNDING_CYCLE_MS
                     results.append(mark_trading(self._linear_symbol_info(model_sym, native, base, sz_dec), not u.get("isDelisted")))
+            except UpstreamUnavailableError:
+                raise
             except Exception as e:
                 logger.warning(f"Hyperliquid builder dex {dex} skipped: {e!r}")
                 continue

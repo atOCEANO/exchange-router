@@ -994,7 +994,7 @@ class OkxAdapter(BaseExchange):
 
         need = limit + 1
         if start_time is not None or need > per_req:
-            rows = await self._paginate_backwards(fetch_backward, need, per_req)
+            rows = await self._paginate_backwards(fetch_backward, limit, per_req, extra_rows=1)
         else:
             rows = await fetch_backward(None, need)
         return stamp_funding_cycles(rows, current_ms)[-limit:]
@@ -1119,11 +1119,7 @@ class OkxAdapter(BaseExchange):
             p = {"instType": "SWAP", "uly": uly, "state": "filled", "limit": min(l, per_req)}
             if anchor:
                 p["after"] = str(anchor + 1)
-            try:
-                rows = await self._make_request("GET", "/api/v5/public/liquidation-orders", p)
-            except (httpx.HTTPStatusError, ValueError):
-                return []
-            return _parse(rows)
+            return _parse(await self._make_request("GET", "/api/v5/public/liquidation-orders", p))
 
         if start_time is not None or limit > per_req:
             return await self._paginate_backwards(fetch_backward, limit, per_req)

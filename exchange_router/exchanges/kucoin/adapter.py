@@ -1061,7 +1061,7 @@ class KucoinAdapter(BaseExchange):
 
         need = limit + 1
         if start_time is not None or need > per_req:
-            rows = await self._paginate_backwards(fetch, need, per_req)
+            rows = await self._paginate_backwards(fetch, limit, per_req, extra_rows=1)
         else:
             rows = await fetch(None, need)
         return stamp_funding_cycles(rows, current_ms)[-limit:]

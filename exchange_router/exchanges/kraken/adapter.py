@@ -1085,10 +1085,7 @@ class KrakenAdapter(BaseExchange):
             seen_ts: set = set()
 
             for _ in range(20):
-                try:
-                    data = await self._make_request("GET", url, {"from": from_ts})
-                except (httpx.HTTPStatusError, ValueError):
-                    break
+                data  = await self._make_request("GET", url, {"from": from_ts})
                 batch = data.get("candles", [])
                 if not batch:
                     break
@@ -1125,7 +1122,7 @@ class KrakenAdapter(BaseExchange):
 
                 from_ts = last_ts_secs + interval_secs
             else:
-                logger.warning(f"Kraken futures candle walk hit its 20-page cap for {model_sym} {interval}; result may be truncated.")
+                raise ValueError(f"limit {limit} took more than 20 pages on {self.name}; the most one request reached is {len(all_candles)}")
 
             all_candles.sort(key=lambda c: c.timestamp)
             if start_time:

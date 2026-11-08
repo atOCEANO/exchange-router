@@ -752,7 +752,7 @@ class BybitAdapter(BaseExchange):
             ) for i in data.get("list", [])]
             return sorted(parsed, key=lambda x: x.timestamp)
 
-        rows = await self._paginate_backwards(fetch_backwards, limit + 1, max_per_req)
+        rows = await self._paginate_backwards(fetch_backwards, limit, max_per_req, extra_rows=1)
         return stamp_funding_cycles(rows, current_ms)[-limit:]
 
 

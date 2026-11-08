@@ -3,7 +3,6 @@ import decimal
 import logging
 import math
 import time
-import httpx
 import orjson
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any, Set, Tuple, Union, AsyncGenerator, Callable, Awaitable, Iterable
@@ -262,10 +261,13 @@ async def join_open_interest_basis(adapter, market_type: MarketType, symbol: str
     if market_type != MarketType.LINEAR or not oi_rows:
         return oi_rows
 
+    intervals = route_block(adapter.get_capabilities(), market_type, "candles").get("intervals")
+    if intervals and period not in intervals:
+        return oi_rows
+
     try:
         candles = await adapter.get_candles(market_type, symbol, period, start_time, limit + 1)
-    except Exception:
-        logger.exception(f"OI candle-join: candle fetch failed for {adapter.name}/{market_type.value}/{symbol}")
+    except NotImplementedError:
         return oi_rows
 
     if len(candles) < 2:
@@ -549,20 +551,20 @@ class BaseExchange(ABC):
         raise ValueError(f"Unsupported timestamp format: {type(ts)}")
 
 
-    async def _paginate_backwards(self, fetch_func_by_end: Callable, total_limit: int, limit_per_req: int) -> List[Any]:
+    async def _paginate_backwards(self, fetch_func_by_end: Callable, total_limit: int, limit_per_req: int, extra_rows: int = 0) -> List[Any]:
         chunks = []
         seen = set()
         collected = 0
         current_end = None
         max_requests = 100
         req_count = 0
+        wanted = total_limit + extra_rows
 
-        while collected < total_limit and req_count < max_requests:
-            try:
-                batch = await fetch_func_by_end(current_end, limit_per_req)
-            except (httpx.HTTPStatusError, ValueError) as e:
-                logging.getLogger(f"{self.name}_adapter").warning(f"{self.name} pagination stopped early with {collected}/{total_limit} records; upstream request failed: {e}")
-                break
+        if wanted > max_requests * limit_per_req:
+            raise ValueError(f"limit {total_limit} is more than {self.name} serves in one request; the most is {max_requests * limit_per_req - extra_rows}")
+
+        while collected < wanted and req_count < max_requests:
+            batch = await fetch_func_by_end(current_end, limit_per_req)
             if not batch:
                 break
 
@@ -584,13 +586,13 @@ class BaseExchange(ABC):
                 break
             current_end = next_end
 
-        if req_count >= max_requests and collected < total_limit:
-            logging.getLogger(f"{self.name}_adapter").warning(f"{self.name} pagination hit {max_requests}-page safety cap with {collected}/{total_limit} records; result truncated")
+        if req_count >= max_requests and collected < wanted:
+            raise ValueError(f"limit {total_limit} took more than {max_requests} pages on {self.name}; the most one request reached is {max(collected - extra_rows, 0)}")
 
         chunks.reverse()
         out = [item for chunk in chunks for item in chunk]
         out.sort(key=lambda x: x.timestamp)
-        return out[-total_limit:]
+        return out[-wanted:]
 
 
     @property
