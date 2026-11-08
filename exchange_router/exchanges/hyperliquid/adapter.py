@@ -88,6 +88,10 @@ class HyperliquidAdapter(BaseExchange):
             "name": self.name,
             "markets": {
                 MarketType.SPOT: {
+                    "margin_tiers": {
+                        "rest": False,
+                        "ws":   False,
+                    },
                     "ticker": {
                         "rest": True,
                         "ws":   True,
@@ -157,12 +161,12 @@ class HyperliquidAdapter(BaseExchange):
                         "retention_ms": None,
                         "intervals":    None,
                     },
-                    "margin_tiers": {
-                        "rest": False,
-                        "ws":   False,
-                    },
                 },
                 MarketType.LINEAR: {
+                    "margin_tiers": {
+                        "rest": True,
+                        "ws":   False,
+                    },
                     "ticker": {
                         "rest": True,
                         "ws":   True,
@@ -231,10 +235,6 @@ class HyperliquidAdapter(BaseExchange):
                         "max_limit":    None,
                         "retention_ms": None,
                         "intervals":    None,
-                    },
-                    "margin_tiers": {
-                        "rest": True,
-                        "ws":   False,
                     },
                 },
             },

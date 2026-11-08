@@ -81,6 +81,10 @@ class BybitAdapter(BaseExchange):
             "name": self.name,
             "markets": {
                 MarketType.SPOT: {
+                    "margin_tiers": {
+                        "rest": False,
+                        "ws":   False,
+                    },
                     "ticker": {
                         "rest": True,
                         "ws":   True,
@@ -150,12 +154,12 @@ class BybitAdapter(BaseExchange):
                         "retention_ms": None,
                         "intervals":    None,
                     },
-                    "margin_tiers": {
-                        "rest": False,
-                        "ws":   False,
-                    },
                 },
                 MarketType.LINEAR: {
+                    "margin_tiers": {
+                        "rest": True,
+                        "ws":   False,
+                    },
                     "ticker": {
                         "rest": True,
                         "ws":   True,
@@ -224,13 +228,13 @@ class BybitAdapter(BaseExchange):
                         "max_limit":    None,
                         "retention_ms": None,
                         "intervals":    ["5m", "15m", "30m", "1h", "4h", "1d"],
-                    },
-                    "margin_tiers": {
-                        "rest": True,
-                        "ws":   False,
                     },
                 },
                 MarketType.INVERSE: {
+                    "margin_tiers": {
+                        "rest": True,
+                        "ws":   False,
+                    },
                     "ticker": {
                         "rest": True,
                         "ws":   True,
@@ -299,10 +303,6 @@ class BybitAdapter(BaseExchange):
                         "max_limit":    None,
                         "retention_ms": None,
                         "intervals":    ["5m", "15m", "30m", "1h", "4h", "1d"],
-                    },
-                    "margin_tiers": {
-                        "rest": True,
-                        "ws":   False,
                     },
                 },
             },

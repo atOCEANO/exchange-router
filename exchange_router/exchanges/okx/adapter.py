@@ -177,6 +177,10 @@ class OkxAdapter(BaseExchange):
             "name": self.name,
             "markets": {
                 MarketType.SPOT: {
+                    "margin_tiers": {
+                        "rest": False,
+                        "ws":   False,
+                    },
                     "ticker": {
                         "rest": True,
                         "ws":   True,
@@ -246,12 +250,12 @@ class OkxAdapter(BaseExchange):
                         "retention_ms": None,
                         "intervals":    None,
                     },
-                    "margin_tiers": {
-                        "rest": False,
-                        "ws":   False,
-                    },
                 },
                 MarketType.LINEAR: {
+                    "margin_tiers": {
+                        "rest": True,
+                        "ws":   False,
+                    },
                     "ticker": {
                         "rest": True,
                         "ws":   True,
@@ -320,13 +324,13 @@ class OkxAdapter(BaseExchange):
                         "max_limit":    None,
                         "retention_ms": 30 * 24 * 60 * 60 * 1000,
                         "intervals":    ["5m", "1h", "1d"],
-                    },
-                    "margin_tiers": {
-                        "rest": True,
-                        "ws":   False,
                     },
                 },
                 MarketType.INVERSE: {
+                    "margin_tiers": {
+                        "rest": True,
+                        "ws":   False,
+                    },
                     "ticker": {
                         "rest": True,
                         "ws":   True,
@@ -395,10 +399,6 @@ class OkxAdapter(BaseExchange):
                         "max_limit":    None,
                         "retention_ms": 30 * 24 * 60 * 60 * 1000,
                         "intervals":    ["5m", "1h", "1d"],
-                    },
-                    "margin_tiers": {
-                        "rest": True,
-                        "ws":   False,
                     },
                 },
             },

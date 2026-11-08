@@ -89,16 +89,17 @@ def _series(market_type: MarketType, intervals: Optional[List[str]] = None, pagi
 
 
 _SPOT_CAPS = {
+    "margin_tiers": {"rest": False, "ws": False},
     "ticker":       _point(MarketType.SPOT, "ticker"),
     "book_ticker":  _point(MarketType.SPOT, "book_ticker"),
     "orderbook":    {"rest": True, "ws": True, "depths": DEPTHS},
     "trades":       _series(MarketType.SPOT),
     "agg_trades":   _series(MarketType.SPOT, paginated=True),
     "candles":      _series(MarketType.SPOT, intervals=INTERVALS, paginated=True),
-    "margin_tiers": {"rest": False, "ws": False},
 }
 
 _LINEAR_CAPS = {
+    "margin_tiers":      {"rest": True, "ws": False},
     "ticker":            _point(MarketType.LINEAR, "ticker"),
     "book_ticker":       _point(MarketType.LINEAR, "book_ticker"),
     "mark_price":        _point(MarketType.LINEAR, "mark_price"),
@@ -110,10 +111,10 @@ _LINEAR_CAPS = {
     "open_interest":     _series(MarketType.LINEAR, intervals=OI_PERIODS, paginated=True),
     "liquidations":      _series(MarketType.LINEAR),
     "long_short_ratio":  _series(MarketType.LINEAR, intervals=LSR_PERIODS),
-    "margin_tiers":      {"rest": True, "ws": False},
 }
 
 _INVERSE_CAPS = {
+    "margin_tiers":  {"rest": True, "ws": False},
     "ticker":        _point(MarketType.INVERSE, "ticker"),
     "book_ticker":   _point(MarketType.INVERSE, "book_ticker"),
     "mark_price":    _point(MarketType.INVERSE, "mark_price"),
@@ -124,7 +125,6 @@ _INVERSE_CAPS = {
     "funding_rate":  _series(MarketType.INVERSE, paginated=True),
     "open_interest": _series(MarketType.INVERSE, intervals=OI_PERIODS, paginated=True),
     "liquidations":  {"rest": False, "ws": False},
-    "margin_tiers":  {"rest": True, "ws": False},
 }
 
 CAPABILITIES = {

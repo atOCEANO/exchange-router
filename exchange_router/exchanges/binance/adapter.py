@@ -96,6 +96,10 @@ class BinanceAdapter(BaseExchange):
             "name": self.name,
             "markets": {
                 MarketType.SPOT: {
+                    "margin_tiers": {
+                        "rest": False,
+                        "ws":   False,
+                    },
                     "ticker": {
                         "rest": True,
                         "ws":   True,
@@ -165,12 +169,12 @@ class BinanceAdapter(BaseExchange):
                         "retention_ms": None,
                         "intervals":    None,
                     },
+                },
+                MarketType.LINEAR: {
                     "margin_tiers": {
                         "rest": False,
                         "ws":   False,
                     },
-                },
-                MarketType.LINEAR: {
                     "ticker": {
                         "rest": True,
                         "ws":   True,
@@ -239,13 +243,13 @@ class BinanceAdapter(BaseExchange):
                         "max_limit":    None,
                         "retention_ms": 30 * 24 * 60 * 60 * 1000,
                         "intervals":    ["5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d"],
-                    },
-                    "margin_tiers": {
-                        "rest": False,
-                        "ws":   False,
                     },
                 },
                 MarketType.INVERSE: {
+                    "margin_tiers": {
+                        "rest": False,
+                        "ws":   False,
+                    },
                     "ticker": {
                         "rest": True,
                         "ws":   True,
@@ -314,10 +318,6 @@ class BinanceAdapter(BaseExchange):
                         "max_limit":    None,
                         "retention_ms": 30 * 24 * 60 * 60 * 1000,
                         "intervals":    ["5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d"],
-                    },
-                    "margin_tiers": {
-                        "rest": False,
-                        "ws":   False,
                     },
                 },
             },
