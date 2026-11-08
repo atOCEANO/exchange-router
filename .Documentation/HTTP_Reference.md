@@ -29,7 +29,7 @@
 
 This is the wire format of the service, which is what `Router.service` speaks and what any non-Python client would use. It is not the API most readers want: [Python API](Python_API.md) is, and it covers both modes. Read this page when you are writing a client in another language, debugging a response by hand, or checking exactly what a field means on the wire.
 
-The same shapes come back in local mode, because the local backend serves the same records; it just never puts them on a socket. The schema is pinned by `schema_version`, which is `3` and moves only on a breaking change.
+The same shapes come back in local mode, because the local backend serves the same records; it just never puts them on a socket. The schema is pinned by `schema_version`, which is `3` and moves only on a breaking change; every REST answer also carries it in a `Schema-Version` header.
 
 The service exposes two interfaces on the same port. REST is request/response; WebSocket is real-time streaming.
 
@@ -86,7 +86,7 @@ Every quantitative record (Trade, Candle, OpenInterest, etc.) carries nested val
 | Method | Route | Description | Params |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/{exchange}/{market_type}/trades/{symbol}` | Recent public trades. | `limit` |
-| `GET` | `/{exchange}/{market_type}/agg_trades/{symbol}` | Aggregated trade history. | `start`, `limit` |
+| `GET` | `/{exchange}/{market_type}/agg_trades/{symbol}` | Aggregated trade history. | `end`, `limit` |
 
 **Orderbook**
 
@@ -98,35 +98,39 @@ Every quantitative record (Trade, Candle, OpenInterest, etc.) carries nested val
 
 | Method | Route | Description | Params |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/{exchange}/{market_type}/candles/{symbol}` | OHLCV candles. | `interval`, `start`, `limit` |
+| `GET` | `/{exchange}/{market_type}/candles/{symbol}` | OHLCV candles. | `interval`, `end`, `limit` |
 
 **Futures** &nbsp;•&nbsp; *linear and inverse market types only*
 
 | Method | Route | Description | Params |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/{exchange}/{market_type}/mark_price/{symbol}` | Mark price, index price, and current funding view. | None |
-| `GET` | `/{exchange}/{market_type}/liquidations/{symbol}` | Recent forced liquidation events. | `start`, `limit` |
-| `GET` | `/{exchange}/{market_type}/funding_rate/{symbol}` | Historical funding rates. | `start`, `limit` |
-| `GET` | `/{exchange}/{market_type}/open_interest/{symbol}` | Open interest history. On `linear` markets the route joins matching candles to populate the USD basis; on `inverse` it uses `contract_size` directly. | `period`, `start`, `limit` |
-| `GET` | `/{exchange}/{market_type}/long_short_ratio/{symbol}` | Long/short account distribution. | `period`, `start`, `limit` |
+| `GET` | `/{exchange}/{market_type}/liquidations/{symbol}` | Recent forced liquidation events. | `end`, `limit` |
+| `GET` | `/{exchange}/{market_type}/funding_rate/{symbol}` | Historical funding rates. | `end`, `limit` |
+| `GET` | `/{exchange}/{market_type}/open_interest/{symbol}` | Open interest history. On `linear` markets the route joins matching candles to populate the USD basis; on `inverse` it uses `contract_size` directly. | `interval`, `end`, `limit` |
+| `GET` | `/{exchange}/{market_type}/long_short_ratio/{symbol}` | Long/short account distribution. | `interval`, `end`, `limit` |
 | `GET` | `/{exchange}/{market_type}/margin_tiers/{symbol}` | Margin tiers: the leverage cap and margin rates a position gets at each size. | None |
+
+Before 3.3.0 `end` was called `start`, and `interval` was called `period` on open interest and long/short. The older names are still accepted.
 
 <br>
 
 ### Pagination Semantics
 
-Every endpoint that accepts a `start` query parameter (candles, agg_trades, funding_rate, open_interest, liquidations, long_short_ratio) treats it as an **inclusive backward-walking upper bound**:
+Every endpoint that accepts an `end` query parameter (candles, agg_trades, funding_rate, open_interest, liquidations, long_short_ratio) treats it as an **inclusive backward-walking upper bound**:
 
-* `?start=X&limit=N` returns up to N records with `timestamp <= X`, sorted ascending. X is the newest record in the response when present in the dataset.
-* Omit `start` to get the most recent N records ending at "now".
-* The response is always sorted ascending (oldest first), regardless of whether `start` was set.
+* `?end=X&limit=N` returns up to N records with `timestamp <= X`, sorted ascending. X is the newest record in the response when present in the dataset.
+* Omit `end` to get the most recent N records ending at "now".
+* The response is always sorted ascending (oldest first), regardless of whether `end` was set.
 
-The natural pagination loop for "load older" is therefore: pass the oldest timestamp you already have as the new `start`, request the next page, prepend to your view.
+The pagination loop for "load older" is therefore: pass the oldest timestamp you already have, minus one, as the new `end`, request the next page, prepend to your view. Passing the oldest timestamp itself returns that row again.
 
 <div align="center">
   <img src="imgs/204650.png" alt="Backward-walking pagination" width="90%" />
-  <p style="margin: 0;"><i>Each call's start anchor is the prior call's oldest record minus one; the response is always sorted oldest-first regardless of which call</i></p>
+  <p style="margin: 0;"><i>Each call's anchor is the prior call's oldest record minus one; the response is always sorted oldest-first regardless of which call</i></p>
 </div>
+
+A request walks back at most 100 of the exchange's pages. A `limit` beyond what 100 pages hold is refused with a `400` that names the most the route serves, and so is a read that reaches the hundredth page short of its `limit`. A page that fails fails the whole request; the router never returns the pages it got as if they were all. Where the exchange holds nothing older, the response is simply shorter than `limit`.
 
 <br>
 
@@ -158,7 +162,7 @@ The SDK helpers (`per_hour_view`, `funding_paid`) already branch on these fields
 
 ### Response Shapes
 
-All REST responses are normalized to the same schema regardless of the upstream exchange. Timestamps are Unix milliseconds. Prices are floats in the row's `quote` currency. Quantitative fields (qty, volume, open_interest) are **nested value objects** that carry both the native upstream value and a quote-currency notional. WebSocket channels emit the same shapes, noted inline.
+All REST responses are normalized to the same schema regardless of the upstream exchange. Timestamps are Unix milliseconds. Prices are floats in the row's `quote` currency. Quantitative fields (qty, volume, open_interest) are **nested value objects** that carry both the native upstream value and a quote-currency notional. That notional is named `usd` whatever the quote is, so on a EUR or BTC pair it is in EUR or BTC; sum `usd` across rows only where their `quote` matches. WebSocket channels emit the same shapes, noted inline.
 
 **Service root** &nbsp;•&nbsp; `GET /`
 ```json
@@ -234,7 +238,7 @@ The lite entry carries just enough metadata to enumerate and filter symbols with
 
 `tick_size` and `qty_step` are the grid an order has to sit on, as the exchange states it: the price step in `quote_asset` and the quantity step in `qty_unit`. `price_precision` and `quantity_precision` count decimal places and say less, since a count cannot express a step of 10 or more; check an order against the step, not the precision. Either grid field is `null` where the exchange states no step, as Hyperliquid states no tick. Each exchange's sources are in [Exchange Notes](Exchange_Notes.md#tick-and-step).
 
-Only tradeable symbols appear in `/markets` and `/markets/{symbol}`. Paused, halted, and offline instruments are filtered out at the adapter level, so a symbol's presence in the response is itself the liveness signal.
+Only tradeable symbols appear in `/markets` and `/markets/{symbol}`. Paused, halted, and offline instruments are filtered out at the adapter level, so a symbol's presence in the response is itself the liveness signal. The data routes still serve such an instrument for as long as its exchange lists it, and answer a symbol the exchange does not list at all with a `400` that names the markets route.
 
 **Ticker** &nbsp;•&nbsp; `GET /ticker/{symbol}` &nbsp;•&nbsp; WS `ticker`
 ```json
@@ -287,7 +291,7 @@ On inverse markets `volume_24h.unit` is `"contract"`, `contract_size` is populat
 }
 ```
 
-Per-level qty stays as a flat `[price, qty]` pair. Doubling depth-200 books just to embed per-level USD is a poor cost/benefit trade; consumers compute it as `price * qty` locally.
+Per-level qty stays as a flat `[price, qty]` pair. Doubling depth-200 books just to embed per-level USD is a poor cost/benefit trade; consumers compute it locally, as `price * qty` on a book whose `qty_unit` is `"base"` and as `qty * contract_size` on a `"contract"` book, with `contract_size` from `/markets/{symbol}`. A side with no orders is an empty list.
 
 **Trade** &nbsp;•&nbsp; `GET /trades/{symbol}` (list) &nbsp;•&nbsp; WS `trades`
 ```json
@@ -344,6 +348,8 @@ On inverse markets `qty.unit` is `"contract"`, `contract_size` is populated, and
 ```
 
 On linear/spot, `volume.usd = native * close` (close-as-VWAP-proxy, approximate). On inverse, `volume.usd = native * contract_size` (exact). The `usd_basis.method` field tells you which.
+
+A candle is stamped at the open of its bucket, while an open interest or long/short row is stamped at its reading. To pair a reading with the candle that ends at it, match the reading's `timestamp` to the candle's `timestamp` plus the interval, as the open interest join does; matching the two timestamps directly pairs each reading with the next candle.
 
 **Mark Price** &nbsp;•&nbsp; `GET /mark_price/{symbol}` &nbsp;•&nbsp; WS `mark_price` &nbsp;•&nbsp; *linear/inverse only*
 
@@ -457,7 +463,7 @@ Inverse (USD basis from fixed contract_size):
 }
 ```
 
-On linear markets, the route handler fetches matching candles after the OI rows arrive (sequential, not parallel) and joins them by timestamp to populate the row's `usd_basis` block (`method: "candle_close"`, plus the joined `close` and `close_ts`) and derive `usd = native * close`. If the candle fetch itself fails, the route logs an exception and returns the OI rows with `usd` left `null`. If it returns fewer than two candles, the join is skipped for the whole response with no log line, since the handler needs a second candle to derive the period offset. If the fetch succeeds but a given OI row has no matching candle, the row passes through silently with `usd` `null` and `usd_basis.close` / `close_ts` both `null`. The raw `native` is always populated.
+On linear markets, the route handler fetches matching candles after the OI rows arrive (sequential, not parallel) and joins them by timestamp to populate the row's `usd_basis` block (`method: "candle_close"`, plus the joined `close` and `close_ts`) and derive `usd = native * close`. If the candle read itself fails, the request fails with it. Where the exchange has no candle of that interval, the rows pass through with `usd` left `null`. If the read returns fewer than two candles, the join is skipped for the whole response with no log line, since the handler needs a second candle to derive the period offset. If the fetch succeeds but a given OI row has no matching candle, the row passes through silently with `usd` `null` and `usd_basis.close` / `close_ts` both `null`. The raw `native` is always populated.
 
 **Liquidation** &nbsp;•&nbsp; `GET /liquidations/{symbol}` (list) &nbsp;•&nbsp; WS `liquidations`
 ```json
@@ -524,48 +530,44 @@ The first two of Bybit `BTCUSDT`'s 35 tiers. A tier covers positions up to its `
 | Code | Status | Meaning |
 | :--- | :--- | :--- |
 | **200** | Success | Request succeeded and the payload was normalized. |
-| **400** | Bad Request | Invalid parameter, unsupported market type, or upstream rejection. |
+| **400** | Bad Request | Invalid parameter, unsupported market type, a symbol the exchange does not list, or upstream rejection. |
 | **404** | Not Found | Exchange not registered. |
 | **422** | Unprocessable Entity | Path or query parameter failed validation (e.g. an unrecognised `market_type` value). |
 | **500** | Internal Error | Unhandled server-side error. |
 | **501** | Not Implemented | Route not supported by the target adapter on this market type. |
-| **502** | Bad Upstream Response | Upstream answered but the body could not be normalized into the schema. |
-| **503** | Service Unavailable | Upstream rate-limit or ban window active, or the retry budget was exhausted. Carries a `Retry-After` header (seconds) when the adapter knows the wait. Retry later; the request itself was valid. |
+| **502** | Bad Upstream Response | Upstream answered but the body could not be normalized into the schema, or a record arrived without its own value. |
+| **503** | Service Unavailable | Upstream rate-limit or ban window active, an outage the exchange reported, or the retry budget was exhausted. Carries a `Retry-After` header (seconds) when the adapter knows the wait. Retry later; the request itself was valid. |
 
 <br>
 
-All error responses include a `detail` field describing what went wrong:
-
-```json
-{"detail": "Exchange 'foo' not found or not enabled"}
-```
-
-Every exception that reaches one of the global handlers, whether an adapter or the route layer raised it, carries an `error` label beside `detail`:
-
-| Status | `error` |
-| :--- | :--- |
-| **400** | `"Invalid Request"` |
-| **500** | `"Internal Server Error"` |
-| **501** | `"Not Implemented"` |
-| **502** | `"Bad Upstream Response"` |
-| **503** | `"Upstream Unavailable"` |
+Every error response carries an `error` label and a `detail` saying what went wrong:
 
 ```json
 {"error": "Invalid Request", "detail": "Interval '2m' is not valid for binance spot candles"}
 ```
 
-The three responses the route layer raises before an adapter is reached carry `detail` alone and no `error`: the 404 for an unregistered exchange, the 400 for a market type the adapter does not declare, and FastAPI's own 422 for a path or query parameter that fails validation. So a 400 arrives in either form; branch on `detail`, not on the presence of `error`.
+| Status | `error` |
+| :--- | :--- |
+| **400** | `"Invalid Request"`, or `"Bad Request"` from the route layer |
+| **404** | `"Not Found"` |
+| **422** | `"Unprocessable Entity"` |
+| **500** | `"Internal Server Error"` |
+| **501** | `"Not Implemented"` |
+| **502** | `"Bad Upstream Response"` |
+| **503** | `"Upstream Unavailable"` |
+
+The route layer answers before an adapter is reached in three cases, and labels each with its HTTP status phrase: the 404 for an unregistered exchange, the 400 for a market type the adapter does not declare, and FastAPI's own 422 for a path or query parameter that fails validation, whose `detail` is a list of the failed checks rather than a string. So a 400 arrives under either label; branch on the status, not on `error`.
 
 The router never masks upstream error detail. If the underlying exchange returns a specific message, it is passed through in `detail`.
 
 **Common causes by code:**
 
-* **400** reached an adapter and was rejected. Usually an unknown symbol for this exchange or market type (Kraken spot uses legacy codes like `XBTUSDT`, not `BTCUSDT`; check `GET /{exchange}/{market_type}/markets` for the canonical list), or a parameter out of range (`limit` or `depth` below 1, or an `interval` / `period` the venue does not declare; check `GET /{exchange}/capabilities`).
+* **400** reached an adapter and was rejected. Usually a symbol the exchange does not list on this market type, answered as `symbol 'X' is not listed on {exchange} {market_type}; see /{exchange}/{market_type}/markets` after the router has read the exchange's list again, at most once a minute; or a parameter out of range (`limit` or `depth` below 1, a `limit` beyond what 100 pages hold, or an `interval` the venue does not declare; check `GET /{exchange}/capabilities`).
 * **404** means the exchange name in the path is not registered: a typo, or an adapter that failed to load at startup (check the router's stdout for `Failed to load adapter`). On `margin_tiers`, a 404 whose body is `{"detail": "Not Found"}` comes from a service older than 3.2.0, which has no such route; the SDK raises `NotSupported` naming the service's version.
 * **500** means an adapter bug or an unexpected error escaped the request loop. A reproducible 500 is a bug report.
 * **501** means the route is not supported on this exchange and market, per the capability map: for example `funding_rate` or `mark_price` on spot, `liquidations` on KuCoin or Kraken, `long_short_ratio` on Bybit spot or any spot market, `margin_tiers` on any spot market and on Binance, Kraken and KuCoin.
-* **502** means the upstream answered but the body could not be normalized into the schema, usually a shape drift on the venue side. The `detail` carries the validation error.
-* **503** means the upstream is throttling or has banned the IP and the wait exceeds the adapter's fail-fast threshold (30s on Bybit and KuCoin, 60s on OKX), or the retry budget was exhausted on any adapter. The request was valid; retry after the `Retry-After` window. Binance and Kraken do not fail fast on an active cooldown; they sleep and retry, and surface `503` only once the retry budget is exhausted.
+* **502** means the upstream answered but the body could not be normalized into the schema, usually a shape drift on the venue side, or a record in it lacked its own value, such as a trade without a price. The `detail` carries the validation error or names the record.
+* **503** means the upstream is throttling or has banned the IP and the wait exceeds the adapter's fail-fast threshold (30s on Bybit and KuCoin, 60s on OKX), the exchange reported itself busy or down inside a `200` answer, as Bybit, OKX, KuCoin and Kraken do, or the retry budget was exhausted on any adapter. The request was valid; retry after the `Retry-After` window. Binance and Kraken do not fail fast on an active cooldown; they sleep and retry, and surface `503` only once the retry budget is exhausted.
 
 <br>
 <br>
@@ -574,7 +576,7 @@ The router never masks upstream error detail. If the underlying exchange returns
 
 The WebSocket interface covers everything REST does not. It carries real-time streams from the exchange pushed through without polling. The two interfaces share a port and a schema, so a `ticker` WebSocket message looks identical to a `GET /ticker/{symbol}` response body, and you can pick whichever fits the workload.
 
-Connect to `ws://localhost:8040/ws/{exchange}/{market_type}` and send a JSON subscription payload. The server starts streaming as soon as the upstream exchange connection is established. There is no acknowledgement message, just data.
+Connect to `ws://localhost:8040/ws/{exchange}/{market_type}` and send a JSON subscription payload. The router subscribes at the exchange and waits up to 30 seconds for its answer: an acceptance starts the stream, and a refusal or no answer closes the connection with the reason (see [Close Codes](#close-codes)). There is no acknowledgement message, just data.
 
 <br>
 
@@ -583,6 +585,7 @@ Connect to `ws://localhost:8040/ws/{exchange}/{market_type}` and send a JSON sub
 * **One subscription per connection.** A connection is bound to a single `(channel, symbol)` tuple. To subscribe to more than one, open additional connections. The internal `StreamManager` still shares a single upstream exchange connection between any clients that pick the same tuple, so this does not create redundant upstream connections.
 * **No unsubscribe message.** Close the connection to unsubscribe. The server tears down resources immediately.
 * **No client heartbeat required.** Exchange-specific ping/pong handling is abstracted inside the adapter. The server does not close idle connections on its own.
+* **A dead exchange connection is replaced.** The router pings every exchange; when one stops answering, the router reconnects and subscribes again while the client's connection stays open. A quiet market keeps its connection, since its exchange still answers the pings, and a stream with nothing to report simply sends nothing.
 * **Stream payloads match REST shapes.** A `ticker` subscription yields the same JSON object as `GET /ticker/{symbol}`, including the nested value objects and the `quote` field. See the response shapes above.
 * **Availability is not uniform.** Not every channel is available on every exchange or market type. Check `GET /{exchange}/capabilities` before subscribing.
 
@@ -606,9 +609,9 @@ Connect to `ws://localhost:8040/ws/{exchange}/{market_type}` and send a JSON sub
 
 | Code | Meaning |
 | :--- | :--- |
-| **1003** | Subscription payload rejected. Three causes: missing `channel` or `symbol`, channel name not in the supported set (`ticker`, `book_ticker`, `mark_price`, `agg_trades`, `trades`, `orderbook`, `liquidations`), or the channel exists but `ws: False` for this exchange/market in the capability map. |
-| **1008** | No subscription payload received within the 10s handshake window. |
-| **1011** | Upstream exchange connection lost. Reconnect and re-subscribe. |
+| **1003** | Subscription refused. Four causes: a `channel` or `symbol` missing or not text, channel name not in the supported set (`ticker`, `book_ticker`, `mark_price`, `agg_trades`, `trades`, `orderbook`, `liquidations`), the channel exists but `ws: False` for this exchange/market in the capability map, or the exchange refused the subscription, whose reason the close carries. |
+| **1008** | No subscription payload received within the 10s handshake window, or a symbol the exchange does not list, closed with the same reason the REST routes give. |
+| **1011** | Upstream exchange connection lost, the exchange gave no answer to the subscription within 30 seconds, or the exchange failed while the router read its listing to check the symbol. Reconnect and re-subscribe. |
 
 An exchange that is not registered, or a market type its adapter does not carry, is refused before the upgrade rather than with a close code: the server closes before accepting, which ASGI answers with an HTTP `403` in place of the WebSocket handshake. A client sees the handshake fail, never a `1008`.
 
@@ -647,7 +650,7 @@ Trade events stream immediately after the payload is sent.
 
 ## Parameter defaults
 
-Default values applied when the caller omits the query parameter. There is no router-side maximum: the cap, where one exists, is per-exchange and lives in the `/capabilities` map.
+Default values applied when the caller omits the query parameter. The router's one maximum is the 100-page walk of a paginated route; every other cap is per-exchange and lives in the `/capabilities` map.
 
 | Parameter | Min | Max | Default |
 | :--- | :--- | :--- | :--- |
@@ -660,11 +663,11 @@ Default values applied when the caller omits the query parameter. There is no ro
 | `limit` (liquidations) | 1 | * | 100 |
 | `limit` (long_short_ratio) | 1 | * | 30 |
 | `interval` (candles) | - | - | 1h |
-| `period` (open_interest) | - | - | 1h |
-| `period` (long_short_ratio) | - | - | 5m |
+| `interval` (open_interest) | - | - | 1h |
+| `interval` (long_short_ratio) | - | - | 5m |
 
-`*` Determined by the capabilities map for each exchange and route. Paginated routes (`candles`, `agg_trades`, `funding_rate`, `open_interest`, `liquidations`, `long_short_ratio`) have no router-side ceiling: the adapter walks back through history bounded by upstream retention. Non-paginated routes (`trades`, `orderbook`) clamp to the per-exchange `max_limit` (`max_depth` for orderbook) declared in capabilities.
+`*` Determined by the capabilities map for each exchange and route. Paginated routes (`candles`, `agg_trades`, `funding_rate`, `open_interest`, `liquidations`, `long_short_ratio`) walk back through history bounded by upstream retention and by the 100-page walk in [Pagination Semantics](#pagination-semantics). Non-paginated routes (`trades`, `orderbook`) clamp to the per-exchange `max_limit` (`max_depth` for orderbook) declared in capabilities.
 
-`interval` and `period` carry no numeric range. Each is checked against the route's `intervals` list in the capability map when the adapter declares one, and an undeclared value returns `400` before the adapter is called.
+`interval` carries no numeric range. It is checked against the route's `intervals` list in the capability map when the adapter declares one, and an undeclared value returns `400` before the adapter is called.
 
 Per-venue semantic quirks (funding cycle `valid_until_ts` meaning, ticker timestamp lag on Binance, trade-id formats, 1000-prefix tokens, long/short breakdown availability) live in [Exchange Notes](Exchange_Notes.md).
