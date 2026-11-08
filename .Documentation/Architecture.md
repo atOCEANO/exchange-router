@@ -101,7 +101,7 @@ The route resolves the exchange name to its registered adapter, the adapter make
 
 WebSocket streams do not follow the same path as REST. The `StreamManager` in `exchange_router/service/stream_manager.py` sits between clients and the adapter's streaming methods.
 
-When a client subscribes to a `(channel, symbol)` tuple on an exchange, the manager builds a key of the form `{exchange}:{market_type}:{channel}:{symbol}` and checks whether an upstream task already exists for it.
+When a client subscribes to a `(channel, symbol)` tuple on an exchange, the symbol is first checked against the exchange's listing, and one it does not list closes the connection with `1008`. The manager then builds a key of the form `{exchange}:{market_type}:{channel}:{symbol}` and checks whether an upstream task already exists for it.
 
 <div align="center">
   <img src="imgs/204647.png" alt="WebSocket fan-out lifecycle" width="90%" />
@@ -110,10 +110,10 @@ When a client subscribes to a `(channel, symbol)` tuple on an exchange, the mana
 
 <br>
 
-1. **First subscriber.** The manager starts an async task that opens a single upstream WebSocket via `adapter.stream_*(market_type, symbol)`. Every message produced by the adapter is fanned out to all local clients registered under the same key.
+1. **First subscriber.** The manager starts an async task that opens a single upstream WebSocket via `adapter.stream_*(market_type, symbol)`. The adapter's hub subscribes at the exchange and waits up to 30 seconds for its answer; a refusal closes every client on the key with `1003` and the exchange's reason, and no answer closes them with `1011`. Every message produced by the adapter is fanned out to all local clients registered under the same key.
 2. **Additional subscribers.** New clients attach to the existing task. No new upstream connection is opened, which keeps the router well under per-IP connection limits on exchanges that enforce them.
 3. **Last subscriber leaves.** The manager cancels the upstream task and releases its resources. The next subscriber to the same tuple starts a fresh connection.
-4. **Upstream failure.** If the adapter's stream terminates (network drop, exchange-side reset), the manager closes every attached client with code `1011` and clears the entry. Clients are expected to reconnect and re-subscribe.
+4. **Upstream failure.** If the adapter's stream terminates (network drop, exchange-side reset), the manager closes every attached client with code `1011` and clears the entry. Clients are expected to reconnect and re-subscribe. A hub whose exchange stops answering its pings for two keepalive intervals reconnects on its own and subscribes again, and the clients stay attached.
 
 This is also why re-subscribing on the same connection is not supported. Each connection is bound to one stream task, and the router has no mechanism for moving a client between tasks.
 
@@ -140,10 +140,12 @@ Each adapter holds a shared `_backoff_until` timestamp guarded by an `asyncio.Lo
 
 The router normalizes failures into a small set of HTTP responses. It helps to separate what adapters raise from what the route layer emits, because adapter authors only need to worry about the first list.
 
-Adapters raise four exception types:
+Adapters raise six exception types:
 
-* **`ValueError`** for bad input or upstream validation failures (unknown symbol, out-of-range limit, an interval or period not declared in the capability map, adapter-side parameter rejections). A global exception handler in `main.py` converts these into `400 Bad Request`, preserving the message in `detail`. The route layer itself raises `ValueError` for undeclared `interval` / `period` values before the adapter is called, validated against the capability map.
-* **`UpstreamUnavailableError`** (defined in `exchange_router/exchanges/base.py`, a subclass of `AdapterError`, not `ValueError`) when the upstream is throttling or has banned the IP: active backoff windows past the adapter's fail-fast threshold (30s on Bybit and KuCoin, 60s on OKX), Bybit 403 bans, an upstream 5xx that survives the retry budget, and any adapter's exhausted retry budget (message `"Max retries exceeded for {url}"`). The handler in `main.py` converts these into `503 Service Unavailable` with a `Retry-After` header when the adapter knows the wait.
+* **`ValueError`** for bad input or upstream validation failures (a symbol the exchange does not list, out-of-range limit, a `limit` beyond the page cap, an interval not declared in the capability map, adapter-side parameter rejections). A global exception handler in `main.py` converts these into `400 Bad Request`, preserving the message in `detail`. The route layer itself raises `ValueError` for undeclared `interval` values before the adapter is called, validated against the capability map, and for a symbol the exchange does not list, through `listed_symbol`.
+* **`UpstreamUnavailableError`** (defined in `exchange_router/exchanges/base.py`, a subclass of `AdapterError`, not `ValueError`) when the upstream is throttling or has banned the IP: active backoff windows past the adapter's fail-fast threshold (30s on Bybit and KuCoin, 60s on OKX), Bybit 403 bans, an upstream 5xx that survives the retry budget, an outage the exchange reports inside a `200` answer, and any adapter's exhausted retry budget (message `"Max retries exceeded for {url}"`). The handler in `main.py` converts these into `503 Service Unavailable` with a `Retry-After` header when the adapter knows the wait.
+* **`UpstreamDataError`** (also in `base.py`) when a record arrives without its own value, a trade without a price or a funding row without a rate, which the router will not fill in. Its handler returns `502 Bad Upstream Response`.
+* **`SubscriptionRefused`** (also in `base.py`) when an exchange refuses a stream subscription. The stream manager closes the client with `1003` and the exchange's reason; local mode raises it as `NotSupported`.
 * **`NotImplementedError`** when the adapter does not implement a method for a given market type. The base class raises this by default, and the route layer catches it and returns `501 Not Implemented`.
 * **`pydantic.ValidationError`** when an upstream response cannot be normalized into the schema. A `ValidationError` is not a `ValueError` in pydantic v2, and its own handler in `main.py` returns `502 Bad Upstream Response`. Any other uncaught exception falls through to a generic handler that returns `500 Internal Server Error`.
 
@@ -157,7 +159,7 @@ One more condition does not correspond to an exception type at all:
 
 * **Upstream rate limiting** (429 or 418, or proactive detection via response headers) causes the adapter to wait for the declared backoff window before retrying. The client request is delayed, not rejected. When the wait exceeds the adapter's fail-fast threshold (30s on Bybit and KuCoin, 60s on OKX), the adapter raises `UpstreamUnavailableError` instead, which falls under the second bullet above. Binance and Kraken do not implement a single fail-fast cutoff; they sleep and retry until the upstream clears or the retry budget exhausts, then raise `UpstreamUnavailableError` (Kraken retries 8 times on Spot REST and 5 on Futures, and its waits are exponential to a 60s ceiling with 0.5x to 1.5x jitter, so a Spot budget runs out after roughly 1 to 3 minutes).
 
-The `detail` field in error responses always carries the underlying exception message, whether it came from the adapter or the upstream exchange. Nothing is rewritten or swallowed.
+The `detail` field in error responses always carries the underlying exception message, whether it came from the adapter or the upstream exchange, and every error body names its kind in `error`. Nothing is rewritten or swallowed.
 
 <br>
 <br>
@@ -167,7 +169,7 @@ The `detail` field in error responses always carries the underlying exception me
 The router carries two version numbers, defined in [exchange_router/version.py](../exchange_router/version.py). Only one of them is a compatibility claim.
 
 * **`VERSION`** is the standard semver string (`MAJOR.MINOR.PATCH`). It bumps for any user-visible change: a new route, a new field, a behavioural fix, a capability adjustment, a dependency upgrade. Returned at `GET /version` and `GET /`.
-* **`SCHEMA_VERSION`** is a small integer. It bumps only when the wire format breaks consumer code: renaming a field, flattening a nested object into top-level fields, removing a discriminator value, changing the type of a field. Adding an optional field does not bump. Returned at `GET /` and stamped on every auditor `results.json` and on every DataFrame's `.attrs`; the auditor compares served-against-pinned and fails the suite on drift.
+* **`SCHEMA_VERSION`** is a small integer. It bumps only when the wire format breaks consumer code: renaming a field, flattening a nested object into top-level fields, removing a discriminator value, changing the type of a field. Adding an optional field does not bump. Returned at `GET /`, in a `Schema-Version` header on every REST answer, and stamped on every auditor `results.json` and on every DataFrame's `.attrs`; the auditor compares served-against-pinned and fails the suite on drift.
 
 The two are decoupled on purpose. A wire-compatible bug fix bumps `VERSION` and leaves `SCHEMA_VERSION` untouched, so clients pinned to a schema number do not need to change. A genuine wire break bumps both.
 
