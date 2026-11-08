@@ -729,13 +729,13 @@ class KucoinAdapter(BaseExchange):
             data = await self._make_request("GET", self.spot_rest_url, endpoint, {"symbol": api_symbol})
             if not data:
                 raise ValueError(f"Orderbook not found for {api_symbol}")
-            ts = int(data.get("time") or 0)
+            ts = int(data.get("time") or time.time() * 1000)
         else:
             endpoint = f"/api/v1/level2/depth{discrete_depth_bucket}"
             data = await self._make_request("GET", self.fut_rest_url, endpoint, {"symbol": api_symbol})
             if not data:
                 raise ValueError(f"Orderbook not found for {api_symbol}")
-            ts = self._ns_to_ms(data.get("ts") or 0)
+            ts = self._ns_to_ms(data.get("ts") or int(time.time() * 1000))
 
         info       = await self._info_for(market_type, model_sym)
         quote      = info.quote_asset if info else ""
