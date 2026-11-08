@@ -9,6 +9,8 @@ USD_FAMILY = {"USD", "USDT", "USDC", "USDD", "TUSD", "FDUSD", "BUSD", "DAI", "PY
 
 TEXT_COLUMNS = {"side", "id", "agg_id", "first_trade_id", "last_trade_id", "exchange", "market_type", "symbol", "quote", "unit"}
 
+INT_COLUMNS = {"cycle_ms"}
+
 COLUMNS: Dict[str, List[str]] = {
     "candles":          ["open", "high", "low", "close", "volume", "volume_usd"],
     "trades":           ["price", "qty", "qty_usd", "side", "id"],
@@ -18,6 +20,16 @@ COLUMNS: Dict[str, List[str]] = {
     "liquidations":     ["price", "qty", "qty_usd", "side"],
     "long_short_ratio": ["ratio", "long_account", "short_account"],
     "margin_tiers":     ["up_to", "max_leverage", "maintenance_margin_rate", "initial_margin_rate", "maintenance_deduction"],
+}
+
+ATTRS: Dict[str, List[str]] = {
+    "candles":          ["quote", "interval", "volume_unit", "contract_size", "usd_basis"],
+    "trades":           ["quote", "qty_unit", "contract_size"],
+    "agg_trades":       ["quote", "qty_unit", "contract_size"],
+    "funding_rate":     ["quote", "funding_kind"],
+    "open_interest":    ["quote", "interval", "oi_unit", "open_interest_unit", "contract_size", "usd_basis"],
+    "liquidations":     ["quote", "qty_unit", "contract_size"],
+    "long_short_ratio": ["interval", "account_scope"],
 }
 
 
@@ -72,8 +84,10 @@ def _finalize(df: pd.DataFrame, attrs: Dict[str, Any], columns: List[str], warni
 def _empty(ctx: Dict[str, Any], route: str) -> Tuple[pd.DataFrame, List[str]]:
     message = f"0 rows returned for {ctx['exchange']}/{ctx['market_type']}/{ctx['symbol']} {route}"
 
-    df    = pd.DataFrame(columns=COLUMNS[route])
+    index = pd.DatetimeIndex([], tz="UTC", name="datetime")
+    df    = pd.DataFrame({column: pd.Series(index=index, dtype=object if column in TEXT_COLUMNS else "int64" if column in INT_COLUMNS else "float64") for column in COLUMNS[route]}, index=index)
     attrs = _base_attrs(ctx)
+    attrs.update(dict.fromkeys(ATTRS[route]))
     attrs["warnings"] = [message]
     df.attrs.update(attrs)
 
@@ -187,11 +201,12 @@ def _open_interest(rows: List[Dict], ctx: Dict[str, Any]) -> Tuple[pd.DataFrame,
     df = df.rename(columns={"open_interest_native": "open_interest"})
 
     attrs = _base_attrs(ctx)
-    attrs["quote"]         = _const(df, "quote")
-    attrs["interval"]      = _const(df, "interval")
-    attrs["oi_unit"]       = _const(df, "open_interest_unit")
-    attrs["contract_size"] = _const(df, "open_interest_contract_size")
-    attrs["usd_basis"]     = _const(df, "open_interest_usd_basis_method")
+    attrs["quote"]              = _const(df, "quote")
+    attrs["interval"]           = _const(df, "interval")
+    attrs["oi_unit"]            = _const(df, "open_interest_unit")
+    attrs["open_interest_unit"] = attrs["oi_unit"]
+    attrs["contract_size"]      = _const(df, "open_interest_contract_size")
+    attrs["usd_basis"]          = _const(df, "open_interest_usd_basis_method")
 
     warnings: List[str] = []
     if "open_interest_usd" in df.columns:
