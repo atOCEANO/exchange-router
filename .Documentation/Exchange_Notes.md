@@ -42,7 +42,7 @@ All adapters normalize to bare trading pairs (`BTCUSDT`, `ETHUSDT`) with no exch
 
 Normalization rewrites a symbol's format, not its asset. Kraken's `XBT` stays `XBT` (see [Legacy asset codes stay literal](#legacy-asset-codes-stay-literal)), so one coin can carry a different symbol on each exchange, and code that reads several exchanges keeps its own map between them.
 
-`GET /{exchange}/{market_type}/markets` returns a dict `{exchange, market_type, count, markets}` where `markets` is an array of **lite** entries carrying `symbol`, `base_asset`, `quote_asset`, `qty_unit`, `contract_size`, and `funding`. To get the full specs for one symbol (including `native_symbol`, the raw symbol as it appears on the exchange's own API), call `GET /{exchange}/{market_type}/markets/{symbol}`:
+`GET /{exchange}/{market_type}/markets` returns a dict `{exchange, market_type, count, markets}` where `markets` is an array of **lite** entries carrying `symbol`, `status`, `base`, `quote`, the `qty` unit and contract size, and `funding`. To get the full specs for one symbol (including `native_symbol`, the raw symbol as it appears on the exchange's own API), call `GET /{exchange}/{market_type}/markets/{symbol}`:
 
 ```json
 {
@@ -54,13 +54,13 @@ Normalization rewrites a symbol's format, not its asset. Kraken's `XBT` stays `X
 
 Examples of the mapping: `BTCUSD` (model) <-> `BTCUSD_PERP` (upstream), `XBTUSD` <-> `PF_XBTUSD`, `BTCUSD` <-> `BTC-USD-SWAP`. Use `native_symbol` when you need to cross-reference a normalized symbol back to the exchange's documentation or raw API. Per-venue rules for what gets stripped or rewritten live in the venue sections below.
 
-Every data route serves a market in any state its exchange lists, halted, pre-launch or cancel-only included, and answers it with its real `quote`. The market list and `/markets/{symbol}` keep to the markets that trade. A symbol the exchange does not list at all is refused with one 400 that names the market list; the router reads the exchange's list again first, at most once a minute, so a market listed since the last read is found. A stream for an unlisted symbol closes with 1008 and the same reason.
+Every data route serves a market in any state its exchange lists, halted, pre-launch or cancel-only included, and answers it with its real `quote`. `/markets/{symbol}` answers it too, with the state in `status`; the market list holds the markets that trade, and `?status=` lists the others. A symbol the exchange does not list at all is refused with one 400 titled `Unknown Symbol` that names the market list; the router reads the exchange's list again first, at most once a minute, so a market listed since the last read is found. A stream for an unlisted symbol sends the same body and closes with 1003.
 
 <br>
 
 ### Empty book sides
 
-A side with no orders is answered as price `0.0` with size `0.0` on every exchange, never refused and never dropped from a stream; Binance and OKX send it that way themselves. Read a `0.0` price on a book ticker as an empty side, not as a quote.
+A side with no orders is answered with its price and its size `null` on every exchange, never refused and never dropped from a stream. Binance and OKX send such a side as `0.0` themselves, and the router reads that `0.0` as the empty side it is.
 
 <br>
 
@@ -68,7 +68,7 @@ A side with no orders is answered as price `0.0` with size `0.0` on every exchan
 
 Binance, Bybit, OKX and Kraken send a zero-volume bar for every interval up to now on a market that has stopped trading. KuCoin and Hyperliquid send no bar after a market's last trade, and KuCoin, spot and futures, leaves gaps between trades too, so a window of `limit` intervals can hold fewer bars or none. KuCoin futures already pages back until it has `limit` bars. When an answer comes back short on KuCoin spot or Hyperliquid, the router asks again over the widest window they serve and keeps the newest `limit` bars, so `limit` counts bars on every exchange and a quiet market answers with its newest bars, however old. That costs a second request whenever an answer comes back short, including where the exchange simply holds fewer bars than `limit`. A bar that was never sent is not filled in. A paged read stops only where the exchange holds nothing older, and the short-result warning says so.
 
-For a market with no trade in 24 hours the exchanges disagree, and the router keeps each one's answer: OKX and Bybit repeat the last price as the open, high and low; KuCoin sends `0` for the high and low; Kraken and Binance send `0` throughout. A ticker with no last trade at all reads `price: 0.0`.
+For a market with no trade in 24 hours the exchanges disagree: OKX and Bybit repeat the last price as the open, high and low; KuCoin sends `0` for the high and low; Kraken and Binance send `0` throughout. The router answers them all one way: a ticker whose 24-hour volume is zero has its open, high, low and change `null`, and a ticker with no last trade at all has its `price` `null`.
 
 <br>
 
@@ -80,16 +80,16 @@ For `linear` and `inverse` market types, both `/markets` and `/markets/{symbol}`
 
 ### Tick and step
 
-`SymbolInfo.tick_size` and `qty_step` are the grid an order has to sit on: the price step in `quote_asset` and the quantity step in `qty_unit`, as each exchange states them. `price_precision` and `quantity_precision` are counts of decimal places and say less: a step of 10 or more has a `quantity_precision` of `0`, and on Binance futures `price_precision` is Binance's own `pricePrecision`, which can be finer than the tick (`BTCUSDT` has `2` against a tick of `0.1`). Check an order against the step, not the precision.
+`SymbolInfo.price` and `SymbolInfo.qty` are the grid an order has to sit on, as each exchange states it: `price.tick` in `quote`, and `qty.step` in `qty.unit`. `decimals` counts the decimal places the step implies and says less: a step of 10 or more has `decimals` `0`. Check an order against the step, not the decimals.
 
-| Exchange | `tick_size` | `qty_step` |
+| Exchange | `price.tick` | `qty.step` |
 | :--- | :--- | :--- |
 | Binance | `PRICE_FILTER.tickSize` | `LOT_SIZE.stepSize`, in contracts on inverse |
 | Bybit | `priceFilter.tickSize` | `lotSizeFilter.qtyStep` on linear, `lotSizeFilter.qtyStep` in contracts on inverse, `lotSizeFilter.basePrecision` on spot |
 | OKX | `tickSz` | `lotSz` times `ctVal` on linear, `lotSz` in contracts on inverse, `lotSz` on spot |
 | Kraken | `tick_size` on spot, `tickSize` on futures | ten to the minus `lot_decimals` on spot, ten to the minus `contractValueTradePrecision` on futures |
 | KuCoin | `priceIncrement` on spot, `tickSize` on futures | `baseIncrement` on spot, `lotSize` times `multiplier` on linear, `lotSize` in contracts on inverse |
-| Hyperliquid | `null`, see [No public liquidations, long/short ratio, or per-symbol order limits](#no-public-liquidations-longshort-ratio-or-per-symbol-order-limits) | ten to the minus `szDecimals` |
+| Hyperliquid | none: `price.kind` is `significant_figures`, five figures with at most 6 minus `szDecimals` decimals on perpetuals and 8 minus `szDecimals` on spot | ten to the minus `szDecimals` |
 
 A step built from two exchange numbers is their decimal product, converted to a float once, so it is the float nearest the number the exchange means: `0.1` times `0.1` gives `0.01`, where a float product gives `0.010000000000000002`. Both fields are still floats, so test a price against the grid by rounding the quotient, not by comparing floats.
 
@@ -123,15 +123,15 @@ The router never invents data. When an upstream omits a field, the router surfac
 * Queries past upstream retention return an empty list.
 * An exchange outage reported inside a 200 body, as Bybit, OKX, KuCoin and Kraken do, is retried and then answered 503, like an HTTP outage. A request that pages back fails as a whole when any page fails; it never returns the pages it got as if they were all.
 
-`SymbolInfo` follows this rule with a split by type. The string fields, `base_asset` and `quote_asset`, come back as `""` when the adapter cannot derive them, which is why the Kraken futures note below calls out symbols whose suffix is not in the quote-currency list. The order-limit numbers, `min_qty`, `max_qty` and `min_notional`, are declared `Optional[float]` and come back `null`, never `0`, when the exchange does not publish the limit; each exchange's section below documents which of them tend to be missing. On `SymbolInfo` a `0` is therefore always a value the upstream sent, not a stand-in for absence. The grid fields, `tick_size` and `qty_step`, come back `null` when the exchange states no step, as Hyperliquid states no tick. `tick_size` is never worked out from `price_precision`; where an exchange states its quantity step only as a count of decimals, as Kraken and Hyperliquid do, `qty_step` is ten to the minus that count.
+`SymbolInfo` follows this rule with a split by type. The string fields, `base` and `quote`, come back as `""` when the adapter cannot derive them, which is why the Kraken futures note below calls out symbols whose suffix is not in the quote-currency list. The order limits, `qty.min`, `qty.max` and `notional.min`, come back `null`, never `0`, when the exchange does not publish the limit; each exchange's section below documents which of them tend to be missing. On `SymbolInfo` a `0` is therefore always a value the upstream sent, not a stand-in for absence. `qty.step` comes back `null` when the exchange states no step, and a price kept to significant figures has no `price.tick` at all. The tick is never worked out from a count of decimals; where an exchange states its quantity step only as a count of decimals, as Kraken and Hyperliquid do, `qty.step` is ten to the minus that count.
 
-The same rule applies to derived values such as `usd` on `open_interest`: on linear markets it is joined from a same-period candle's close, and where the exchange has no candle of that period, or none at that time, `usd` comes back `null` with `native` still populated. A candle read that fails fails the open interest request with it. The router does not substitute a stale close, a ticker price, or a back-of-envelope estimate.
+The same rule applies to derived values such as the `notional` on `open_interest`: on linear markets it is priced at a same-period candle's close, and where the exchange has no candle of that period, or none at that time, `notional` comes back `null` with `native` still populated. A candle read that fails fails the open interest request with it. The router does not substitute a stale close, a ticker price, or a back-of-envelope estimate.
 
 <br>
 
 ### Open interest units differ by exchange and market
 
-`OpenInterest.open_interest` is the upstream-native count of open positions, carried alongside the `usd` and `usd_basis` slots described below. Several unit conventions exist across the matrix:
+`OpenInterest.open_interest` is the upstream-native count of open positions, carried alongside the `notional` and `notional_basis` slots described below. Several unit conventions exist across the matrix:
 
 | Exchange / market | `unit` | `native` is in | example BTC perp |
 | :--- | :--- | :--- | :--- |
@@ -146,13 +146,13 @@ The same rule applies to derived values such as `usd` on `open_interest`: on lin
 | OKX LINEAR      | `base`     | base coin (adapter reads upstream's `oiCcy` column directly)               | `34,223.4` BTC |
 | OKX INVERSE     | `contract` | contracts (`contract_size` = `ctVal`, $100 for BTC-USD-SWAP)               | `5,847,300` contracts = $584.7M nominal |
 
-Each open-interest row carries a `usd` nominal in its `open_interest` value object: inverse (contract-unit) rows multiply contracts by `contract_size`, and linear (base-unit) rows join to a same-period candle close, recorded in `usd_basis`. When no matching candle is found the router leaves `usd` null rather than guessing it.
+Each open-interest row carries a `notional` in its `open_interest` value object: inverse (contract-unit) rows multiply contracts by `contract_size`, and linear (base-unit) rows join to a same-period candle close, which `notional_basis` names with the candle's stamp. When no matching candle is found the router leaves `notional` null rather than guessing it. Hyperliquid's live reading is priced at the mark it arrives with (see [Open interest is a current snapshot, not a history](#open-interest-is-a-current-snapshot-not-a-history)).
 
 <br>
 
 ### Pagination is always backward-walking
 
-Every endpoint that takes `end` (or its older name `start`) follows the [backward-walking pagination contract](HTTP_Reference.md#pagination-semantics); per-venue upstream mechanics differ but the user-visible behavior is identical. Where the upstream walks forward only, the adapter computes a synthetic forward start, fetches a window, and truncates. Backward-anchored requests on forward-walking upstreams are slightly slower than on natively-backward ones.
+Every endpoint that takes `end` follows the [backward-walking pagination contract](HTTP_Reference.md#pagination-semantics); per-venue upstream mechanics differ but the user-visible behavior is identical. Where the upstream walks forward only, the adapter computes a synthetic forward start, fetches a window, and truncates. Backward-anchored requests on forward-walking upstreams are slightly slower than on natively-backward ones.
 
 <br>
 
@@ -170,15 +170,17 @@ Trade `side` is always normalized to `"buy"` or `"sell"` (taker side). A liquida
 
 <br>
 
-### Ticker `timestamp` semantics
+### Snapshot clocks
 
-Each adapter exposes the most upstream-faithful timestamp for `Ticker.timestamp`:
+Each adapter stamps a snapshot with the most upstream-faithful time it has, and `time_source` says whose clock that is: `venue` for the exchange's own time, `router` for the router's clock at the read, where the exchange sends no time.
 
-- **Bybit, OKX, Kraken futures and KuCoin spot**: the time the exchange put on its response (within ~1s of wall clock).
-- **Hyperliquid, Kraken spot and KuCoin futures**: the time the router read the ticker, since none of them sends a time with it.
-- **Binance**: the `closeTime` field from `/ticker/24hr`. Empirically lags wall clock by 5-10 seconds because Binance's 24-hour rolling statistics pipeline aggregates with non-zero delay. The lag is a property of Binance's stats pipeline, not router behavior.
+- **Ticker.** Bybit, OKX, Kraken futures and KuCoin spot stamp it with the time on their response (within ~1s of wall clock). Hyperliquid, Kraken spot and KuCoin futures send no time with it, so it carries the router's clock. Binance stamps it with the `closeTime` field from `/ticker/24hr`, which empirically lags wall clock by 5-10 seconds because Binance's 24-hour rolling statistics pipeline aggregates with non-zero delay; the price data itself is real-time.
+- **Book ticker and order book.** The router's clock on Binance spot and Kraken spot, whose answers carry no time; the venue's elsewhere.
+- **Mark price.** The router's clock on Hyperliquid; the venue's elsewhere.
+- **Open interest.** Every history row carries the venue's time; Hyperliquid's live reading carries the router's.
+- **Symbol info.** Always the router's clock: `timestamp` is when the router read the exchange's record.
 
-Consumers using `ticker.timestamp` to gauge data freshness across exchanges should expect Binance to look 5-10s "older" than the others. The price data itself is real-time; only the timestamp reflects stats-aggregation delay.
+Any snapshot whose exchange leaves the time out of one answer carries the router's clock for that answer. Consumers gauging freshness across exchanges should skip a `router` stamp, which says nothing of the exchange, and expect Binance's tickers to look 5-10s "older" than the others.
 
 <br>
 
@@ -199,16 +201,18 @@ Consumers parsing `id` as integer will fail on Bybit and Kraken futures. Always 
 
 <br>
 
-### Funding cycle and `valid_until_ts`
+### Funding cycle and `valid_until`
 
-For the `kind` discriminator semantics see [Interpretation Fields](HTTP_Reference.md#interpretation-fields) in the HTTP Reference. `FundingCurrent.valid_until_ts` is the timestamp after which the current `per_cycle` rate is no longer the "current" rate, but the precise meaning differs per upstream:
+For the `kind` discriminator semantics see [Interpretation Fields](HTTP_Reference.md#interpretation-fields) in the HTTP Reference. `MarkPrice.funding.valid_until` is when the current `per_cycle` rate stops being the current rate, and its `kind` says which of two things that time is:
 
-| Exchange | typical `cycle_ms` | Meaning of `valid_until_ts` |
-| :--- | :--- | :--- |
-| Discrete-funding venues | 28,800,000 (8h) | Discrete settlement cycle. Most pairs are 8h, but the value varies per symbol (some pairs settle every 4h or every hour); each adapter caches the per-symbol interval from the upstream's instruments endpoint. On every discrete-funding adapter `valid_until_ts` is the next settlement, the one the current `per_cycle` rate is charged at, less than one cycle ahead. Before 3.3.0 OKX's was one cycle later. |
-| Continuous-funding venues | 3,600,000 (1h) | End of the current hourly accrual window. The rate accrues across the window rather than settling at a boundary. Currently used by Kraken futures. |
+| Exchange | typical `cycle_ms` | `valid_until.kind` | What `valid_until.ts` is |
+| :--- | :--- | :--- | :--- |
+| Binance, Bybit, OKX, KuCoin | 28,800,000 (8h) | `settlement` | The next settlement, the one the current `per_cycle` rate is charged at, less than one cycle ahead. Most pairs are 8h, but the value varies per symbol (some pairs settle every 4h or every hour); each adapter caches the per-symbol interval from the upstream's instruments endpoint. Before 3.3.0 OKX's was one cycle later. |
+| Hyperliquid, primary dex | 3,600,000 (1h) | `settlement` | The next top-of-hour settlement. |
+| Hyperliquid, builder dexes | 3,600,000 (1h) | `estimate` | One cycle after the reading, since these markets settle hourly but not on the clock hour. |
+| Kraken futures | 3,600,000 (1h) | `estimate` | One cycle after the reading. The rate accrues across each hour rather than settling at a boundary, so no charge happens there. |
 
-A consumer that does `next_settlement = now + cycle_ms` will be wrong on Kraken. Always use `valid_until_ts` as the authoritative deadline. To compute a uniform per-hour rate across all exchanges, divide `per_cycle` by `cycle_ms / 3_600_000`.
+A consumer that does `next_settlement = now + cycle_ms` will be wrong on Kraken. Use `valid_until.ts` as the deadline where its kind is `settlement`, and as a horizon where it is `estimate`. To compute a uniform per-hour rate across all exchanges, divide `per_cycle` by `cycle_ms / 3_600_000`.
 
 An exchange can change a symbol's cycle, and each funding history row carries the cycle it settled under, read from the gaps to its neighbours, so a history that crosses a change from 4h to 1h shows 4h before it and 1h after. A single longer gap is a pause and keeps its neighbours' cycle. When the router cannot read a symbol's current cycle from the exchange, the cycle stays unknown and is read again on the next request; it is never assumed to be 8h.
 
@@ -249,7 +253,13 @@ Forced liquidation history is not available via public REST. The endpoints (`/fa
 
 ### COIN-M `qty` and `volume` are in contracts
 
-For COIN-M (inverse) perpetuals, `qty.native` and `volume.native` are reported in contracts, not the base asset. For `BTCUSD_PERP`, 1 contract represents 100 USD of notional. The native count stays in contracts; the same record carries `contract_size` and `usd = native * contract_size` per the standard inverse layout, and the per-instrument multiplier is on `/markets/{symbol}` as `contract_size`. Divide `usd` by `price` if you need a base-asset volume. USD-M (linear) and SPOT report `qty` and `volume` in the base asset directly.
+For COIN-M (inverse) perpetuals, `qty.native` and `volume.native` are reported in contracts, not the base asset. For `BTCUSD_PERP`, 1 contract represents 100 USD of notional. The native count stays in contracts; the same record carries `contract_size` and `notional = native * contract_size` per the standard inverse layout, and the per-instrument multiplier is on `/markets/{symbol}` as `qty.contract_size`. Divide `notional` by `price` if you need a base-asset volume. USD-M (linear) and SPOT report `qty` and `volume` in the base asset directly.
+
+<br>
+
+### A contract being settled has no ticker
+
+Binance keeps a delisted perpetual in its instrument list while it settles, under the state `SETTLING`, which the router reads as `halted`, and answers its 24-hour ticker with an empty object. The router answers that ticker with every price and `volume_24h` `null`, stamped with its own clock, since nothing trades there; its book, mark price and history are served as Binance sends them. An empty ticker for a market that trades is still answered `502`.
 
 <br>
 <br>
@@ -268,7 +278,7 @@ Bybit returns HTTP 403 (not 429) on persistent rate-limit violations. These are 
 
 ### Inverse `volume24h` and `turnover24h` semantics
 
-For inverse perpetuals (`BTCUSD`, `ETHUSD`), Bybit reports `volume24h` in **contract count** (each contract = 1 USD on Bybit inverse) and `turnover24h` in the **base coin** (BTC). The adapter lands `Ticker.volume_24h.native` from `volume24h` directly, sets `volume_24h.unit` to `"contract"` on inverse, sets `volume_24h.contract_size` to `1.0`, and resolves `volume_24h.usd` via `native * contract_size` (so the USD figure is exact, not a derivation from `turnover24h`). Spot and linear follow the conventional layout (`volume24h` = base, `volume_24h.unit = "base"`, USD from `close * native`). The `usd_basis.method` field tells you which conversion ran.
+For inverse perpetuals (`BTCUSD`, `ETHUSD`), Bybit reports `volume24h` in **contract count** (each contract = 1 USD on Bybit inverse) and `turnover24h` in the **base coin** (BTC). The adapter lands `Ticker.volume_24h.native` from `volume24h` directly, sets `volume_24h.unit` to `"contract"` on inverse, sets `volume_24h.contract_size` to `1.0`, and resolves `volume_24h.notional` via `native * contract_size` (so the USD figure is exact, not a derivation from `turnover24h`). Spot and linear follow the conventional layout (`volume24h` = base, `volume_24h.unit = "base"`, the notional at the ticker's own price). The `notional_basis.method` field tells you which conversion ran.
 
 <br>
 
@@ -278,9 +288,9 @@ The Bybit account-ratio endpoint returns `buyRatio` and `sellRatio` directly. Th
 
 <br>
 
-### Long/short ratio `start` handling
+### Long/short ratio `end` handling
 
-The adapter passes `endTime` to `/v5/market/account-ratio` like any other paginated route, but whether the upstream honours that anchor is not consistently documented by Bybit. Compare returned timestamps against the requested anchor before assuming the response is actually historical; if Bybit returns the most recent window regardless of `start`, the rows still parse cleanly and the capability map's `paginated: True` reflects the adapter's intent rather than a guaranteed upstream behaviour.
+The adapter passes `endTime` to `/v5/market/account-ratio` like any other paginated route, but whether the upstream honours that anchor is not consistently documented by Bybit. Compare returned timestamps against the requested anchor before assuming the response is actually historical; if Bybit returns the most recent window regardless of `end`, the rows still parse cleanly and the capability map's `paginated: True` reflects the adapter's intent rather than a guaranteed upstream behaviour.
 
 <br>
 
@@ -299,9 +309,9 @@ Bybit's liquidation stream names the side of the position that was closed, so a 
 
 The router exposes two Hyperliquid markets: `linear` (USDC-margined perpetuals) and `spot`. There is no `inverse` market, so `supported_market_types` is `["spot", "linear"]` and an `inverse` request returns an error.
 
-**Linear.** Perpetuals are quoted against USDC: the normalized symbol is `{coin}USDC` (`BTCUSDC`, `ETHUSDC`), `quote_asset` is `USDC`, and `native_symbol` is the bare coin (`BTC`) exactly as Hyperliquid's own API names it. Sizes are in the base coin, so `qty_unit` is `"base"` and `contract_size` is `null` on every linear record, and the nested `usd` figures are USDC notional. `price_precision` is `6 - szDecimals`.
+**Linear.** Perpetuals are quoted against USDC: the normalized symbol is `{coin}USDC` (`BTCUSDC`, `ETHUSDC`), `quote` is `USDC`, and `native_symbol` is the bare coin (`BTC`) exactly as Hyperliquid's own API names it. Sizes are in the base coin, so `qty.unit` is `"base"` and `contract_size` is `null` on every linear record, and the nested `notional` figures are in USDC. `price.decimals` is `6 - szDecimals`.
 
-**Spot.** Upstream, almost every spot pair is named `@N` (`@107`); only a handful are canonically named (`PURR/USDC`). The router resolves each pair through the token table into a flat `{base}{quote}` symbol (`HYPEUSDC`, `PURRUSDC`), and `native_symbol` carries the upstream `@N` (or `PURR/USDC`) form used for data requests. Spot is quoted against several stablecoins, not only USDC (`USDC`, `USDH`, `USDT0`, `USDE`), so one base can list under several symbols (`HYPEUSDC`, `HYPEUSDT0`, `HYPEUSDH`, `HYPEUSDE`) and `quote_asset` varies per row. Spot has no mark price, funding, or open interest, so those routes are `False`. `price_precision` is `8 - szDecimals`.
+**Spot.** Upstream, almost every spot pair is named `@N` (`@107`); only a handful are canonically named (`PURR/USDC`). The router resolves each pair through the token table into a flat `{base}{quote}` symbol (`HYPEUSDC`, `PURRUSDC`), and `native_symbol` carries the upstream `@N` (or `PURR/USDC`) form used for data requests. Spot is quoted against several stablecoins, not only USDC (`USDC`, `USDH`, `USDT0`, `USDE`), so one base can list under several symbols (`HYPEUSDC`, `HYPEUSDT0`, `HYPEUSDH`, `HYPEUSDE`) and `quote` varies per row. Spot has no mark price, funding, or open interest, so those routes are `False`. `price.decimals` is `8 - szDecimals`.
 
 <br>
 
@@ -314,8 +324,8 @@ Upstream, a builder coin is named `dex:coin`: the lowercase dex name, a colon, t
 | field | value for `xyz:NVDA` | how it is derived |
 | :--- | :--- | :--- |
 | `symbol` (routing / URL)                | `XYZNVDAUSDC` | `{dex}{coin}` uppercased, with the `USDC` suffix |
-| `base_asset`                            | `NVDA`       | the coin, the part after the `dex:` prefix |
-| `quote_asset`                           | `USDC`       | always USDC (see below) |
+| `base`                                  | `NVDA`       | the coin, the part after the `dex:` prefix |
+| `quote`                                 | `USDC`       | always USDC (see below) |
 | `native_symbol` (used for API requests) | `xyz:NVDA`   | the exact upstream `dex:coin`, unchanged |
 | `market_type`                           | `linear`     | builder perps are linear |
 
@@ -323,19 +333,19 @@ Only the routing `symbol` is reshaped; `native_symbol` stays byte-for-byte as Hy
 
 Because the dex is baked into the routing symbol, the same coin listed on several dexs stays distinct: `NVDA` on `xyz` and on `io` are `XYZNVDAUSDC` and `IONVDAUSDC`, and `para:STX` is `PARASTXUSDC`, apart from the primary `STXUSDC`. There is no separate dex or venue field on any model, so a consumer that needs to tell a builder market from a primary one keys on the dex prefix in `symbol`, equivalently the `:` in `native_symbol` (primary coins have neither).
 
-Each dex names its collateral by token index in its `meta`, and every dex names token `0`, USDC, so every builder market is USDC-quoted (`quote_asset` is `USDC`). The router does not read that index; a dex settled in another token would need it. Everything else matches primary linear: mid price, 10-row REST trades, current-only open interest, `min_qty` and `max_qty` null, `min_notional` at the 10 USD floor, and `price_precision` of `6 - szDecimals`.
+Each dex names its collateral by token index in its `meta`, and every dex names token `0`, USDC, so every builder market is USDC-quoted (`quote` is `USDC`). The router does not read that index; a dex settled in another token would need it. Everything else matches primary linear: mid price, 10-row REST trades, current-only open interest, `qty.min` and `qty.max` null, `notional.min` at the 10 USD floor, and `price.decimals` of `6 - szDecimals`.
 
 <br>
 
 ### `Ticker.price` is the mid, not the last trade
 
-Hyperliquid's asset context carries no last-traded price, so `Ticker.price` is the current mid (`midPx`), or the mark price (`markPx`) when the book is empty and there is no mid, as on a delisted coin. `open_24h`, `volume_24h` and `price_change_percent` are exact; `high_24h` and `low_24h` carry the caveat below; only the last-price slot is a mid rather than the most recent fill. A consumer comparing `price` across venues should read Hyperliquid's as a mid quote.
+Hyperliquid's asset context carries no last-traded price, so `Ticker.price` is the current mid (`midPx`), or the mark price (`markPx`) when the book is empty and there is no mid, as on a delisted coin; `price_source` says which, `"mid"` or `"mark"`. `open_24h`, `volume_24h` and `price_change_percent` are exact; `high_24h` and `low_24h` carry the caveat below; only the last-price slot is a mid rather than the most recent fill. A consumer comparing `price` across venues should read Hyperliquid's as a mid quote.
 
 <br>
 
 ### `high_24h` and `low_24h` come from traded bars
 
-Hyperliquid publishes no 24h high or low, so the router reads them from the hourly bars of the last 24 hours, refreshed at most once every 120 seconds per coin on REST and on the WebSocket ticker alike. Only traded bars count: the book's mid never moves the range, since a mid outside every trade is not a price anyone paid. With no bar in the window the pair reads `0.0`. Because `price` is the mid, it can sit outside `[low_24h, high_24h]` on a thin market. Where Hyperliquid gives no previous-day price, as on a market listed within the day, `open_24h` is the open of the first bar.
+Hyperliquid publishes no 24h high or low, so the router reads them from the hourly bars of the last 24 hours, refreshed at most once every 120 seconds per coin on REST and on the WebSocket ticker alike. Only traded bars count: the book's mid never moves the range, since a mid outside every trade is not a price anyone paid. With no bar in the window there was no trade, so the ticker's 24-hour values read `null`. Because `price` is the mid, as `price_source` says, it can sit outside `[low_24h, high_24h]` on a thin market. Where Hyperliquid gives no previous-day price, as on a market listed within the day, `open_24h` is the open of the first bar.
 
 <br>
 
@@ -353,19 +363,19 @@ The public REST recent-trades endpoint is capped at 10 rows and ignores `limit`,
 
 ### Open interest is a current snapshot, not a history
 
-Hyperliquid publishes only the current open interest, with no historical series. `GET /hyperliquid/linear/open_interest/{symbol}` returns a single row carrying the live value, stamped when it was read, with `usd` left `null`, since no candle closes at that instant. The capability block lists no intervals; `start` and `limit` are accepted but do not page back through history (`paginated` is `False`, `max_limit` is `1`). Consumers expecting an OI time series receive one point.
+Hyperliquid publishes only the current open interest, with no historical series. `GET /hyperliquid/linear/open_interest/{symbol}` returns a single row carrying the live value: `interval` is `null`, `time_source` is `"router"`, since the row is stamped when it was read, and the notional is priced at the mark Hyperliquid sends with the reading, which `notional_basis` names with `method` `"mark"`. The capability block lists no intervals, so the route refuses `interval` and `end`; `limit` is accepted but nothing pages back through history (`paginated` is `False`, `max_limit` is `1`). Consumers expecting an OI time series receive one point.
 
 <br>
 
 ### Funding is discrete and hourly
 
-Hyperliquid settles funding every hour, so `MarkPrice.funding` and `FundingRate.rate` carry `kind: "discrete"` with `cycle_ms: 3_600_000`, a shorter cycle than the 8h and 4h discrete venues. `per_cycle` is therefore already a per-hour rate, and on the primary dex `valid_until_ts` is the next top-of-hour settlement. Builder-deployed dex markets also settle hourly but not aligned to the clock hour, so for those symbols `valid_until_ts` is an hourly estimate (`timestamp + cycle_ms`) rather than the next top-of-hour; it still satisfies `valid_until_ts >= timestamp`. See [Funding cycle and `valid_until_ts`](#funding-cycle-and-valid_until_ts) for the cross-venue math.
+Hyperliquid settles funding every hour, so `MarkPrice.funding` and `FundingRate.funding` carry `kind: "discrete"` with `cycle_ms: 3_600_000`, a shorter cycle than the 8h and 4h discrete venues. `per_cycle` is therefore already a per-hour rate, and on the primary dex `valid_until` is the next top-of-hour `settlement`. Builder-deployed dex markets also settle hourly but not aligned to the clock hour, so for those symbols `valid_until` is an `estimate`, `timestamp + cycle_ms`, rather than the next top-of-hour; its `ts` is never before `timestamp`. See [Funding cycle and `valid_until`](#funding-cycle-and-valid_until) for the cross-venue math.
 
 <br>
 
 ### No public liquidations, long/short ratio, or per-symbol order limits
 
-Hyperliquid exposes no public liquidation feed and no long/short account ratio, so `liquidations` and `long_short_ratio` are `False` for REST and WS and calling those routes returns HTTP 501. It also does not publish per-symbol order-size limits, so `SymbolInfo.min_qty` and `max_qty` come back `null`; `min_notional` is set to Hyperliquid's flat 10 USD minimum order value (a global platform floor, not a per-symbol figure). Hyperliquid states no price step either, so `tick_size` is `null`: a price is held to five significant figures and to at most `price_precision` decimals, a whole number always allowed. `qty_step` is one unit of the last of the asset's size decimals. The funding cycle length and next-payout time are not on `SymbolInfo` (which carries only `funding.kind`); `cycle_ms` and `valid_until_ts` come from `mark_price`, and the hourly settlement timestamps from `funding_rate`.
+Hyperliquid exposes no public liquidation feed and no long/short account ratio, so `liquidations` and `long_short_ratio` are `False` for REST and WS and calling those routes returns HTTP 501. It also does not publish per-symbol order-size limits, so `SymbolInfo.qty.min` and `qty.max` come back `null`; `notional.min` is set to Hyperliquid's flat 10 USD minimum order value (a global platform floor, not a per-symbol figure). Hyperliquid states no price step either, so `price.kind` is `"significant_figures"`: a price is held to `price.figures`, five, significant figures and to at most `price.decimals` decimals, a whole number always allowed. `qty.step` is one unit of the last of the asset's size decimals. The funding cycle length and next-payout time are not on `SymbolInfo` (which carries only `funding.kind`); `cycle_ms` and `valid_until` come from `mark_price`, and the hourly settlement timestamps from `funding_rate`.
 
 <br>
 <br>
@@ -388,7 +398,7 @@ The Kraken spot OHLC endpoint has a hard ceiling of 720 candles per request with
 
 ### Inverse and linear `/markets/{symbol}` base/quote derivation
 
-The Kraken Futures `/instruments` endpoint carries no `baseCurrency` or `quoteCurrency` on its perpetuals. The router parses the model symbol against a fixed quote-currency list (`USDT, USDC, USD, EUR, GBP, JPY, CHF, CAD, AUD`) and populates `base_asset`/`quote_asset` from that split. So `PF_XBTUSD` -> `base_asset=XBT`, `quote_asset=USD`, the code its symbol carries, though the `base` field `/instruments` sends beside it reads `BTC`. Symbols whose suffix isn't in that list will fall through to empty strings.
+The Kraken Futures `/instruments` endpoint carries no `baseCurrency` or `quoteCurrency` on its perpetuals. The router parses the model symbol against a fixed quote-currency list (`USDT, USDC, USD, EUR, GBP, JPY, CHF, CAD, AUD`) and populates `base` and `quote` from that split. So `PF_XBTUSD` -> `base=XBT`, `quote=USD`, the code its symbol carries, though the `base` field `/instruments` sends beside it reads `BTC`. Symbols whose suffix isn't in that list will fall through to empty strings.
 
 <br>
 
@@ -398,9 +408,9 @@ Kraken Futures lists no inverse perpetuals: `/instruments` returns no `PI_` symb
 
 <br>
 
-### Futures quantity precision follows the trade precision
+### Futures quantity step follows the trade precision
 
-On futures, `quantity_precision` is the instrument's `contractValueTradePrecision`, and `qty_step` is ten to the minus that. A negative precision means lots of 10, 100 or 1,000, which a count of decimals cannot carry, so `quantity_precision` is `0` there and `qty_step` holds the lot.
+On futures, `qty.decimals` is the instrument's `contractValueTradePrecision`, and `qty.step` is ten to the minus that. A negative precision means lots of 10, 100 or 1,000, which a count of decimals cannot carry, so `qty.decimals` is `0` there and `qty.step` holds the lot.
 
 <br>
 
@@ -412,13 +422,13 @@ Kraken's spot ticker exposes `o` = "today's opening price" (UTC midnight) but no
 
 ### Inverse `vol24h` and `volumeQuote` semantics
 
-On a Kraken inverse perpetual (`PI_*`), the adapter reads `vol24h` as the **contract count** (each contract = 1 USD on Kraken inverse). `Ticker.volume_24h` lands as `{native: vol24h, unit: "contract", contract_size: 1.0, usd: native * contract_size, usd_basis: {method: "contract_size"}}`. Because `contract_size = 1`, `usd == native` numerically, which is the expected "200 == 200" pattern, not a bug. Linear / multi-collateral perpetuals (`PF_*`) follow the conventional layout: `vol24h` is the base coin, `volume_24h.unit = "base"`, USD derived from close * native.
+On a Kraken inverse perpetual (`PI_*`), the adapter reads `vol24h` as the **contract count** (each contract = 1 USD on Kraken inverse). `Ticker.volume_24h` lands as `{native: vol24h, unit: "contract", contract_size: 1.0, notional: native * contract_size, notional_basis: {method: "contract_size"}}`. Because `contract_size = 1`, `notional == native` numerically, which is the expected "200 == 200" pattern, not a bug. Linear / multi-collateral perpetuals (`PF_*`) follow the conventional layout: `vol24h` is the base coin, `volume_24h.unit = "base"`, the notional at the ticker's own price.
 
 <br>
 
 ### Funding shape and rate conversion
 
-Kraken Futures uses [continuous funding](HTTP_Reference.md#interpretation-fields); every Kraken futures `MarkPrice.funding` and `FundingRate.rate` carries `kind: "continuous"`, `cycle_ms: 3_600_000` (hourly sampling window, not a settlement schedule).
+Kraken Futures uses [continuous funding](HTTP_Reference.md#interpretation-fields); every Kraken futures `MarkPrice.funding` and `FundingRate.funding` carries `kind: "continuous"`, `cycle_ms: 3_600_000` (hourly sampling window, not a settlement schedule), and the mark price's `valid_until` is an `estimate`.
 
 <div align="center">
   <img src="imgs/204649.png" alt="Discrete vs continuous funding timelines" width="90%" />
@@ -452,19 +462,19 @@ KuCoin does not expose a public liquidation history endpoint (only a private `Li
 
 ### Open interest retention
 
-KuCoin's open-interest history endpoint accepts `5min`, `15min`, `30min`, `1hour`, `4hour`, `1day` periods. Sub-hour data has roughly 7 days of retention; daily data extends to roughly 100 days. Queries with `start` older than the retention return an empty list.
+KuCoin's open-interest history endpoint accepts `5min`, `15min`, `30min`, `1hour`, `4hour`, `1day` periods. Sub-hour data has roughly 7 days of retention; daily data extends to roughly 100 days. Queries with `end` older than the retention return an empty list.
 
 <br>
 
 ### Mark price funding fields
 
-The `/api/v1/mark-price/{symbol}/current` endpoint only returns mark and index. The router fetches `/api/v1/contracts/{symbol}` as a side request to populate the nested `MarkPrice.funding` block (with `kind: "discrete"`, `per_cycle`, `cycle_ms` from `fundingRateGranularity`, and `valid_until_ts` derived from `nextFundingRateTime`). If that side request fails, the whole `mark_price` request fails rather than returning a row with a partial or null-defaulted funding block; a contract that genuinely reports no funding still yields `null`. The mark price stream carries `funding: null`: KuCoin sends the mark and the funding rate in separate messages, and the stream passes on the mark messages only.
+The `/api/v1/mark-price/{symbol}/current` endpoint only returns mark and index. The router fetches `/api/v1/contracts/{symbol}` as a side request to populate the nested `MarkPrice.funding` block (with `kind: "discrete"`, `per_cycle`, `cycle_ms` from `fundingRateGranularity`, and `valid_until`, a `settlement`, derived from `nextFundingRateTime`). If that side request fails, the whole `mark_price` request fails rather than returning a row with a partial or null-defaulted funding block; a contract that genuinely reports no funding still yields `null`. The mark price stream carries `funding: null`: KuCoin sends the mark and the funding rate in separate messages, and the stream passes on the mark messages only.
 
 <br>
 
 ### Futures sizes are contract-denominated upstream
 
-KuCoin reports futures sizes (trades, orderbook levels, kline volume, open interest, order limits) in contracts, not the base asset. Each instrument has a `multiplier` field on the upstream contract spec (absolute-valued; KuCoin sometimes returns negative multipliers for inverse and the adapter takes the magnitude). On linear contracts the adapter multiplies every contract count by the multiplier, so the wire is base-denominated throughout: data rows carry `unit: "base"`, and `SymbolInfo.min_qty` / `max_qty` / `quantity_precision` / `qty_step` are in the base asset with `qty_unit: "base"` and `contract_size` null, per the schema; the multiplier itself lives in an adapter-internal cache. On inverse contracts the wire stays contract-denominated: `qty: {native, unit: "contract", contract_size, usd}` where `usd = native * contract_size` (price-independent), and `SymbolInfo.min_qty` / `max_qty` are contract counts with `qty_unit: "contract"` and `contract_size` populated. For `XBTUSDTM`, 1 contract represents 0.001 XBT; for `XBTUSDM`, 1 contract represents 1 USD. Spot reports `qty.native` / `volume.native` in the base asset directly with `unit: "base"`.
+KuCoin reports futures sizes (trades, orderbook levels, kline volume, open interest, order limits) in contracts, not the base asset. Each instrument has a `multiplier` field on the upstream contract spec (absolute-valued; KuCoin sometimes returns negative multipliers for inverse and the adapter takes the magnitude). On linear contracts the adapter multiplies every contract count by the multiplier, so the wire is base-denominated throughout: data rows carry `unit: "base"`, and `SymbolInfo.qty` (its `min`, `max`, `step` and `decimals`) is in the base asset with `unit: "base"` and `contract_size` null, per the schema; the multiplier itself lives in an adapter-internal cache. On inverse contracts the wire stays contract-denominated: `qty: {unit: "contract", contract_size, native, notional}` where `notional = native * contract_size` (price-independent), and `SymbolInfo.qty.min` and `qty.max` are contract counts with `qty.unit: "contract"` and `qty.contract_size` populated. For `XBTUSDTM`, 1 contract represents 0.001 XBT; for `XBTUSDM`, 1 contract represents 1 USD. Spot reports `qty.native` / `volume.native` in the base asset directly with `unit: "base"`.
 
 <br>
 <br>
@@ -487,7 +497,7 @@ OKX exposes funding interval per symbol via `/api/v5/public/funding-rate` and do
 
 ### Recency vs. deep history on candles
 
-OKX exposes a "live" candles endpoint with shallow recency (~1440 most-recent bars) and a "history" endpoint with deeper history but a smaller per-request page size. The router selects between them automatically based on the requested `start` and `limit`. Behavior is uniform from the caller's side; the only effect is on how many round trips a large historical pull takes.
+OKX exposes a "live" candles endpoint with shallow recency (~1440 most-recent bars) and a "history" endpoint with deeper history but a smaller per-request page size. The router selects between them automatically based on the requested `end` and `limit`. Behavior is uniform from the caller's side; the only effect is on how many round trips a large historical pull takes.
 
 <br>
 
@@ -499,13 +509,13 @@ OKX cuts its own bars of 6h and longer on Hong Kong time, so its daily bar opens
 
 ### SWAP/FUTURES `vol24h` and `volCcy24h` semantics
 
-For SWAP and FUTURES (both linear and inverse), OKX reports `vol24h` as the **contract count** and `volCcy24h` in the **base coin**. On inverse the wire form is `Ticker.volume_24h: {native: vol24h, unit: "contract", contract_size: ctVal, usd: native * contract_size, usd_basis: {method: "contract_size"}}`; `ctVal` is the instrument's contract size from `/api/v5/public/instruments`, cached on `SymbolInfo.contract_size` for inverse. On linear the adapter reads `volCcy24h` directly, so the wire form is `{native: volCcy24h, unit: "base"}` with USD derived from `close * native`. Spot follows the conventional layout: `volume_24h.native = vol24h` (in the base coin), `unit = "base"`, USD derived from `close * native`.
+For SWAP and FUTURES (both linear and inverse), OKX reports `vol24h` as the **contract count** and `volCcy24h` in the **base coin**. On inverse the wire form is `Ticker.volume_24h: {native: vol24h, unit: "contract", contract_size: ctVal, notional: native * contract_size, notional_basis: {method: "contract_size"}}`; `ctVal` is the instrument's contract size from `/api/v5/public/instruments`, carried on `SymbolInfo.qty.contract_size` for inverse. On linear the adapter reads `volCcy24h` directly, so the wire form is `{native: volCcy24h, unit: "base"}` with the notional at the ticker's own price. Spot follows the conventional layout: `volume_24h.native = vol24h` (in the base coin), `unit = "base"`, the notional at the ticker's own price.
 
 <br>
 
 ### Order size metadata is contract-denominated upstream
 
-OKX reports `minSz`, `lotSz`, and `maxLmtSz` in contracts on SWAP instruments, and `ctVal` carries the size of one contract denominated in `ctValCcy`: the base coin on linear (`0.01` BTC for `BTC-USDT-SWAP`), the quote on inverse (`100` USD for `BTC-USD-SWAP`). On linear the adapter converts order limits to the base asset, so `SymbolInfo.min_qty` / `max_qty` / `quantity_precision` / `qty_step` come back base-denominated with `qty_unit: "base"` and `contract_size` null, matching every other linear market; the `ctVal` multiplier is held in an adapter-internal cache and drives the same conversion applied to trade, orderbook, book-ticker, and liquidation sizes. On inverse, limits stay contract counts with `qty_unit: "contract"` and `contract_size` = `ctVal` (quote notional per contract).
+OKX reports `minSz`, `lotSz`, and `maxLmtSz` in contracts on SWAP instruments, and `ctVal` carries the size of one contract denominated in `ctValCcy`: the base coin on linear (`0.01` BTC for `BTC-USDT-SWAP`), the quote on inverse (`100` USD for `BTC-USD-SWAP`). On linear the adapter converts order limits to the base asset, so `SymbolInfo.qty` (its `min`, `max`, `step` and `decimals`) comes back base-denominated with `unit: "base"` and `contract_size` null, matching every other linear market; the `ctVal` multiplier is held in an adapter-internal cache and drives the same conversion applied to trade, orderbook, book-ticker, and liquidation sizes. On inverse, limits stay contract counts with `qty.unit: "contract"` and `qty.contract_size` = `ctVal` (quote notional per contract).
 
 <br>
 
@@ -513,12 +523,12 @@ OKX reports `minSz`, `lotSz`, and `maxLmtSz` in contracts on SWAP instruments, a
 
 OKX's upstream OI history endpoint returns rows of the form `[ts, contracts, oi_in_base_coin, oi_in_usd]`. The adapter picks different columns per market type:
 
-- **Linear (`BTC-USDT-SWAP`)**: reads `oi_in_base_coin` (the 3rd column) directly. `open_interest.unit = "base"`, `contract_size = null`. Because `native` is already a base-coin count, the route handler joins matching candles to fill the `usd_basis` block (`method: "candle_close"`, `close`, `close_ts`) and derive `usd`; if the join misses, `usd` stays `null` while `native` is always populated. See [HTTP Reference](HTTP_Reference.md#response-shapes) for the join behavior.
-- **Inverse (`BTC-USD-SWAP`)**: reads `contracts` (the 2nd column). `open_interest.unit = "contract"`, `contract_size` is populated from the instrument's `ctVal` (e.g. `100` for BTC-USD-SWAP). `usd = native * contract_size` directly, `usd_basis.method = "contract_size"`; no candle join needed.
+- **Linear (`BTC-USDT-SWAP`)**: reads `oi_in_base_coin` (the 3rd column) directly. `open_interest.unit = "base"`, `contract_size = null`. Because `native` is already a base-coin count, the route handler joins matching candles to fill the `notional_basis` block (`method: "candle_close"`, with the close in `price` and its candle's stamp in `ts`) and derive `notional`; if the join misses, `notional` stays `null` while `native` is always populated. See [HTTP Reference](HTTP_Reference.md#response-shapes) for the join behavior.
+- **Inverse (`BTC-USD-SWAP`)**: reads `contracts` (the 2nd column). `open_interest.unit = "contract"`, `contract_size` is populated from the instrument's `ctVal` (e.g. `100` for BTC-USD-SWAP). `notional = native * contract_size` directly, `notional_basis.method = "contract_size"`; no candle join needed.
 
 Supported periods: `5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d`. **`8h` is not supported** by the upstream and is excluded from the capability map; sending it returns an OKX error.
 
-Retention is finite even within supported periods: roughly ~8 hours of 5m data, ~4 days of 1h data, lengthening for coarser periods. Queries with `start` older than the retention return an empty list.
+Retention is finite even within supported periods: roughly ~8 hours of 5m data, ~4 days of 1h data, lengthening for coarser periods. Queries with `end` older than the retention return an empty list.
 
 <br>
 
