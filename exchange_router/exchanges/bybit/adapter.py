@@ -22,6 +22,9 @@ logger = logging.getLogger("bybit_adapter")
 
 
 class BybitAdapter(BaseExchange):
+    UNAVAILABLE_CODES = {10000, 10016, 10018, 10429, 170001, 170007, 170032, 170234}
+
+
     def __init__(self):
         super().__init__()
         self.http_client = httpx.AsyncClient(timeout=30.0)
@@ -401,6 +404,12 @@ class BybitAdapter(BaseExchange):
                         async with self._backoff_lock:
                             self._backoff_until = max(self._backoff_until, time.time() + 2)
                         logger.warning(f"Bybit soft rate limit (10006). Retrying after 2s.")
+                        retries -= 1
+                        continue
+                    if data["retCode"] in self.UNAVAILABLE_CODES:
+                        async with self._backoff_lock:
+                            self._backoff_until = max(self._backoff_until, time.time() + 2)
+                        logger.warning(f"Bybit is unavailable ({data['retCode']}): {data['retMsg']}. Retrying after 2s.")
                         retries -= 1
                         continue
                     if data["retCode"] != 0:

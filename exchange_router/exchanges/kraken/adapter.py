@@ -22,7 +22,8 @@ logger = logging.getLogger("kraken_adapter")
 
 
 class KrakenAdapter(BaseExchange):
-    FUT_TICKERS_TTL_S = 1.0
+    FUT_TICKERS_TTL_S  = 1.0
+    UNAVAILABLE_ERRORS = ("EService:Unavailable", "EService:Busy", "EService:Deadline elapsed", "EGeneral:Internal error", "EDatabase:Internal error")
 
 
     def __init__(self):
@@ -610,6 +611,10 @@ class KrakenAdapter(BaseExchange):
                             if throttle_until or "Rate limit exceeded" in err_str or "Too many requests" in err_str:
                                 wait = await self._set_backoff(attempt, throttle_until, strong=True)
                                 logger.warning(f"Kraken {url} rate-limit body ({err_str}), backing off {wait:.1f}s (attempt {attempt + 1}/{max_retries})")
+                                continue
+                            if any(code in err_str for code in self.UNAVAILABLE_ERRORS):
+                                wait = await self._set_backoff(attempt, None, strong=False)
+                                logger.warning(f"Kraken {url} unavailable body ({err_str}), backing off {wait:.1f}s (attempt {attempt + 1}/{max_retries})")
                                 continue
                             raise ValueError(f"Kraken Spot API Error: {err}")
                         if data.get("result") == "error":

@@ -23,7 +23,8 @@ logger = logging.getLogger("okx_adapter")
 
 
 class OkxAdapter(BaseExchange):
-    SPOT_QUOTES = ["USDT", "USDC", "USD", "BTC", "ETH", "EUR", "GBP", "DAI"]
+    SPOT_QUOTES       = ["USDT", "USDC", "USD", "BTC", "ETH", "EUR", "GBP", "DAI"]
+    UNAVAILABLE_CODES = {"50001", "50004", "50005", "50011", "50013", "50026"}
 
 
     class _RateBucket:
@@ -564,6 +565,8 @@ class OkxAdapter(BaseExchange):
                 if resp.status_code == 200:
                     body = resp.json()
                     code = body.get("code", "0")
+                    if code in self.UNAVAILABLE_CODES:
+                        raise UpstreamUnavailableError(f"OKX is unavailable ({code}): {body.get('msg', 'Unknown error')}", retry_after=2)
                     if code != "0":
                         raise ValueError(f"OKX API Error ({code}): {body.get('msg', 'Unknown error')}")
                     return body.get("data", [])

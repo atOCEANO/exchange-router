@@ -22,7 +22,8 @@ logger = logging.getLogger("kucoin_adapter")
 
 
 class KucoinAdapter(BaseExchange):
-    SPOT_QUOTES = ["USDT", "USDC", "TUSD", "USD", "BTC", "ETH", "EUR", "GBP", "DAI", "KCS"]
+    SPOT_QUOTES       = ["USDT", "USDC", "TUSD", "USD", "BTC", "ETH", "EUR", "GBP", "DAI", "KCS"]
+    UNAVAILABLE_CODES = {"429000", "500000"}
 
 
     def __init__(self):
@@ -493,6 +494,8 @@ class KucoinAdapter(BaseExchange):
                 if resp.status_code == 200:
                     body = resp.json()
                     code = body.get("code", "200000")
+                    if code in self.UNAVAILABLE_CODES:
+                        raise UpstreamUnavailableError(f"KuCoin is unavailable ({code}): {body.get('msg', 'Unknown error')}", retry_after=2)
                     if code != "200000":
                         raise ValueError(f"KuCoin API Error ({code}): {body.get('msg', 'Unknown error')}")
                     return body.get("data")
