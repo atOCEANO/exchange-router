@@ -15,6 +15,7 @@ from exchange_router.models import (
     MarginTier, MarginTiers,
     QtyValue, VolumeValue, OiValue, UsdBasis,
     FundingCurrent, FundingHistorical, FundingConvention,
+    QtyGrid, PriceTick, PriceSignificantFigures, Notional,
 )
 
 
@@ -53,9 +54,7 @@ def venue_value(record: Dict[str, Any], key: str, what: str) -> Any:
     return value
 
 
-def mark_trading(info: SymbolInfo, trading: bool) -> SymbolInfo:
-    info._trading = trading
-    return info
+STATUSES = ("trading", "halted", "pre_trading", "delisted")
 
 
 def build_qty_value(native: float, qty_unit: str, contract_size: Optional[float], price: float) -> QtyValue:
@@ -209,6 +208,42 @@ def count_decimals(value: Any) -> Optional[int]:
     return max(-exponent, 0)
 
 
+def build_price_tick(tick: Any) -> Optional[PriceTick]:
+    value = build_step(tick)
+    if value is None:
+        return None
+
+    return PriceTick(
+        kind     = "tick",
+        tick     = value,
+        decimals = count_decimals(tick),
+    )
+
+
+def build_price_figures(figures: int, decimals: int) -> PriceSignificantFigures:
+    return PriceSignificantFigures(
+        kind     = "significant_figures",
+        figures  = figures,
+        decimals = decimals,
+    )
+
+
+def build_qty_grid(unit: str, contract_size: Optional[float], step: Optional[float],
+                   minimum: Optional[float], maximum: Optional[float]) -> QtyGrid:
+    return QtyGrid(
+        unit          = unit,
+        contract_size = contract_size if unit == "contract" else None,
+        step          = step,
+        decimals      = count_decimals(step) if step is not None else None,
+        min           = minimum,
+        max           = maximum,
+    )
+
+
+def build_notional(minimum: Optional[float]) -> Notional:
+    return Notional(min=minimum)
+
+
 def _blank_as_none(value: Any) -> Any:
     return None if value is None or value == "" else value
 
@@ -237,12 +272,12 @@ def symbol_info_to_lite(info: SymbolInfo) -> Dict[str, Any]:
         funding = {"kind": info.funding.kind}
 
     return {
-        "symbol":        info.symbol,
-        "base_asset":    info.base_asset,
-        "quote_asset":   info.quote_asset,
-        "qty_unit":      info.qty_unit,
-        "contract_size": info.contract_size,
-        "funding":       funding,
+        "symbol":  info.symbol,
+        "status":  info.status,
+        "base":    info.base,
+        "quote":   info.quote,
+        "qty":     {"unit": info.qty.unit, "contract_size": info.qty.contract_size},
+        "funding": funding,
     }
 
 
@@ -583,6 +618,7 @@ class BaseExchange(ABC):
     INFO_REFRESH_S = 24 * 60 * 60
     INFO_RETRY_S   = 60 * 60
     INFO_MISS_S    = 60
+    INFO_RECORD_S  = 5 * 60
 
 
     def __init__(self):
@@ -780,9 +816,24 @@ class BaseExchange(ABC):
         return cache.get(model_symbol)
 
 
-    async def _trading_info(self, market_type: MarketType) -> Dict[str, SymbolInfo]:
+    async def _listed_info(self, market_type: MarketType, status: str = "trading") -> Dict[str, SymbolInfo]:
+        if status != "all" and status not in STATUSES:
+            raise ValueError(f"status: '{status}' is not a market state; give all, {', '.join(STATUSES[:-1])} or {STATUSES[-1]}")
+
         cache = await self._ensure_info_cache(market_type)
-        return {symbol: info for symbol, info in cache.items() if info._trading}
+        if status == "all":
+            return dict(cache)
+        return {symbol: info for symbol, info in cache.items() if info.status == status}
+
+
+    async def symbol_record(self, market_type: MarketType, symbol: str) -> SymbolInfo:
+        name   = await self.listed_symbol(market_type, symbol)
+        cache  = await self._ensure_info_cache(market_type, max_age_s=self.INFO_RECORD_S)
+        record = cache.get(name)
+
+        if record is None:
+            raise ValueError(f"symbol '{symbol}' is not listed on {self.name} {market_type.value}; see /{self.name}/{market_type.value}/markets")
+        return record
 
 
     def _alias(self, market_type: MarketType, symbol: str) -> Optional[str]:
@@ -837,7 +888,7 @@ class BaseExchange(ABC):
 
 
     @abstractmethod
-    async def get_exchange_info(self, market_type: MarketType) -> List[SymbolInfo]:
+    async def get_exchange_info(self, market_type: MarketType, status: str = "trading") -> List[SymbolInfo]:
         pass
 
 

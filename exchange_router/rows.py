@@ -97,11 +97,32 @@ def mark_price_row(raw: Dict[str, Any]) -> Row:
 
 
 def symbol_info_row(raw: Dict[str, Any]) -> Row:
-    funding = raw.get("funding")
+    price    = raw.get("price") or {}
+    qty      = raw.get("qty") or {}
+    notional = raw.get("notional") or {}
+    funding  = raw.get("funding") or {}
 
-    flat = {k: v for k, v in raw.items() if k != "funding"}
-    flat.setdefault("tick_size", None)
-    flat.setdefault("qty_step", None)
-    flat["funding_kind"] = funding.get("kind") if isinstance(funding, dict) else None
+    flat = {
+        "symbol":            raw.get("symbol"),
+        "market_type":       raw.get("market_type"),
+        "native_symbol":     raw.get("native_symbol"),
+        "status":            raw.get("status"),
+        "base":              raw.get("base"),
+        "quote":             raw.get("quote"),
+        "price_kind":        price.get("kind"),
+        "price_tick":        price.get("tick"),
+        "price_figures":     price.get("figures"),
+        "price_decimals":    price.get("decimals"),
+        "qty_unit":          qty.get("unit"),
+        "qty_contract_size": qty.get("contract_size"),
+        "qty_step":          qty.get("step"),
+        "qty_decimals":      qty.get("decimals"),
+        "qty_min":           qty.get("min"),
+        "qty_max":           qty.get("max"),
+        "notional_min":      notional.get("min"),
+        "funding_kind":      funding.get("kind"),
+        "timestamp":         raw.get("timestamp"),
+        "time_source":       raw.get("time_source"),
+    }
 
     return _wrap(flat, raw)

@@ -9,7 +9,8 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention, build_step,
-    build_margin_tier, mark_trading, next_request_id, stamp_funding_cycles,
+    build_margin_tier, build_notional, build_price_tick, build_qty_grid,
+    next_request_id, stamp_funding_cycles,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -23,6 +24,12 @@ logger = logging.getLogger("bybit_adapter")
 
 class BybitAdapter(BaseExchange):
     UNAVAILABLE_CODES = {10000, 10016, 10018, 10429, 170001, 170007, 170032, 170234}
+
+    _STATUS: Dict[str, str] = {
+        "Trading":   "trading",
+        "PreLaunch": "pre_trading",
+        "Closed":    "delisted",
+    }
 
 
     def __init__(self):
@@ -507,7 +514,7 @@ class BybitAdapter(BaseExchange):
 
         model_sym  = self.get_model_symbol(t["symbol"], market_type)
         info       = await self._info_for(market_type, model_sym)
-        quote      = info.quote_asset if info else ""
+        quote      = info.quote if info else ""
         is_inverse = market_type == MarketType.INVERSE
         close      = float(t["lastPrice"])
 
@@ -522,7 +529,7 @@ class BybitAdapter(BaseExchange):
             volume_24h           = build_volume_value(
                 native        = float(t["volume24h"]),
                 volume_unit   = "contract" if is_inverse else "base",
-                contract_size = info.contract_size if info else None,
+                contract_size = info.qty.contract_size if info else None,
                 close         = close,
             ),
             price_change_percent = float(t["price24hPcnt"]) * 100,
@@ -541,8 +548,8 @@ class BybitAdapter(BaseExchange):
 
         model_sym     = self.get_model_symbol(t["symbol"], market_type)
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
         is_inverse    = market_type == MarketType.INVERSE
         unit          = "contract" if is_inverse else "base"
         bid_price     = float(t.get("bid1Price") or 0)
@@ -581,7 +588,7 @@ class BybitAdapter(BaseExchange):
 
         model_sym = self.get_model_symbol(data["s"], market_type)
         info      = await self._info_for(market_type, model_sym)
-        quote     = info.quote_asset if info else ""
+        quote     = info.quote if info else ""
 
         return OrderBook(
             symbol      = model_sym,
@@ -605,8 +612,8 @@ class BybitAdapter(BaseExchange):
 
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
         is_inverse    = market_type == MarketType.INVERSE
         unit          = "contract" if is_inverse else "base"
 
@@ -645,8 +652,8 @@ class BybitAdapter(BaseExchange):
         unit       = "contract" if is_inverse else "base"
 
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
 
         bybit_interval = self._map_candle_interval(interval)
 
@@ -702,7 +709,7 @@ class BybitAdapter(BaseExchange):
 
         model_sym = self.get_model_symbol(t["symbol"], market_type)
         info      = await self._info_for(market_type, model_sym)
-        quote     = info.quote_asset if info else ""
+        quote     = info.quote if info else ""
         cycle_ms  = await self._funding_interval_ms_for(market_type, model_sym)
 
         ts          = self.normalize_timestamp(data.get("_envelope_ts") or int(time.time() * 1000))
@@ -744,7 +751,7 @@ class BybitAdapter(BaseExchange):
         api_symbol = self.get_api_symbol(symbol, market_type)
         model_sym  = self.get_model_symbol(api_symbol, market_type)
         info       = await self._info_for(market_type, model_sym)
-        quote      = info.quote_asset if info else ""
+        quote      = info.quote if info else ""
         current_ms = await self._funding_interval_ms_for(market_type, model_sym)
 
         max_per_req = 200
@@ -784,8 +791,8 @@ class BybitAdapter(BaseExchange):
         is_inverse    = market_type == MarketType.INVERSE
         oi_unit       = "contract" if is_inverse else "base"
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
         max_per_req   = 200
 
         async def fetch_backwards(end_ts, l):
@@ -851,13 +858,6 @@ class BybitAdapter(BaseExchange):
         return await self._paginate_backwards(fetch_batch_backward, limit, per_req)
 
 
-    @staticmethod
-    def _precision(value: str) -> int:
-        if not value or "." not in value:
-            return 0
-        return len(value.split(".")[1].rstrip("0"))
-
-
     async def _fetch_exchange_info(self, market_type: MarketType) -> List[SymbolInfo]:
         cat = self._get_category(market_type)
         params: dict = {"category": cat, "limit": 1000}
@@ -884,6 +884,7 @@ class BybitAdapter(BaseExchange):
             if cursor:
                 logger.warning(f"Bybit instruments-info stopped at the {pages}-page cap with a cursor still set")
 
+        read_at   = int(time.time() * 1000)
         results   = []
         native_of = {}
         model_of  = {}
@@ -899,7 +900,7 @@ class BybitAdapter(BaseExchange):
             step_field = "basePrecision" if market_type == MarketType.SPOT else "qtyStep"
             tick = (s.get("priceFilter") or {}).get("tickSize")
             step = lot.get(step_field)
-            if not tick or not step:
+            if build_price_tick(tick) is None or not step:
                 logger.warning(f"Bybit lists {s['symbol']} without a tick size or a quantity step; it stays out of the market list until Bybit sends both")
                 continue
             notional_field = "minOrderAmt" if market_type == MarketType.SPOT else "minNotionalValue"
@@ -941,22 +942,20 @@ class BybitAdapter(BaseExchange):
             if funding_interval_ms is not None:
                 self._funding_interval_cache[market_type][model_sym] = funding_interval_ms
 
-            results.append(mark_trading(SymbolInfo(
-                symbol             = model_sym,
-                native_symbol      = s["symbol"],
-                base_asset         = s["baseCoin"],
-                quote_asset        = s["quoteCoin"],
-                price_precision    = self._precision(tick),
-                quantity_precision = self._precision(step),
-                min_qty            = min_qty,
-                max_qty            = max_qty,
-                min_notional       = min_notional,
-                qty_unit           = qty_unit,
-                contract_size      = contract_size,
-                funding            = funding_block,
-                tick_size          = build_step(tick),
-                qty_step           = build_step(step),
-            ), s["status"] == "Trading"))
+            results.append(SymbolInfo(
+                symbol        = model_sym,
+                market_type   = market_type,
+                native_symbol = s["symbol"],
+                status        = self._STATUS.get(s["status"], "halted"),
+                base          = s["baseCoin"],
+                quote         = s["quoteCoin"],
+                price         = build_price_tick(tick),
+                qty           = build_qty_grid(qty_unit, contract_size, build_step(step), min_qty, max_qty),
+                notional      = build_notional(min_notional),
+                funding       = funding_block,
+                timestamp     = read_at,
+                time_source   = "router",
+            ))
 
         self._native_of[market_type] = native_of
         self._model_of[market_type]  = model_of
@@ -968,18 +967,13 @@ class BybitAdapter(BaseExchange):
         return self._funding_interval_cache.get(market_type, {}).get(model_symbol)
 
 
-    async def get_exchange_info(self, market_type: MarketType) -> List[SymbolInfo]:
-        cache = await self._trading_info(market_type)
+    async def get_exchange_info(self, market_type: MarketType, status: str = "trading") -> List[SymbolInfo]:
+        cache = await self._listed_info(market_type, status)
         return list(cache.values())
 
 
     async def get_symbol_info(self, market_type: MarketType, symbol: str) -> SymbolInfo:
-        cache = await self._trading_info(market_type)
-        model_sym = self.get_model_symbol(self.get_api_symbol(symbol, market_type), market_type)
-        info = cache.get(model_sym)
-        if info is None:
-            raise ValueError(f"Symbol {symbol} not found on Bybit {market_type.value}")
-        return info
+        return await self.symbol_record(market_type, symbol)
 
 
     async def get_margin_tiers(self, market_type: MarketType, symbol: str) -> MarginTiers:
@@ -1020,7 +1014,7 @@ class BybitAdapter(BaseExchange):
         return MarginTiers(
             symbol      = info.symbol,
             market_type = market_type,
-            quote       = info.quote_asset,
+            quote       = info.quote,
             up_to_unit  = "quote" if market_type == MarketType.LINEAR else "base",
             tiers       = tiers,
             timestamp   = read_at,
@@ -1035,8 +1029,8 @@ class BybitAdapter(BaseExchange):
 
         model_sym_for_lookup = self.get_model_symbol(api_symbol, market_type)
         info                 = await self._info_for(market_type, model_sym_for_lookup)
-        quote                = info.quote_asset if info else ""
-        contract_size        = info.contract_size if info else None
+        quote                = info.quote if info else ""
+        contract_size        = info.qty.contract_size if info else None
 
         state: Dict[str, Any] = {}
         bootstrapped          = False
@@ -1081,8 +1075,8 @@ class BybitAdapter(BaseExchange):
 
         model_sym_for_lookup = self.get_model_symbol(api_symbol, market_type)
         info                 = await self._info_for(market_type, model_sym_for_lookup)
-        quote                = info.quote_asset if info else ""
-        contract_size        = info.contract_size if info else None
+        quote                = info.quote if info else ""
+        contract_size        = info.qty.contract_size if info else None
 
         bids: Dict[float, float] = {}
         asks: Dict[float, float] = {}
@@ -1147,7 +1141,7 @@ class BybitAdapter(BaseExchange):
         api_symbol = self.get_api_symbol(symbol, market_type)
         model_sym  = self.get_model_symbol(api_symbol, market_type)
         info       = await self._info_for(market_type, model_sym)
-        quote      = info.quote_asset if info else ""
+        quote      = info.quote if info else ""
 
         if depth <= 1:
             lvl = 1
@@ -1216,8 +1210,8 @@ class BybitAdapter(BaseExchange):
         unit       = "contract" if is_inverse else "base"
 
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
 
         async for msg in self._ws_connect(market_type, [topic]):
             try:
@@ -1252,8 +1246,8 @@ class BybitAdapter(BaseExchange):
         unit       = "contract" if is_inverse else "base"
 
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
 
         async for msg in self._ws_connect(market_type, [topic]):
             try:

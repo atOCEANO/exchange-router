@@ -251,12 +251,12 @@ class Router:
         return self._loop.run(self._core.get_capabilities(exchange))
 
 
-    def get_markets(self, exchange: str, market_type: str) -> Dict:
-        return self._loop.run(self._core.get_markets(exchange, market_type))
+    def get_markets(self, exchange: str, market_type: str, status: str = "trading") -> List[Dict]:
+        return self._loop.run(self._core.get_markets(exchange, market_type, status))
 
 
-    def get_symbol_info(self, exchange: str, market_type: str, symbol: str) -> Row:
-        return self._loop.run(self._core.get_symbol_info(exchange, market_type, symbol))
+    def get_symbol_info(self, exchange: str, market_type: str, symbol: str, verbose: Optional[bool] = None) -> Row:
+        return self._loop.run(self._core.get_symbol_info(exchange, market_type, symbol, verbose))
 
 
     def get_ticker(self, exchange: str, market_type: str, symbol: str, verbose: Optional[bool] = None) -> Row:
@@ -311,9 +311,9 @@ class Router:
         return SyncMarket(self, exchange, market_type, symbol)
 
 
-    def markets(self, exchange: str, market_type: str) -> List[SyncMarket]:
-        data = self.get_markets(exchange, market_type)
-        return [SyncMarket(self, exchange, market_type, m["symbol"]) for m in data["markets"]]
+    def markets(self, exchange: str, market_type: str, status: str = "trading") -> List[SyncMarket]:
+        listed = self.get_markets(exchange, market_type, status)
+        return [SyncMarket(self, exchange, market_type, m["symbol"]) for m in listed]
 
 
     def fetch_many(self, route: str, exchange: str, market_type: str, symbols: List[str], verbose: Optional[bool] = None, max_concurrent: int = 8, **kwargs) -> BatchResult:

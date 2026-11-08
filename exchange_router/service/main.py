@@ -225,9 +225,9 @@ def list_market_types(exchange: str):
 
 
 @app.get("/{exchange}/{market_type}/markets")
-async def get_markets(exchange: str, market_type: MarketType):
+async def get_markets(exchange: str, market_type: MarketType, status: str = "trading"):
     adapter   = validate_request(exchange, market_type)
-    info_list = await adapter.get_exchange_info(market_type)
+    info_list = await adapter.get_exchange_info(market_type, status)
     return {
         "exchange":    exchange,
         "market_type": market_type.value,

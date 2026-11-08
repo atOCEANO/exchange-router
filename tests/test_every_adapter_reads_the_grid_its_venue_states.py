@@ -282,7 +282,7 @@ async def listed(adapter, market_type, answer):
 
 
 def grid(info):
-    return info.tick_size, info.qty_step, info.price_precision, info.quantity_precision
+    return getattr(info.price, "tick", None), info.qty.step, info.price.decimals, info.qty.decimals
 
 
 def binance(symbols):
@@ -330,12 +330,12 @@ async def test_binance_reads_the_tick_and_the_step_from_its_filters():
     inverse = await listed(BinanceAdapter(), MarketType.INVERSE, binance([BINANCE_INVERSE]))
     spot    = await listed(BinanceAdapter(), MarketType.SPOT, binance([BINANCE_SPOT]))
 
-    assert grid(linear["BTCUSDT"]) == (0.1, 0.001, 2, 3)
+    assert grid(linear["BTCUSDT"]) == (0.1, 0.001, 1, 3)
     assert grid(inverse["BTCUSD"]) == (0.1, 1.0, 1, 0)
     assert grid(spot["BTCUSDT"])   == (0.01, 0.00001, 2, 5)
 
-    assert linear["BTCUSDT"].min_notional  == 50.0
-    assert inverse["BTCUSD"].contract_size == 100.0
+    assert linear["BTCUSDT"].notional.min      == 50.0
+    assert inverse["BTCUSD"].qty.contract_size == 100.0
 
 
 async def test_bybit_spot_reads_its_own_step_and_minimum_notional():
@@ -346,8 +346,8 @@ async def test_bybit_spot_reads_its_own_step_and_minimum_notional():
     assert grid(linear["BTCUSDT"])      == (0.1, 0.001, 1, 3)
     assert grid(linear["1000BONKUSDT"]) == (0.000001, 100.0, 6, 0)
 
-    assert spot["BTCUSDT"].min_notional   == 5.0
-    assert linear["BTCUSDT"].min_notional == 5.0
+    assert spot["BTCUSDT"].notional.min   == 5.0
+    assert linear["BTCUSDT"].notional.min == 5.0
 
 
 async def test_a_blank_minimum_reads_null_and_a_blank_grid_leaves_the_instrument_out():
@@ -363,8 +363,8 @@ async def test_a_blank_minimum_reads_null_and_a_blank_grid_leaves_the_instrument
 
     assert linear == {}
 
-    assert spot["BTCUSDT"].min_notional is None
-    assert spot["BTCUSDT"].qty_step     == 0.000001
+    assert spot["BTCUSDT"].notional.min is None
+    assert spot["BTCUSDT"].qty.step     == 0.000001
 
 
 async def test_okx_steps_a_linear_lot_by_the_contract_value():
@@ -377,7 +377,7 @@ async def test_okx_steps_a_linear_lot_by_the_contract_value():
     assert grid(inverse["BTCUSD"])  == (0.1, 0.1, 1, 1)
     assert grid(spot["BTCUSDT"])    == (0.1, 0.00000001, 1, 8)
 
-    assert inverse["BTCUSD"].contract_size == 100.0
+    assert inverse["BTCUSD"].qty.contract_size == 100.0
 
 
 async def test_kraken_futures_take_their_precision_from_the_field_kraken_sends():
@@ -388,7 +388,7 @@ async def test_kraken_futures_take_their_precision_from_the_field_kraken_sends()
     assert grid(linear["PEPEUSD"]) == (1e-10, 1000.0, 10, 0)
     assert grid(linear["MOGUSD"])  == (1e-11, 1000.0, 11, 0)
     assert grid(spot["XBTUSD"])    == (0.1, 0.00000001, 1, 8)
-    assert grid(spot["CELRUSD"])   == (0.000001, 0.00000001, 7, 8)
+    assert grid(spot["CELRUSD"])   == (0.000001, 0.00000001, 6, 8)
 
 
 async def test_kucoin_counts_the_decimals_of_a_tick_written_in_exponent_form():
@@ -400,13 +400,16 @@ async def test_kucoin_counts_the_decimals_of_a_tick_written_in_exponent_form():
     assert grid(inverse["XBTUSD"])  == (0.1, 1.0, 1, 0)
     assert grid(spot["BTCUSDT"])    == (0.1, 0.00000001, 1, 8)
 
-    assert linear["DOGEUSDT"].min_qty      == 100.0
-    assert inverse["XBTUSD"].contract_size == 1.0
+    assert linear["DOGEUSDT"].qty.min          == 100.0
+    assert inverse["XBTUSD"].qty.contract_size == 1.0
 
 
-async def test_hyperliquid_has_no_tick_and_steps_by_its_size_decimals():
+async def test_hyperliquid_holds_a_price_to_significant_figures_and_steps_by_its_size_decimals():
     linear = await listed(HyperliquidAdapter(), MarketType.LINEAR, hyperliquid(HYPERLIQUID_META, HYPERLIQUID_SPOT))
     spot   = await listed(HyperliquidAdapter(), MarketType.SPOT, hyperliquid(HYPERLIQUID_META, HYPERLIQUID_SPOT))
 
     assert grid(linear["BTCUSDC"]) == (None, 0.00001, 1, 5)
     assert grid(spot["HYPEUSDC"])  == (None, 0.01, 6, 2)
+
+    assert linear["BTCUSDC"].price.model_dump() == {"kind": "significant_figures", "figures": 5, "decimals": 1}
+    assert spot["HYPEUSDC"].price.model_dump()  == {"kind": "significant_figures", "figures": 5, "decimals": 6}

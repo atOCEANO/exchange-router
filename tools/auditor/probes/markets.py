@@ -52,7 +52,7 @@ class MarketsProbe(Probe):
             else:
                 seen.add(s)
 
-            for required_key in ("base_asset", "quote_asset", "qty_unit", "funding"):
+            for required_key in ("status", "base", "quote", "qty", "funding"):
                 if required_key not in entry:
                     bad.append(f"{s}: missing {required_key}")
                     break

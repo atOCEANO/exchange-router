@@ -10,8 +10,8 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
-    build_step, build_step_from_decimals, count_decimals, mark_trading, next_request_id,
-    venue_value,
+    build_notional, build_price_tick, build_qty_grid, build_step_from_decimals,
+    next_request_id, venue_value,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -451,13 +451,6 @@ class KrakenAdapter(BaseExchange):
         return 0
 
 
-    @staticmethod
-    def _decimal_places(value: float) -> int:
-        if not value or value <= 0:
-            return 8
-        return count_decimals(value) or 0
-
-
     def _extract_analytics(self, data: Any, field_name: str) -> List[Dict]:
         if not isinstance(data, dict):
             logger.warning(f"Kraken analytics: expected dict, got {type(data).__name__}. Raw: {str(data)[:500]}")
@@ -790,7 +783,7 @@ class KrakenAdapter(BaseExchange):
         api_symbol = self.get_api_symbol(symbol, market_type)
         model_sym  = self.get_model_symbol(api_symbol, market_type)
         info       = await self._info_for(market_type, model_sym)
-        quote      = info.quote_asset if info else ""
+        quote      = info.quote if info else ""
 
         if market_type == MarketType.SPOT:
             data = await self._make_request("GET", f"{self.spot_rest_url}/Ticker", {"pair": api_symbol})
@@ -845,7 +838,7 @@ class KrakenAdapter(BaseExchange):
                     volume_24h           = build_volume_value(
                         native        = vol,
                         volume_unit   = unit,
-                        contract_size = info.contract_size if info else None,
+                        contract_size = info.qty.contract_size if info else None,
                         close         = last,
                     ),
                     price_change_percent = pc,
@@ -858,8 +851,8 @@ class KrakenAdapter(BaseExchange):
         api_symbol    = self.get_api_symbol(symbol, market_type)
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
         is_inverse    = market_type == MarketType.INVERSE
         unit          = "contract" if is_inverse else "base"
 
@@ -927,7 +920,7 @@ class KrakenAdapter(BaseExchange):
         api_symbol = self.get_api_symbol(symbol, market_type)
         model_sym  = self.get_model_symbol(api_symbol, market_type)
         info       = await self._info_for(market_type, model_sym)
-        quote      = info.quote_asset if info else ""
+        quote      = info.quote if info else ""
 
         max_depth = self.get_capabilities()["markets"][market_type]["orderbook"]["max_depth"]
         req_depth = min(depth, max_depth)
@@ -975,8 +968,8 @@ class KrakenAdapter(BaseExchange):
         api_symbol    = self.get_api_symbol(symbol, market_type)
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
         is_inverse    = market_type == MarketType.INVERSE
         unit          = "contract" if is_inverse else "base"
 
@@ -1042,8 +1035,8 @@ class KrakenAdapter(BaseExchange):
         api_symbol    = self.get_api_symbol(symbol, market_type)
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
         is_inverse    = market_type == MarketType.INVERSE
         unit          = "contract" if is_inverse else "base"
 
@@ -1159,7 +1152,7 @@ class KrakenAdapter(BaseExchange):
         api_symbol = self.get_api_symbol(symbol, market_type)
         model_sym  = self.get_model_symbol(api_symbol, market_type)
         info       = await self._info_for(market_type, model_sym)
-        quote      = info.quote_asset if info else ""
+        quote      = info.quote if info else ""
 
         data      = await self._futures_tickers()
         server_ts = self.normalize_timestamp(data["serverTime"]) if data.get("serverTime") else int(time.time() * 1000)
@@ -1213,7 +1206,7 @@ class KrakenAdapter(BaseExchange):
 
         model_sym = self.get_model_symbol(api_symbol, market_type)
         info      = await self._info_for(market_type, model_sym)
-        quote     = info.quote_asset if info else ""
+        quote     = info.quote if info else ""
 
         results = []
         for r in rates:
@@ -1253,8 +1246,8 @@ class KrakenAdapter(BaseExchange):
 
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
         is_inverse    = market_type == MarketType.INVERSE
         oi_unit       = "contract" if is_inverse else "base"
         results = [OpenInterest(
@@ -1319,9 +1312,11 @@ class KrakenAdapter(BaseExchange):
         results = []
         if market_type == MarketType.SPOT:
             data    = await self._make_request("GET", f"{self.spot_rest_url}/AssetPairs")
+            read_at = int(time.time() * 1000)
             aliases = {}
             for k, v in data.items():
-                if "." in k:
+                spot_price = build_price_tick(v.get("tick_size"))
+                if "." in k or spot_price is None:
                     continue
                 wsname = v.get("wsname", "/")
                 base, quote = wsname.split("/") if "/" in wsname else (v.get("base", ""), v.get("quote", ""))
@@ -1338,25 +1333,24 @@ class KrakenAdapter(BaseExchange):
                 if spot_min_notional is not None and spot_min_notional <= 0:
                     spot_min_notional = None
 
-                results.append(mark_trading(SymbolInfo(
-                    symbol             = model_sym,
-                    native_symbol      = v.get("altname", k),
-                    base_asset         = base,
-                    quote_asset        = quote,
-                    price_precision    = int(v.get("pair_decimals", 8)),
-                    quantity_precision = int(v.get("lot_decimals", 8)),
-                    min_qty            = spot_min_qty,
-                    max_qty            = None,
-                    min_notional       = spot_min_notional,
-                    qty_unit           = "base",
-                    contract_size      = None,
-                    funding            = None,
-                    tick_size          = build_step(v.get("tick_size")),
-                    qty_step           = build_step_from_decimals(v.get("lot_decimals")),
-                ), v.get("status") == "online"))
+                results.append(SymbolInfo(
+                    symbol        = model_sym,
+                    market_type   = market_type,
+                    native_symbol = v.get("altname", k),
+                    status        = "trading" if v.get("status") == "online" else "halted",
+                    base          = base,
+                    quote         = quote,
+                    price         = spot_price,
+                    qty           = build_qty_grid("base", None, build_step_from_decimals(v.get("lot_decimals")), spot_min_qty, None),
+                    notional      = build_notional(spot_min_notional),
+                    funding       = None,
+                    timestamp     = read_at,
+                    time_source   = "router",
+                ))
             self._spot_aliases = aliases
         else:
-            data = await self._make_request("GET", f"{self.futures_rest_url}/instruments")
+            data    = await self._make_request("GET", f"{self.futures_rest_url}/instruments")
+            read_at = int(time.time() * 1000)
             for v in data.get("instruments", []):
                 t = v.get("type", "")
                 sym = v.get("symbol", "")
@@ -1365,7 +1359,9 @@ class KrakenAdapter(BaseExchange):
                 if market_type == MarketType.LINEAR and (t != "flexible_futures" or not sym.startswith("PF_")):
                     continue
 
-                tick     = float(v.get("tickSize", 0) or 0)
+                fut_price = build_price_tick(v.get("tickSize"))
+                if fut_price is None:
+                    continue
                 raw_min_size = v.get("minTradeSize")
                 raw_max_size = v.get("maxTradeSize")
                 min_size: Optional[float] = float(raw_min_size) if raw_min_size is not None else None
@@ -1399,22 +1395,20 @@ class KrakenAdapter(BaseExchange):
                         logger.warning(f"Kraken lists {v['symbol']} without a contract size; it stays out of the market list until Kraken sends one")
                         continue
 
-                results.append(mark_trading(SymbolInfo(
-                    symbol             = self.get_model_symbol(v["symbol"], market_type),
-                    native_symbol      = v["symbol"],
-                    base_asset         = base_asset,
-                    quote_asset        = quote_asset,
-                    price_precision    = self._decimal_places(tick),
-                    quantity_precision = self._decimal_places(qty_step or 0),
-                    min_qty            = min_size,
-                    max_qty            = max_size,
-                    min_notional       = None,
-                    qty_unit           = qty_unit,
-                    contract_size      = contract_size,
-                    funding            = build_funding_convention("continuous"),
-                    tick_size          = build_step(v.get("tickSize")),
-                    qty_step           = qty_step,
-                ), bool(v.get("tradeable"))))
+                results.append(SymbolInfo(
+                    symbol        = self.get_model_symbol(v["symbol"], market_type),
+                    market_type   = market_type,
+                    native_symbol = v["symbol"],
+                    status        = "trading" if v.get("tradeable") else "halted",
+                    base          = base_asset,
+                    quote         = quote_asset,
+                    price         = fut_price,
+                    qty           = build_qty_grid(qty_unit, contract_size, qty_step, min_size, max_size),
+                    notional      = build_notional(None),
+                    funding       = build_funding_convention("continuous"),
+                    timestamp     = read_at,
+                    time_source   = "router",
+                ))
         return results
 
 
@@ -1422,26 +1416,21 @@ class KrakenAdapter(BaseExchange):
         return self._spot_aliases.get(self.normalize_symbol(symbol)) if market_type == MarketType.SPOT else None
 
 
-    async def get_exchange_info(self, market_type: MarketType) -> List[SymbolInfo]:
-        cache = await self._trading_info(market_type)
+    async def get_exchange_info(self, market_type: MarketType, status: str = "trading") -> List[SymbolInfo]:
+        cache = await self._listed_info(market_type, status)
         return list(cache.values())
 
 
     async def get_symbol_info(self, market_type: MarketType, symbol: str) -> SymbolInfo:
-        cache = await self._trading_info(market_type)
-        model_sym = self.get_model_symbol(self.get_api_symbol(symbol, market_type), market_type)
-        info = cache.get(model_sym)
-        if info is None:
-            raise ValueError(f"Symbol {symbol} not found on Kraken {market_type.value}")
-        return info
+        return await self.symbol_record(market_type, symbol)
 
 
     async def stream_ticker(self, market_type: MarketType, symbol: str) -> AsyncGenerator[Ticker, None]:
         api_symbol    = self.get_api_symbol(symbol, market_type)
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
         is_inverse    = market_type == MarketType.INVERSE
         unit          = "contract" if is_inverse else "base"
 
@@ -1507,8 +1496,8 @@ class KrakenAdapter(BaseExchange):
         api_symbol    = self.get_api_symbol(symbol, market_type)
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
         is_inverse    = market_type == MarketType.INVERSE
         unit          = "contract" if is_inverse else "base"
 
@@ -1579,7 +1568,7 @@ class KrakenAdapter(BaseExchange):
         api_symbol = self.get_api_symbol(symbol, market_type)
         model_sym  = self.get_model_symbol(api_symbol, market_type)
         info       = await self._info_for(market_type, model_sym)
-        quote      = info.quote_asset if info else ""
+        quote      = info.quote if info else ""
 
         if market_type == MarketType.SPOT:
             ws_sym    = await self._spot_ws_symbol(api_symbol)
@@ -1679,8 +1668,8 @@ class KrakenAdapter(BaseExchange):
         api_symbol    = self.get_api_symbol(symbol, market_type)
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
         is_inverse    = market_type == MarketType.INVERSE
         unit          = "contract" if is_inverse else "base"
 
@@ -1768,7 +1757,7 @@ class KrakenAdapter(BaseExchange):
         api_symbol = self.get_api_symbol(symbol, market_type)
         model_sym  = self.get_model_symbol(api_symbol, market_type)
         info       = await self._info_for(market_type, model_sym)
-        quote      = info.quote_asset if info else ""
+        quote      = info.quote if info else ""
         payload    = {"event": "subscribe", "feed": "ticker", "product_ids": [api_symbol]}
 
         async for data in self._ws_connect(self.futures_ws_url, payload):

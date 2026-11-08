@@ -9,7 +9,8 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
-    build_step_from_decimals, build_margin_tier, mark_trading,
+    build_step_from_decimals, build_margin_tier,
+    build_notional, build_price_figures, build_qty_grid,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -23,6 +24,7 @@ logger = logging.getLogger("hyperliquid_adapter")
 class HyperliquidAdapter(BaseExchange):
     _FUNDING_CYCLE_MS    = 3_600_000
     _MIN_ORDER_VALUE_USD = 10.0
+    _PRICE_FIGURES       = 5
     _TICKER_RESEED_S     = 120
     _MAX_SUBS_PER_HUB    = 900
     _MAX_HUBS            = 10
@@ -337,7 +339,7 @@ class HyperliquidAdapter(BaseExchange):
         info      = await self._info_for(market_type, model_sym)
         if info is None:
             raise ValueError(f"Symbol {symbol} not found on Hyperliquid {market_type.value}")
-        return model_sym, info.native_symbol, info.quote_asset
+        return model_sym, info.native_symbol, info.quote
 
 
     async def _ctx_snapshot(self, info_type: str, body: Dict, key: str) -> Any:
@@ -798,6 +800,7 @@ class HyperliquidAdapter(BaseExchange):
             return []
 
         data     = await self._make_request("metaAndAssetCtxs", {"type": "metaAndAssetCtxs"})
+        read_at  = int(time.time() * 1000)
         universe = data[0]["universe"]
         metas    = {"": data[0]}
 
@@ -815,7 +818,7 @@ class HyperliquidAdapter(BaseExchange):
             seen.add(model_sym)
 
             self._funding_interval_cache[market_type][model_sym] = self._FUNDING_CYCLE_MS
-            results.append(mark_trading(self._linear_symbol_info(model_sym, coin, coin, sz_dec), not u.get("isDelisted")))
+            results.append(self._linear_symbol_info(model_sym, coin, coin, sz_dec, bool(u.get("isDelisted")), read_at))
 
         results.extend(await self._fetch_builder_info(market_type, seen, metas))
 
@@ -825,22 +828,20 @@ class HyperliquidAdapter(BaseExchange):
         return results
 
 
-    def _linear_symbol_info(self, model_sym: str, native: str, base: str, sz_dec: int) -> SymbolInfo:
+    def _linear_symbol_info(self, model_sym: str, native: str, base: str, sz_dec: int, delisted: bool, read_at: int) -> SymbolInfo:
         return SymbolInfo(
-            symbol             = model_sym,
-            native_symbol      = native,
-            base_asset         = base,
-            quote_asset        = "USDC",
-            price_precision    = max(6 - sz_dec, 0),
-            quantity_precision = sz_dec,
-            min_qty            = None,
-            max_qty            = None,
-            min_notional       = self._MIN_ORDER_VALUE_USD,
-            qty_unit           = "base",
-            contract_size      = None,
-            funding            = build_funding_convention("discrete"),
-            tick_size          = None,
-            qty_step           = build_step_from_decimals(sz_dec),
+            symbol        = model_sym,
+            market_type   = MarketType.LINEAR,
+            native_symbol = native,
+            status        = "delisted" if delisted else "trading",
+            base          = base,
+            quote         = "USDC",
+            price         = build_price_figures(self._PRICE_FIGURES, max(6 - sz_dec, 0)),
+            qty           = build_qty_grid("base", None, build_step_from_decimals(sz_dec), None, None),
+            notional      = build_notional(self._MIN_ORDER_VALUE_USD),
+            funding       = build_funding_convention("discrete"),
+            timestamp     = read_at,
+            time_source   = "router",
         )
 
 
@@ -863,6 +864,7 @@ class HyperliquidAdapter(BaseExchange):
 
             try:
                 data       = await self._make_request("metaAndAssetCtxs", {"type": "metaAndAssetCtxs", "dex": dex})
+                read_at    = int(time.time() * 1000)
                 universe   = data[0]["universe"]
                 metas[dex] = data[0]
                 for u in sorted(universe, key=lambda u: bool(u.get("isDelisted"))):
@@ -876,7 +878,7 @@ class HyperliquidAdapter(BaseExchange):
                     seen.add(model_sym)
 
                     self._funding_interval_cache[market_type][model_sym] = self._FUNDING_CYCLE_MS
-                    results.append(mark_trading(self._linear_symbol_info(model_sym, native, base, sz_dec), not u.get("isDelisted")))
+                    results.append(self._linear_symbol_info(model_sym, native, base, sz_dec, bool(u.get("isDelisted")), read_at))
             except UpstreamUnavailableError:
                 raise
             except Exception as e:
@@ -886,9 +888,10 @@ class HyperliquidAdapter(BaseExchange):
 
 
     async def _fetch_spot_info(self) -> List[SymbolInfo]:
-        data  = await self._make_request("spotMeta", {"type": "spotMeta"})
-        names = {t["index"]: t["name"] for t in data["tokens"]}
-        szdec = {t["index"]: int(t["szDecimals"]) for t in data["tokens"]}
+        data    = await self._make_request("spotMeta", {"type": "spotMeta"})
+        read_at = int(time.time() * 1000)
+        names   = {t["index"]: t["name"] for t in data["tokens"]}
+        szdec   = {t["index"]: int(t["szDecimals"]) for t in data["tokens"]}
 
         results = []
         for pair in data["universe"]:
@@ -901,36 +904,29 @@ class HyperliquidAdapter(BaseExchange):
             base_sz = szdec.get(base_idx, 0)
 
             results.append(SymbolInfo(
-                symbol             = f"{base}{quote}".upper(),
-                native_symbol      = pair["name"],
-                base_asset         = base,
-                quote_asset        = quote,
-                price_precision    = max(8 - base_sz, 0),
-                quantity_precision = base_sz,
-                min_qty            = None,
-                max_qty            = None,
-                min_notional       = self._MIN_ORDER_VALUE_USD,
-                qty_unit           = "base",
-                contract_size      = None,
-                funding            = None,
-                tick_size          = None,
-                qty_step           = build_step_from_decimals(base_sz),
+                symbol        = f"{base}{quote}".upper(),
+                market_type   = MarketType.SPOT,
+                native_symbol = pair["name"],
+                status        = "trading",
+                base          = base,
+                quote         = quote,
+                price         = build_price_figures(self._PRICE_FIGURES, max(8 - base_sz, 0)),
+                qty           = build_qty_grid("base", None, build_step_from_decimals(base_sz), None, None),
+                notional      = build_notional(self._MIN_ORDER_VALUE_USD),
+                funding       = None,
+                timestamp     = read_at,
+                time_source   = "router",
             ))
         return results
 
 
-    async def get_exchange_info(self, market_type: MarketType) -> List[SymbolInfo]:
-        cache = await self._trading_info(market_type)
+    async def get_exchange_info(self, market_type: MarketType, status: str = "trading") -> List[SymbolInfo]:
+        cache = await self._listed_info(market_type, status)
         return list(cache.values())
 
 
     async def get_symbol_info(self, market_type: MarketType, symbol: str) -> SymbolInfo:
-        cache     = await self._trading_info(market_type)
-        model_sym = self.get_model_symbol(self.get_api_symbol(symbol, market_type), market_type)
-        info      = cache.get(model_sym)
-        if info is None:
-            raise ValueError(f"Symbol {symbol} not found on Hyperliquid {market_type.value}")
-        return info
+        return await self.symbol_record(market_type, symbol)
 
 
     async def get_margin_tiers(self, market_type: MarketType, symbol: str) -> MarginTiers:

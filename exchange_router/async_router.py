@@ -104,9 +104,9 @@ class AsyncRouter(AsyncCore):
         return AsyncMarket(self, exchange, market_type, symbol)
 
 
-    async def markets(self, exchange: str, market_type: str) -> List[AsyncMarket]:
-        data = await self.get_markets(exchange, market_type)
-        return [AsyncMarket(self, exchange, market_type, m["symbol"]) for m in data["markets"]]
+    async def markets(self, exchange: str, market_type: str, status: str = "trading") -> List[AsyncMarket]:
+        listed = await self.get_markets(exchange, market_type, status)
+        return [AsyncMarket(self, exchange, market_type, m["symbol"]) for m in listed]
 
 
     async def candles_many(self, exchange: str, market_type: str, symbols: List[str], interval: str = "1h", limit: int = 100, start: Optional[int] = None, verbose: Optional[bool] = None, max_concurrent: int = 8, end: Optional[int] = None) -> BatchResult:

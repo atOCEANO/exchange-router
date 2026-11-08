@@ -16,6 +16,14 @@ from .version import SCHEMA_VERSION, __version__
 
 SERIES_ROUTES = ("candles", "trades", "agg_trades", "funding_rate", "open_interest", "liquidations", "long_short_ratio")
 
+SYMBOL_KINDS = {
+    "status":       ("trading", "halted", "pre_trading", "delisted"),
+    "price_kind":   ("tick", "significant_figures"),
+    "qty_unit":     ("base", "contract"),
+    "funding_kind": ("discrete", "continuous"),
+    "time_source":  ("venue", "router"),
+}
+
 CLOSED = (
     "this router is closed; build another with AsyncRouter.local(exchanges=[...]) or "
     "AsyncRouter.service(url, exchanges=[...])"
@@ -258,12 +266,17 @@ class AsyncCore:
         return await self._ensure_capabilities(exchange, quiet=False)
 
 
-    async def get_markets(self, exchange: str, market_type: str) -> Dict:
-        return await self._fetch("markets", exchange, market_type)
+    async def get_markets(self, exchange: str, market_type: str, status: str = "trading") -> List[Dict]:
+        data = await self._fetch("markets", exchange, market_type, status=status)
+        return data["markets"]
 
 
-    async def get_symbol_info(self, exchange: str, market_type: str, symbol: str) -> rows.Row:
-        return rows.symbol_info_row(await self._fetch("symbol_info", exchange, market_type, symbol))
+    async def get_symbol_info(self, exchange: str, market_type: str, symbol: str, verbose: Optional[bool] = None) -> rows.Row:
+        v   = self.verbose if verbose is None else verbose
+        row = rows.symbol_info_row(await self._fetch("symbol_info", exchange, market_type, symbol))
+        emit([f"symbol_info {exchange}/{market_type}/{symbol}: {key} '{row[key]}' is not a value this version knows; .raw holds the record as sent"
+              for key, known in SYMBOL_KINDS.items() if row[key] is not None and row[key] not in known], v)
+        return row
 
 
     async def get_ticker(self, exchange: str, market_type: str, symbol: str, verbose: Optional[bool] = None) -> rows.Row:

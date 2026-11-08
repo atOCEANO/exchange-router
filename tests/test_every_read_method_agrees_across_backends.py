@@ -76,37 +76,47 @@ async def test_mark_price_derives_funding_per_hour_from_the_cycle(router, market
 
 
 @pytest.mark.parametrize("market_type,symbol,quote,unit,size", MARKETS, ids=ALL_IDS)
-async def test_symbol_info_flattens_funding_and_keeps_the_qty_unit(router, market_type, symbol, quote, unit, size):
+async def test_symbol_info_flattens_its_blocks_into_prefixed_keys(router, market_type, symbol, quote, unit, size):
     row = await router.get_symbol_info(EX, market_type, symbol)
 
-    assert row.symbol        == symbol
-    assert row.base_asset    == symbol[:-len(quote)]
-    assert row.quote_asset   == quote
-    assert row.qty_unit      == unit
-    assert row.contract_size == size
-    assert row.funding_kind  == (None if market_type == "spot" else ("discrete" if market_type == "linear" else "continuous"))
+    assert row.symbol            == symbol
+    assert row.market_type       == market_type
+    assert row.status            == "trading"
+    assert row.base              == symbol[:-len(quote)]
+    assert row.quote             == quote
+    assert row.qty_unit          == unit
+    assert row.qty_contract_size == size
+    assert row.funding_kind      == (None if market_type == "spot" else ("discrete" if market_type == "linear" else "continuous"))
+    assert row.timestamp         == BASE_TS
+    assert row.time_source       == "router"
 
 
 @pytest.mark.parametrize("market_type,symbol,quote,unit,size", MARKETS, ids=ALL_IDS)
-async def test_symbol_info_carries_the_tick_and_the_step(router, market_type, symbol, quote, unit, size):
+async def test_symbol_info_carries_the_grid_with_the_decimals_it_implies(router, market_type, symbol, quote, unit, size):
     row = await router.get_symbol_info(EX, market_type, symbol)
 
-    assert row.tick_size == 0.01
-    assert row.qty_step  == 0.001
-    assert list(row)[-3:] == ["tick_size", "qty_step", "funding_kind"]
+    assert row.price_kind     == "tick"
+    assert row.price_tick     == 0.01
+    assert row.price_figures  is None
+    assert row.price_decimals == 2
+    assert row.qty_step       == 0.001
+    assert row.qty_decimals   == 3
+    assert row.qty_min        == 0.001
+    assert row.qty_max        == 1000.0
+    assert row.notional_min   == 5.0
+    assert row.raw["price"]   == {"kind": "tick", "tick": 0.01, "decimals": 2}
 
 
 @pytest.mark.parametrize("market_type,symbol,quote,unit,size", MARKETS, ids=ALL_IDS)
-async def test_markets_lists_every_symbol_in_the_lite_projection(router, market_type, symbol, quote, unit, size):
-    data = await router.get_markets(EX, market_type)
+async def test_markets_lists_every_trading_symbol_in_the_lite_projection(router, market_type, symbol, quote, unit, size):
+    listed = await router.get_markets(EX, market_type)
 
-    assert data["exchange"] == EX
-    assert [m["symbol"] for m in data["markets"]] == [symbol, symbol.replace("BTC", "ETH")]
+    assert [m["symbol"] for m in listed] == [symbol, symbol.replace("BTC", "ETH")]
 
-    first = data["markets"][0]
-    assert first["qty_unit"]      == unit
-    assert first["contract_size"] == size
-    assert set(first) == {"symbol", "base_asset", "quote_asset", "qty_unit", "contract_size", "funding"}
+    first = listed[0]
+    assert first["status"] == "trading"
+    assert first["qty"]    == {"unit": unit, "contract_size": size}
+    assert set(first)      == {"symbol", "status", "base", "quote", "qty", "funding"}
 
 
 @pytest.mark.parametrize("market_type,symbol,quote,unit,size", MARKETS, ids=ALL_IDS)

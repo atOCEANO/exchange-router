@@ -293,7 +293,7 @@ async def test_an_inverse_contract_without_its_size_stays_out_of_the_list():
     sized   = await on_kucoin(kucoin(), lambda a: a._fetch_exchange_info(MarketType.INVERSE))
     unsized = await on_kucoin(kucoin(contracts=[without(INVERSE_CONTRACT, "multiplier")]), lambda a: a._fetch_exchange_info(MarketType.INVERSE))
 
-    assert [(info.symbol, info.contract_size) for info in sized] == [("XBTUSD", 1.0)]
+    assert [(info.symbol, info.qty.contract_size) for info in sized] == [("XBTUSD", 1.0)]
     assert unsized == []
 
 

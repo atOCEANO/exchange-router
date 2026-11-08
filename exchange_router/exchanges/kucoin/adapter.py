@@ -10,7 +10,8 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
-    build_step, count_decimals, mark_trading, next_request_id, stamp_funding_cycles, venue_value,
+    build_notional, build_price_tick, build_qty_grid, build_step,
+    next_request_id, stamp_funding_cycles, venue_value,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -24,6 +25,13 @@ logger = logging.getLogger("kucoin_adapter")
 class KucoinAdapter(BaseExchange):
     SPOT_QUOTES       = ["USDT", "USDC", "TUSD", "USD", "BTC", "ETH", "EUR", "GBP", "DAI", "KCS"]
     UNAVAILABLE_CODES = {"429000", "500000"}
+
+    _STATUS: Dict[str, str] = {
+        "Open":    "trading",
+        "Init":    "pre_trading",
+        "Settled": "delisted",
+        "Closed":  "delisted",
+    }
 
 
     def __init__(self):
@@ -465,11 +473,6 @@ class KucoinAdapter(BaseExchange):
         return v * 1000 if v < 10**11 else v
 
 
-    @staticmethod
-    def _precision(value: str) -> int:
-        return count_decimals(value) or 0
-
-
     async def _make_request(self, method: str, base: str, endpoint: str, params: Optional[Dict] = None) -> Any:
         url = f"{base}{endpoint}"
         retries = 3
@@ -587,7 +590,7 @@ class KucoinAdapter(BaseExchange):
         api_symbol = await self._resolve_symbol(symbol, market_type)
         model_sym  = self.get_model_symbol(api_symbol, market_type)
         info       = await self._info_for(market_type, model_sym)
-        quote      = info.quote_asset if info else ""
+        quote      = info.quote if info else ""
 
         if market_type == MarketType.SPOT:
             t = await self._make_request("GET", self.spot_rest_url, "/api/v1/market/stats", {"symbol": api_symbol})
@@ -634,7 +637,7 @@ class KucoinAdapter(BaseExchange):
             volume_24h           = build_volume_value(
                 native        = float(c.get("volumeOf24h") or 0),
                 volume_unit   = "contract" if is_inverse else "base",
-                contract_size = info.contract_size if info else None,
+                contract_size = info.qty.contract_size if info else None,
                 close         = last,
             ),
             price_change_percent = float(c.get("priceChgPct") or 0) * 100,
@@ -646,8 +649,8 @@ class KucoinAdapter(BaseExchange):
         api_symbol    = await self._resolve_symbol(symbol, market_type)
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
         multiplier    = await self._multiplier_for(market_type, model_sym)
         is_inverse    = market_type == MarketType.INVERSE
         unit          = "contract" if is_inverse else "base"
@@ -746,7 +749,7 @@ class KucoinAdapter(BaseExchange):
             ts = self._ns_to_ms(data.get("ts") or int(time.time() * 1000))
 
         info       = await self._info_for(market_type, model_sym)
-        quote      = info.quote_asset if info else ""
+        quote      = info.quote if info else ""
         multiplier = await self._multiplier_for(market_type, model_sym)
 
         if market_type == MarketType.LINEAR and multiplier is None:
@@ -778,8 +781,8 @@ class KucoinAdapter(BaseExchange):
         api_symbol    = await self._resolve_symbol(symbol, market_type)
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
         multiplier    = await self._multiplier_for(market_type, model_sym)
         is_inverse    = market_type == MarketType.INVERSE
         unit          = "contract" if is_inverse else "base"
@@ -859,7 +862,7 @@ class KucoinAdapter(BaseExchange):
         per_req     = 1500
         model_sym   = self.get_model_symbol(api_symbol, MarketType.SPOT)
         info        = await self._info_for(MarketType.SPOT, model_sym)
-        quote       = info.quote_asset if info else ""
+        quote       = info.quote if info else ""
 
         def _parse(rows):
             out = []
@@ -919,8 +922,8 @@ class KucoinAdapter(BaseExchange):
         per_req       = 200
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
         multiplier    = await self._multiplier_for(market_type, model_sym)
         is_inverse    = market_type == MarketType.INVERSE
 
@@ -987,7 +990,7 @@ class KucoinAdapter(BaseExchange):
         api_symbol = await self._resolve_symbol(symbol, market_type)
         model_sym  = self.get_model_symbol(api_symbol, market_type)
         info       = await self._info_for(market_type, model_sym)
-        quote      = info.quote_asset if info else ""
+        quote      = info.quote if info else ""
         cycle_ms   = await self._funding_interval_ms_for(market_type, model_sym)
 
         m = await self._make_request("GET", self.fut_rest_url, f"/api/v1/mark-price/{api_symbol}/current")
@@ -1035,7 +1038,7 @@ class KucoinAdapter(BaseExchange):
         api_symbol        = await self._resolve_symbol(symbol, market_type)
         model_sym         = self.get_model_symbol(api_symbol, market_type)
         info              = await self._info_for(market_type, model_sym)
-        quote             = info.quote_asset if info else ""
+        quote             = info.quote if info else ""
         current_ms        = await self._funding_interval_ms_for(market_type, model_sym)
         funding_window_ms = 8 * 60 * 60 * 1000
         per_req           = 100
@@ -1087,8 +1090,8 @@ class KucoinAdapter(BaseExchange):
         period_ms     = self._interval_to_ms(period)
         per_req       = 200
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
         multiplier    = await self._multiplier_for(market_type, model_sym)
         is_inverse    = market_type == MarketType.INVERSE
 
@@ -1152,12 +1155,14 @@ class KucoinAdapter(BaseExchange):
     async def _fetch_exchange_info(self, market_type: MarketType) -> List[SymbolInfo]:
         if market_type == MarketType.SPOT:
             data = await self._make_request("GET", self.spot_rest_url, "/api/v1/symbols")
+            read_at = int(time.time() * 1000)
             results = []
             for s in data or []:
                 api_sym = s["symbol"]
                 base_raw = s.get("baseCurrency")
                 quote_raw = s.get("quoteCurrency")
-                if not base_raw or not quote_raw:
+                spot_price = build_price_tick(s.get("priceIncrement"))
+                if not base_raw or not quote_raw or spot_price is None:
                     continue
                 raw_min_qty = s.get("baseMinSize")
                 raw_max_qty = s.get("baseMaxSize")
@@ -1171,25 +1176,24 @@ class KucoinAdapter(BaseExchange):
                     spot_max_qty = None
                 if spot_min_notional is not None and spot_min_notional <= 0:
                     spot_min_notional = None
-                results.append(mark_trading(SymbolInfo(
-                    symbol             = self.get_model_symbol(api_sym, market_type),
-                    native_symbol      = api_sym,
-                    base_asset         = base_raw,
-                    quote_asset        = quote_raw,
-                    price_precision    = self._precision(s.get("priceIncrement", "0")),
-                    quantity_precision = self._precision(s.get("baseIncrement", "0")),
-                    min_qty            = spot_min_qty,
-                    max_qty            = spot_max_qty,
-                    min_notional       = spot_min_notional,
-                    qty_unit           = "base",
-                    contract_size      = None,
-                    funding            = None,
-                    tick_size          = build_step(s.get("priceIncrement")),
-                    qty_step           = build_step(s.get("baseIncrement")),
-                ), bool(s.get("enableTrading"))))
+                results.append(SymbolInfo(
+                    symbol        = self.get_model_symbol(api_sym, market_type),
+                    market_type   = market_type,
+                    native_symbol = api_sym,
+                    status        = "trading" if s.get("enableTrading") else "halted",
+                    base          = base_raw,
+                    quote         = quote_raw,
+                    price         = spot_price,
+                    qty           = build_qty_grid("base", None, build_step(s.get("baseIncrement")), spot_min_qty, spot_max_qty),
+                    notional      = build_notional(spot_min_notional),
+                    funding       = None,
+                    timestamp     = read_at,
+                    time_source   = "router",
+                ))
             return results
 
         data = await self._make_request("GET", self.fut_rest_url, "/api/v1/contracts/active")
+        read_at = int(time.time() * 1000)
         results = []
         for s in data or []:
             is_inv = bool(s.get("isInverse"))
@@ -1225,7 +1229,8 @@ class KucoinAdapter(BaseExchange):
 
             fut_base = s.get("baseCurrency")
             fut_quote = s.get("quoteCurrency")
-            if not fut_base or not fut_quote:
+            fut_price = build_price_tick(s.get("tickSize"))
+            if not fut_base or not fut_quote or fut_price is None:
                 continue
             raw_lot = s.get("lotSize")
             raw_max = s.get("maxOrderQty")
@@ -1245,10 +1250,6 @@ class KucoinAdapter(BaseExchange):
                     if fut_max_qty is not None:
                         fut_max_qty = round(fut_max_qty * multiplier, 12)
 
-            if market_type == MarketType.LINEAR and multiplier is not None and raw_lot is not None:
-                qty_precision = self._precision(f"{float(raw_lot) * multiplier:.10f}")
-            else:
-                qty_precision = self._precision(str(s.get("lotSize", "0")))
             step_parts = [raw_lot, multiplier] if market_type == MarketType.LINEAR else [raw_lot]
 
             model_sym = self.get_model_symbol(api_sym, market_type)
@@ -1259,22 +1260,20 @@ class KucoinAdapter(BaseExchange):
             if multiplier is not None:
                 self._contract_multiplier_cache[market_type][model_sym] = multiplier
 
-            results.append(mark_trading(SymbolInfo(
-                symbol             = model_sym,
-                native_symbol      = api_sym,
-                base_asset         = fut_base,
-                quote_asset        = fut_quote,
-                price_precision    = self._precision(str(s.get("tickSize", "0"))),
-                quantity_precision = qty_precision,
-                min_qty            = fut_min_qty,
-                max_qty            = fut_max_qty,
-                min_notional       = None,
-                qty_unit           = qty_unit,
-                contract_size      = contract_size,
-                funding            = build_funding_convention("discrete"),
-                tick_size          = build_step(s.get("tickSize")),
-                qty_step           = build_step(*step_parts),
-            ), s.get("status") == "Open"))
+            results.append(SymbolInfo(
+                symbol        = model_sym,
+                market_type   = market_type,
+                native_symbol = api_sym,
+                status        = self._STATUS.get(s.get("status"), "halted"),
+                base          = fut_base,
+                quote         = fut_quote,
+                price         = fut_price,
+                qty           = build_qty_grid(qty_unit, contract_size, build_step(*step_parts), fut_min_qty, fut_max_qty),
+                notional      = build_notional(None),
+                funding       = build_funding_convention("discrete"),
+                timestamp     = read_at,
+                time_source   = "router",
+            ))
         return results
 
 
@@ -1288,27 +1287,21 @@ class KucoinAdapter(BaseExchange):
         return self._contract_multiplier_cache.get(market_type, {}).get(model_symbol)
 
 
-    async def get_exchange_info(self, market_type: MarketType) -> List[SymbolInfo]:
-        cache = await self._trading_info(market_type)
+    async def get_exchange_info(self, market_type: MarketType, status: str = "trading") -> List[SymbolInfo]:
+        cache = await self._listed_info(market_type, status)
         return list(cache.values())
 
 
     async def get_symbol_info(self, market_type: MarketType, symbol: str) -> SymbolInfo:
-        cache = await self._trading_info(market_type)
-        api_symbol = await self._resolve_symbol(symbol, market_type)
-        model_sym = self.get_model_symbol(api_symbol, market_type)
-        info = cache.get(model_sym)
-        if info is None:
-            raise ValueError(f"Symbol {symbol} not found on KuCoin {market_type.value}")
-        return info
+        return await self.symbol_record(market_type, symbol)
 
 
     async def stream_ticker(self, market_type: MarketType, symbol: str) -> AsyncGenerator[Ticker, None]:
         api_symbol    = await self._resolve_symbol(symbol, market_type)
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
         is_inverse    = market_type == MarketType.INVERSE
         unit          = "contract" if is_inverse else "base"
 
@@ -1381,8 +1374,8 @@ class KucoinAdapter(BaseExchange):
         api_symbol    = await self._resolve_symbol(symbol, market_type)
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
         multiplier    = await self._multiplier_for(market_type, model_sym)
         is_inverse    = market_type == MarketType.INVERSE
         unit          = "contract" if is_inverse else "base"
@@ -1469,7 +1462,7 @@ class KucoinAdapter(BaseExchange):
         api_symbol = await self._resolve_symbol(symbol, market_type)
         model_sym  = self.get_model_symbol(api_symbol, market_type)
         info       = await self._info_for(market_type, model_sym)
-        quote      = info.quote_asset if info else ""
+        quote      = info.quote if info else ""
         multiplier = await self._multiplier_for(market_type, model_sym)
         size       = 5 if depth <= 5 else 50
         prefix     = "/spotMarket" if market_type == MarketType.SPOT else "/contractMarket"
@@ -1509,8 +1502,8 @@ class KucoinAdapter(BaseExchange):
         api_symbol    = await self._resolve_symbol(symbol, market_type)
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
         multiplier    = await self._multiplier_for(market_type, model_sym)
         is_inverse    = market_type == MarketType.INVERSE
         unit          = "contract" if is_inverse else "base"
@@ -1596,7 +1589,7 @@ class KucoinAdapter(BaseExchange):
         api_symbol = await self._resolve_symbol(symbol, market_type)
         model_sym  = self.get_model_symbol(api_symbol, market_type)
         info       = await self._info_for(market_type, model_sym)
-        quote      = info.quote_asset if info else ""
+        quote      = info.quote if info else ""
         cycle_ms   = await self._funding_interval_ms_for(market_type, model_sym)
         topic      = f"/contract/instrument:{api_symbol}"
 

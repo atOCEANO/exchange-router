@@ -6,7 +6,10 @@ from exchange_router.exchanges.base import (
     build_funding_current,
     build_funding_historical,
     build_margin_tier,
+    build_notional,
     build_oi_value,
+    build_price_tick,
+    build_qty_grid,
     build_qty_value,
     build_volume_value,
 )
@@ -163,8 +166,8 @@ class FakeExchange(BaseExchange):
         return symbol
 
 
-    async def get_exchange_info(self, market_type: MarketType) -> List[SymbolInfo]:
-        cache = await self._ensure_info_cache(market_type)
+    async def get_exchange_info(self, market_type: MarketType, status: str = "trading") -> List[SymbolInfo]:
+        cache = await self._listed_info(market_type, status)
         return list(cache.values())
 
 
@@ -175,20 +178,18 @@ class FakeExchange(BaseExchange):
 
         for symbol in SYMBOLS[market_type]:
             out.append(SymbolInfo(
-                symbol             = symbol,
-                native_symbol      = symbol.lower(),
-                base_asset         = symbol[:-len(quote)],
-                quote_asset        = quote,
-                price_precision    = 2,
-                quantity_precision = 3,
-                min_qty            = 0.001,
-                max_qty            = 1000.0,
-                min_notional       = 5.0,
-                qty_unit           = qty_unit_for(market_type),
-                contract_size      = contract_size_for(market_type),
-                funding            = build_funding_convention(funding) if funding else None,
-                tick_size          = 0.01,
-                qty_step           = 0.001,
+                symbol        = symbol,
+                market_type   = market_type,
+                native_symbol = symbol.lower(),
+                status        = "trading",
+                base          = symbol[:-len(quote)],
+                quote         = quote,
+                price         = build_price_tick("0.01"),
+                qty           = build_qty_grid(qty_unit_for(market_type), contract_size_for(market_type), 0.001, 0.001, 1000.0),
+                notional      = build_notional(5.0),
+                funding       = build_funding_convention(funding) if funding else None,
+                timestamp     = BASE_TS,
+                time_source   = "router",
             ))
 
         return out
@@ -196,7 +197,7 @@ class FakeExchange(BaseExchange):
 
     async def get_symbol_info(self, market_type: MarketType, symbol: str) -> SymbolInfo:
         self._known(market_type, symbol)
-        for info in await self.get_exchange_info(market_type):
+        for info in await self.get_exchange_info(market_type, "all"):
             if info.symbol == symbol:
                 return info
         raise ValueError(f"symbol '{symbol}' is not listed on fake {market_type.value}")

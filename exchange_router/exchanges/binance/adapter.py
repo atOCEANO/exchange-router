@@ -9,7 +9,8 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention, build_step,
-    mark_trading, next_request_id, stamp_funding_cycles, venue_value,
+    build_notional, build_price_tick, build_qty_grid,
+    next_request_id, stamp_funding_cycles, venue_value,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -36,6 +37,14 @@ class BinanceAdapter(BaseExchange):
         "api.binance.com":  6000,
         "fapi.binance.com": 2400,
         "dapi.binance.com": 2400,
+    }
+
+    _STATUS: Dict[str, str] = {
+        "TRADING":         "trading",
+        "PRE_TRADING":     "pre_trading",
+        "PENDING_TRADING": "pre_trading",
+        "DELIVERED":       "delisted",
+        "CLOSE":           "delisted",
     }
 
 
@@ -514,7 +523,7 @@ class BinanceAdapter(BaseExchange):
 
         model_sym = self.get_model_symbol(venue_value(data, "symbol", f"Binance's 24h ticker of {api_symbol}"), market_type)
         info      = await self._info_for(market_type, model_sym)
-        quote     = info.quote_asset if info else ""
+        quote     = info.quote if info else ""
 
         is_inverse    = market_type == MarketType.INVERSE
         volume_native = float(data["volume"])
@@ -531,7 +540,7 @@ class BinanceAdapter(BaseExchange):
             volume_24h           = build_volume_value(
                 native        = volume_native,
                 volume_unit   = "contract" if is_inverse else "base",
-                contract_size = info.contract_size if info else None,
+                contract_size = info.qty.contract_size if info else None,
                 close         = close_price,
             ),
             price_change_percent = float(data["priceChangePercent"]),
@@ -553,11 +562,11 @@ class BinanceAdapter(BaseExchange):
 
         model_sym = self.get_model_symbol(data["symbol"], market_type)
         info      = await self._info_for(market_type, model_sym)
-        quote     = info.quote_asset if info else ""
+        quote     = info.quote if info else ""
 
         is_inverse    = market_type == MarketType.INVERSE
         unit          = "contract" if is_inverse else "base"
-        contract_size = info.contract_size if info else None
+        contract_size = info.qty.contract_size if info else None
         bid_price     = float(data["bidPrice"])
         ask_price     = float(data["askPrice"])
 
@@ -599,7 +608,7 @@ class BinanceAdapter(BaseExchange):
 
         model_sym = self.get_model_symbol(api_symbol, market_type)
         info      = await self._info_for(market_type, model_sym)
-        quote     = info.quote_asset if info else ""
+        quote     = info.quote if info else ""
 
         return OrderBook(
             symbol      = model_sym,
@@ -625,8 +634,8 @@ class BinanceAdapter(BaseExchange):
 
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
         is_inverse    = market_type == MarketType.INVERSE
         unit          = "contract" if is_inverse else "base"
 
@@ -663,8 +672,8 @@ class BinanceAdapter(BaseExchange):
 
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
         is_inverse    = market_type == MarketType.INVERSE
         unit          = "contract" if is_inverse else "base"
 
@@ -711,8 +720,8 @@ class BinanceAdapter(BaseExchange):
 
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
         is_inverse    = market_type == MarketType.INVERSE
         unit          = "contract" if is_inverse else "base"
 
@@ -768,7 +777,7 @@ class BinanceAdapter(BaseExchange):
 
         model_sym = self.get_model_symbol(data["symbol"], market_type)
         info      = await self._info_for(market_type, model_sym)
-        quote     = info.quote_asset if info else ""
+        quote     = info.quote if info else ""
         cycle_ms  = await self._funding_interval_ms_for(market_type, model_sym)
 
         ts          = self.normalize_timestamp(data["time"])
@@ -809,7 +818,7 @@ class BinanceAdapter(BaseExchange):
 
         model_sym  = self.get_model_symbol(api_symbol, market_type)
         info       = await self._info_for(market_type, model_sym)
-        quote      = info.quote_asset if info else ""
+        quote      = info.quote if info else ""
         current_ms = await self._funding_interval_ms_for(market_type, model_sym)
 
         async def call(params: dict) -> List[FundingRate]:
@@ -862,8 +871,8 @@ class BinanceAdapter(BaseExchange):
         sym_key = "symbol" if market_type == MarketType.LINEAR else "pair"
 
         info          = await self._info_for(market_type, model_symbol)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
         is_inverse    = market_type == MarketType.INVERSE
         oi_unit       = "contract" if is_inverse else "base"
 
@@ -959,6 +968,7 @@ class BinanceAdapter(BaseExchange):
             endpoint = "/dapi/v1/exchangeInfo"
 
         data = await self._make_request("GET", f"{base_url}{endpoint}")
+        read_at = int(time.time() * 1000)
         funding_overrides = await self._fetch_funding_overrides(market_type)
         results = []
 
@@ -986,17 +996,9 @@ class BinanceAdapter(BaseExchange):
                     if raw_notional is not None:
                         min_notional = float(raw_notional)
 
-            def _decimals(s_val):
-                if not s_val or "." not in s_val:
-                    return 0
-                return len(s_val.split(".")[1].rstrip("0"))
-
-            if market_type == MarketType.SPOT:
-                price_prec    = _decimals(tick_size) if tick_size else s.get("quotePrecision", 8)
-                quantity_prec = _decimals(step_size) if step_size else s.get("baseAssetPrecision", 8)
-            else:
-                price_prec    = s.get("pricePrecision", 8)
-                quantity_prec = s.get("quantityPrecision", 8)
+            price = build_price_tick(tick_size)
+            if price is None:
+                continue
 
             qty_unit = "contract" if market_type == MarketType.INVERSE else "base"
             contract_size: Optional[float] = None
@@ -1007,6 +1009,9 @@ class BinanceAdapter(BaseExchange):
                         contract_size = float(cs_raw)
                     except (TypeError, ValueError):
                         contract_size = None
+                if contract_size is None:
+                    logger.warning(f"Binance lists {s['symbol']} without a contract size; it stays out of the market list until Binance sends one")
+                    continue
 
             funding_interval_ms: Optional[int] = None
             funding_block = None
@@ -1018,22 +1023,20 @@ class BinanceAdapter(BaseExchange):
             if funding_interval_ms is not None:
                 self._funding_interval_cache[market_type][model_sym] = funding_interval_ms
 
-            results.append(mark_trading(SymbolInfo(
-                symbol=model_sym,
-                native_symbol=s["symbol"],
-                base_asset=s["baseAsset"],
-                quote_asset=s["quoteAsset"],
-                price_precision=price_prec,
-                quantity_precision=quantity_prec,
-                min_qty=min_qty,
-                max_qty=max_qty,
-                min_notional=min_notional,
-                qty_unit=qty_unit,
-                contract_size=contract_size,
-                funding=funding_block,
-                tick_size=build_step(tick_size),
-                qty_step=build_step(step_size),
-            ), s_status == "TRADING"))
+            results.append(SymbolInfo(
+                symbol        = model_sym,
+                market_type   = market_type,
+                native_symbol = s["symbol"],
+                status        = self._STATUS.get(s_status, "halted"),
+                base          = s["baseAsset"],
+                quote         = s["quoteAsset"],
+                price         = price,
+                qty           = build_qty_grid(qty_unit, contract_size, build_step(step_size), min_qty, max_qty),
+                notional      = build_notional(min_notional),
+                funding       = funding_block,
+                timestamp     = read_at,
+                time_source   = "router",
+            ))
 
         return results
 
@@ -1049,18 +1052,13 @@ class BinanceAdapter(BaseExchange):
         return known.get(model_symbol)
 
 
-    async def get_exchange_info(self, market_type: MarketType) -> List[SymbolInfo]:
-        cache = await self._trading_info(market_type)
+    async def get_exchange_info(self, market_type: MarketType, status: str = "trading") -> List[SymbolInfo]:
+        cache = await self._listed_info(market_type, status)
         return list(cache.values())
 
 
     async def get_symbol_info(self, market_type: MarketType, symbol: str) -> SymbolInfo:
-        cache = await self._trading_info(market_type)
-        model_sym = self.get_model_symbol(self.get_api_symbol(symbol, market_type), market_type)
-        info = cache.get(model_sym)
-        if info is None:
-            raise ValueError(f"Symbol {symbol} not found on Binance {market_type.value}")
-        return info
+        return await self.symbol_record(market_type, symbol)
 
 
     async def stream_ticker(self, market_type: MarketType, symbol: str) -> AsyncGenerator[Ticker, None]:
@@ -1070,8 +1068,8 @@ class BinanceAdapter(BaseExchange):
 
         model_sym_for_lookup = self.get_model_symbol(self.get_api_symbol(symbol, market_type), market_type)
         info                 = await self._info_for(market_type, model_sym_for_lookup)
-        quote                = info.quote_asset if info else ""
-        contract_size        = info.contract_size if info else None
+        quote                = info.quote if info else ""
+        contract_size        = info.qty.contract_size if info else None
 
         async for data in self._ws_connect(market_type, [f"{s_norm}@ticker"]):
             try:
@@ -1104,8 +1102,8 @@ class BinanceAdapter(BaseExchange):
 
         model_sym_for_lookup = self.get_model_symbol(self.get_api_symbol(symbol, market_type), market_type)
         info                 = await self._info_for(market_type, model_sym_for_lookup)
-        quote                = info.quote_asset if info else ""
-        contract_size        = info.contract_size if info else None
+        quote                = info.quote if info else ""
+        contract_size        = info.qty.contract_size if info else None
 
         async for data in self._ws_connect(market_type, [f"{s_norm}@bookTicker"]):
             try:
@@ -1145,7 +1143,7 @@ class BinanceAdapter(BaseExchange):
             topic = f"{s_norm}@depth{target_depth}@{update_speed}" if update_speed in ["250ms", "500ms"] else f"{s_norm}@depth{target_depth}@100ms"
 
         info  = await self._info_for(market_type, model_sym)
-        quote = info.quote_asset if info else ""
+        quote = info.quote if info else ""
 
         qty_unit = "contract" if market_type == MarketType.INVERSE else "base"
         async for data in self._ws_connect(market_type, [topic]):
@@ -1173,8 +1171,8 @@ class BinanceAdapter(BaseExchange):
         unit       = "contract" if is_inverse else "base"
 
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
 
         async for data in self._ws_connect(market_type, [f"{s_norm}@trade"]):
             try:
@@ -1208,8 +1206,8 @@ class BinanceAdapter(BaseExchange):
         unit       = "contract" if is_inverse else "base"
 
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
 
         async for data in self._ws_connect(market_type, [f"{s_norm}@aggTrade"]):
             try:
@@ -1242,7 +1240,7 @@ class BinanceAdapter(BaseExchange):
         model_sym = self.get_model_symbol(self.get_api_symbol(symbol, market_type), market_type)
 
         info     = await self._info_for(market_type, model_sym)
-        quote    = info.quote_asset if info else ""
+        quote    = info.quote if info else ""
         cycle_ms = await self._funding_interval_ms_for(market_type, model_sym)
 
         async for data in self._ws_connect(market_type, [f"{s_norm}@markPrice"]):
@@ -1283,8 +1281,8 @@ class BinanceAdapter(BaseExchange):
         unit       = "contract" if is_inverse else "base"
 
         info          = await self._info_for(market_type, model_sym)
-        quote         = info.quote_asset if info else ""
-        contract_size = info.contract_size if info else None
+        quote         = info.quote if info else ""
+        contract_size = info.qty.contract_size if info else None
 
         async for data in self._ws_connect(market_type, [f"{s_norm}@forceOrder"]):
             try:

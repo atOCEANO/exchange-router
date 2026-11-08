@@ -86,7 +86,7 @@ class SyncMarket(_BaseMarket):
 
     @property
     def quote(self) -> Optional[str]:
-        return self.info().get("quote_asset")
+        return self.info().get("quote")
 
 
     @property

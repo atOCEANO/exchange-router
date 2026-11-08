@@ -436,7 +436,7 @@ class LocalBackend(Backend):
         adapter = self._adapter(exchange, market_type)
 
         if route == "markets":
-            info_list = await adapter.get_exchange_info(market_type)
+            info_list = await adapter.get_exchange_info(market_type, params.get("status", "trading"))
             return {
                 "exchange":    exchange,
                 "market_type": market_type.value,

@@ -112,18 +112,18 @@ async def listing(adapter, market_type, *symbols):
     return names, shown
 
 
-async def test_binance_serves_a_halted_pair_and_leaves_it_out_of_the_market_list():
+async def test_binance_serves_a_halted_pair_and_lists_it_only_when_asked():
     async def answer(method, url, params=None):
         return {"symbols": BINANCE_SPOT}
 
     async def read(adapter):
         names, shown = await listing(adapter, MarketType.SPOT, "eos-usdt")
-        halted       = await adapter._info_for(MarketType.SPOT, "EOSUSDT")
-        with pytest.raises(ValueError, match="not found"):
-            await adapter.get_symbol_info(MarketType.SPOT, "EOSUSDT")
-        return names, shown, halted.quote_asset
+        halted       = await adapter.get_symbol_info(MarketType.SPOT, "EOSUSDT")
+        every        = [info.symbol for info in await adapter.get_exchange_info(MarketType.SPOT, "all")]
+        only         = [info.symbol for info in await adapter.get_exchange_info(MarketType.SPOT, "halted")]
+        return names, shown, halted.status, halted.quote, every, only
 
-    assert await on(BinanceAdapter(), answer, read) == (["EOSUSDT"], ["BTCUSDT"], "USDT")
+    assert await on(BinanceAdapter(), answer, read) == (["EOSUSDT"], ["BTCUSDT"], "halted", "USDT", ["BTCUSDT", "EOSUSDT"], ["EOSUSDT"])
 
 
 async def test_binance_refuses_the_empty_ticker_it_sends_for_a_settled_perpetual():

@@ -8,29 +8,50 @@ from tools.auditor.aggregator import ErrorType, ProbeResult
 from tools.auditor.probes.base import Probe, ProbeContext, fetch, validate_one
 
 
+KINDS = {
+    "status":      ("trading", "halted", "pre_trading", "delisted"),
+    "price.kind":  ("tick", "significant_figures"),
+    "qty.unit":    ("base", "contract"),
+    "time_source": ("venue", "router"),
+}
+
+
 def _decimals(value: float) -> int:
     exponent = decimal.Decimal(str(value)).normalize().as_tuple().exponent
     return max(-exponent, 0) if isinstance(exponent, int) else 0
 
 
-def _power_of_ten_up_to_one(value: float) -> bool:
-    number = decimal.Decimal(str(value)).normalize()
-    return number.as_tuple().digits == (1,) and number <= 1
+def _kind(data: Dict[str, Any], path: str) -> Any:
+    value: Any = data
+    for key in path.split("."):
+        value = value.get(key) if isinstance(value, dict) else None
+    return value
+
+
+def _unknown_kind(data: Dict[str, Any]) -> Optional[Tuple[str, Dict[str, Any]]]:
+    for path, known in KINDS.items():
+        value = _kind(data, path)
+        if value is not None and value not in known:
+            return (
+                f"{path} '{value}' is not a value the auditor knows",
+                {path: value, "known": list(known)},
+            )
+    return None
 
 
 def _grid_mismatch(data: Dict[str, Any]) -> Optional[Tuple[str, Dict[str, Any]]]:
-    tick_size = data.get("tick_size")
-    qty_step  = data.get("qty_step")
+    price = data["price"]
+    qty   = data["qty"]
 
-    if qty_step is not None and _power_of_ten_up_to_one(qty_step) and _decimals(qty_step) != data["quantity_precision"]:
+    if price.get("kind") == "tick" and _decimals(price["tick"]) != price["decimals"]:
         return (
-            f"quantity_precision {data['quantity_precision']} does not match qty_step {qty_step}",
-            {"quantity_precision": data["quantity_precision"], "qty_step": qty_step},
+            f"price.decimals {price['decimals']} does not match price.tick {price['tick']}",
+            {"price": price},
         )
-    if tick_size is not None and _decimals(tick_size) > data["price_precision"]:
+    if qty["step"] is not None and _decimals(qty["step"]) != qty["decimals"]:
         return (
-            f"price_precision {data['price_precision']} is coarser than tick_size {tick_size}",
-            {"price_precision": data["price_precision"], "tick_size": tick_size},
+            f"qty.decimals {qty['decimals']} does not match qty.step {qty['step']}",
+            {"qty": qty},
         )
     return None
 
@@ -73,64 +94,63 @@ class InfoProbe(Probe):
                 evidence=ev,
             )]
 
-        min_qty = data.get("min_qty")
-        max_qty = data.get("max_qty")
-        if min_qty is not None and max_qty is not None and min_qty > max_qty:
+        price = data["price"]
+        qty   = data["qty"]
+        if qty["min"] is not None and qty["max"] is not None and qty["min"] > qty["max"]:
             return [self.result(
                 ctx, self.name, started,
                 status="fail",
                 error_type=ErrorType.LOGIC,
-                message=f"min_qty {min_qty} > max_qty {max_qty}",
-                evidence={"min_qty": min_qty, "max_qty": max_qty},
+                message=f"qty.min {qty['min']} > qty.max {qty['max']}",
+                evidence={"qty": qty},
             )]
-        if data["price_precision"] < 0 or data["quantity_precision"] < 0:
+        if (price.get("decimals") is not None and price["decimals"] < 0) or (qty["decimals"] is not None and qty["decimals"] < 0):
             return [self.result(
                 ctx, self.name, started,
                 status="fail",
                 error_type=ErrorType.LOGIC,
-                message="negative precision",
-                evidence={"price_precision": data["price_precision"], "quantity_precision": data["quantity_precision"]},
+                message="negative decimals",
+                evidence={"price": price, "qty": qty},
             )]
-        tick_size = data.get("tick_size")
-        qty_step = data.get("qty_step")
-        if (tick_size is not None and tick_size <= 0) or (qty_step is not None and qty_step <= 0):
+        if (price.get("kind") == "tick" and price["tick"] <= 0) or (qty["step"] is not None and qty["step"] <= 0):
             return [self.result(
                 ctx, self.name, started,
                 status="fail",
                 error_type=ErrorType.LOGIC,
-                message="non-positive tick_size or qty_step",
-                evidence={"tick_size": tick_size, "qty_step": qty_step},
+                message="non-positive price.tick or qty.step",
+                evidence={"price": price, "qty": qty},
             )]
 
-        qty_unit = data.get("qty_unit")
-        contract_size = data.get("contract_size")
+        unit          = qty["unit"]
+        contract_size = qty["contract_size"]
         if ctx.market_type == "inverse":
-            unit_ok = qty_unit == "contract"
-            cs_ok = contract_size is not None and contract_size > 0
-            rule = "inverse requires qty_unit='contract' and a positive contract_size"
+            unit_ok = unit == "contract"
+            cs_ok   = contract_size is not None and contract_size > 0
+            rule    = "inverse requires qty.unit='contract' and a positive qty.contract_size"
         else:
-            unit_ok = qty_unit == "base"
-            cs_ok = contract_size is None
-            rule = f"{ctx.market_type} requires qty_unit='base' and contract_size=null"
+            unit_ok = unit == "base"
+            cs_ok   = contract_size is None
+            rule    = f"{ctx.market_type} requires qty.unit='base' and qty.contract_size=null"
         if not unit_ok or not cs_ok:
             return [self.result(
                 ctx, self.name, started,
                 status="fail",
                 error_type=ErrorType.SCHEMA,
-                message=f"unit contract broken: qty_unit={qty_unit!r}, contract_size={contract_size}; {rule}",
-                evidence={"qty_unit": qty_unit, "contract_size": contract_size, "market_type": ctx.market_type},
+                message=f"unit contract broken: qty.unit={unit!r}, qty.contract_size={contract_size}; {rule}",
+                evidence={"qty": qty, "market_type": ctx.market_type},
             )]
 
-        mismatch = _grid_mismatch(data)
-        if mismatch:
-            msg, ev = mismatch
-            return [self.result(
-                ctx, self.name, started,
-                status="warn",
-                error_type=ErrorType.LOGIC,
-                message=msg,
-                evidence=ev,
-            )]
+        for check in (_unknown_kind, _grid_mismatch):
+            found = check(data)
+            if found:
+                msg, ev = found
+                return [self.result(
+                    ctx, self.name, started,
+                    status="warn",
+                    error_type=ErrorType.LOGIC,
+                    message=msg,
+                    evidence=ev,
+                )]
 
         r = self.result(
             ctx, self.name, started,

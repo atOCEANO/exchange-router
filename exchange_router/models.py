@@ -1,6 +1,6 @@
 from enum import Enum
-from typing import List, Literal, Optional
-from pydantic import BaseModel, Field, PrivateAttr, model_validator
+from typing import List, Literal, Optional, Union
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class MarketType(str, Enum):
@@ -118,9 +118,91 @@ class OiValue(BaseModel):
 
 
 class FundingConvention(BaseModel):
-    kind: Literal["discrete", "continuous"] = Field(
+    kind: str = Field(
         ...,
-        description="Categorical funding model for this symbol. 'discrete' venues settle at fixed cycles. 'continuous' venues accrue smoothly and are sampled at a fixed cadence. The cycle_ms parameter lives on MarkPrice.funding and FundingRate.rate, not on SymbolInfo, because it is a parameter the exchange could change without affecting this categorical fact.",
+        description="Funding model of the market. Known values: discrete, settled at fixed cycles; continuous, accrued smoothly and sampled at a fixed cadence. The cycle lives on the mark price and the funding history, since a venue can change it without changing the model. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
+    )
+
+
+class QtyUnit(BaseModel):
+    unit: str = Field(
+        ...,
+        description="What a size counts. Known values: base, the base asset, on spot and linear; contract, on inverse. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
+    )
+    contract_size: Optional[float] = Field(
+        ...,
+        description="Quote notional of one contract; null when unit is base.",
+    )
+
+
+    @model_validator(mode="after")
+    def _contract_requires_size(self) -> "QtyUnit":
+        if self.unit == "contract" and self.contract_size is None:
+            raise ValueError("qty.contract_size must be set when qty.unit == 'contract'")
+        return self
+
+
+class QtyGrid(QtyUnit):
+    step: Optional[float] = Field(
+        ...,
+        description="Step an order's size must sit on, in unit; null where the venue states none. Where a venue counts a linear market in contracts (OKX, KuCoin), it is the venue's lot times the contract's value, in the base asset.",
+    )
+    decimals: Optional[int] = Field(
+        ...,
+        description="Decimal places a size carries: the step's own decimals; null with the step.",
+    )
+    min: Optional[float] = Field(
+        ...,
+        description="Smallest order size, in unit; null where the venue states none.",
+    )
+    max: Optional[float] = Field(
+        ...,
+        description="Largest order size, in unit; null where the venue states none.",
+    )
+
+
+class PriceTick(BaseModel):
+    kind: Literal["tick"] = Field(
+        ...,
+        description="The venue states a fixed price step. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
+    )
+    tick: float = Field(
+        ...,
+        description="Step an order's price must sit on, in quote. Snap with round(price / tick) * tick, then round to decimals.",
+    )
+    decimals: int = Field(
+        ...,
+        description="Decimal places a price carries: the tick's own decimals, and the exact rule for rounding.",
+    )
+
+
+class PriceSignificantFigures(BaseModel):
+    kind: Literal["significant_figures"] = Field(
+        ...,
+        description="The venue states no tick and holds a price to a count of significant figures. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
+    )
+    figures: int = Field(
+        ...,
+        description="Significant figures a price may carry; a whole number is always allowed.",
+    )
+    decimals: int = Field(
+        ...,
+        description="Most decimal places a price may carry.",
+    )
+
+
+class PriceOther(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    kind: str = Field(
+        ...,
+        description="A kind of price grid this schema does not know yet. Read kind, and leave the block uninterpreted.",
+    )
+
+
+class Notional(BaseModel):
+    min: Optional[float] = Field(
+        ...,
+        description="Smallest order value, in quote; null where the venue states none.",
     )
 
 
@@ -163,59 +245,50 @@ class SymbolInfo(BaseModel):
         ...,
         description="Routing-facing symbol; exchange-native form with contract-type prefixes or suffixes stripped (e.g. 'BTCUSDT' on Binance, 'XBTUSD' on Kraken futures where the PF_ prefix is stripped). No base-currency translation (XBT stays XBT).",
     )
+    market_type: MarketType = Field(
+        ...,
+        description="Market the instrument trades on.",
+    )
     native_symbol: str = Field(
         ...,
         description="Raw upstream symbol when it differs from the routing-facing one (e.g. 'BTCUSD_PERP' on Binance COIN-M, 'PF_XBTUSD' on Kraken futures).",
     )
-    base_asset: str = Field(
+    status: str = Field(
         ...,
-        description="Ticker of the base currency (left side of the pair, e.g. 'BTC' in BTC/USDT, 'XBT' on Kraken). Exchange-native casing.",
+        description="Whether the market trades now, as of timestamp. Known values: trading; halted, listed but not matching; pre_trading, listed and not yet open; delisted, gone from trading and still served. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
     )
-    quote_asset: str = Field(
+    base: str = Field(
         ...,
-        description="Ticker of the quote currency (right side of the pair, e.g. 'USDT' in BTC/USDT). All price fields on every record are denominated in this asset. Carried at the row level as `quote` on every data record so each row is interpretable in isolation.",
+        description="Base asset, in the venue's own code (e.g. 'BTC' in BTC/USDT, 'XBT' on Kraken).",
     )
-    price_precision: int = Field(
+    quote: str = Field(
         ...,
-        description="Decimal places for price (not tick size). A symbol with a 0.5 tick is not expressible here; the tick itself is tick_size.",
+        description="Quote asset; every price and notional on the instrument is in it, and every data record carries it as quote.",
     )
-    quantity_precision: int = Field(
+    price: Union[PriceTick, PriceSignificantFigures, PriceOther] = Field(
         ...,
-        description="Decimal places for quantity (not step size). A step of 10 or more is not expressible here; the step itself is qty_step.",
+        description="How a price steps: a tick, or a count of significant figures where the venue states no tick.",
     )
-    min_qty: Optional[float] = Field(
-        None,
-        description="Minimum order quantity in qty_unit. Null when the exchange does not declare a minimum.",
-    )
-    max_qty: Optional[float] = Field(
-        None,
-        description="Maximum order quantity in qty_unit. Null when the exchange does not declare a maximum.",
-    )
-    min_notional: Optional[float] = Field(
-        None,
-        description="Minimum order notional in quote_asset. Null when the exchange does not declare a minimum.",
-    )
-    qty_unit: Literal["base", "contract"] = Field(
+    qty: QtyGrid = Field(
         ...,
-        description="Unit that min_qty / max_qty / qty_step are expressed in. 'base' on spot and linear, 'contract' on inverse.",
+        description="What a size counts, how it steps and its limits.",
     )
-    contract_size: Optional[float] = Field(
-        None,
-        description="Quote-asset notional per contract. Null for spot/linear; set on inverse perpetuals (e.g. 100 on Binance BTCUSD, 1 on Bybit BTCUSD).",
+    notional: Notional = Field(
+        ...,
+        description="Limits on an order's value.",
     )
     funding: Optional[FundingConvention] = Field(
-        None,
-        description="Funding convention categorical descriptor. Null on spot. {'kind': 'discrete'} on discrete-funding linear and inverse markets. {'kind': 'continuous'} on continuous-funding markets.",
+        ...,
+        description="Funding convention; null on spot.",
     )
-    tick_size: Optional[float] = Field(
-        None,
-        description="Price step an order's price must sit on, in quote_asset, as the exchange states it. Null where the exchange has no fixed tick (Hyperliquid holds a price to significant figures instead).",
+    timestamp: int = Field(
+        ...,
+        description="When the router read the venue's record of the instrument, in unix milliseconds; a read by symbol refreshes a record older than five minutes.",
     )
-    qty_step: Optional[float] = Field(
-        None,
-        description="Quantity step an order's size must sit on, in qty_unit. Where an exchange counts a linear market in contracts (OKX, KuCoin), it is the exchange's lot times the contract's value, in the base asset like min_qty. Null when the exchange does not state one.",
+    time_source: str = Field(
+        ...,
+        description="Whose clock stamped the record. Known values: venue, router. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
     )
-    _trading: bool = PrivateAttr(default=True)
 
 
 class Ticker(BaseModel):
@@ -229,7 +302,7 @@ class Ticker(BaseModel):
     )
     quote: str = Field(
         ...,
-        description="Quote currency for all price-denominated fields on this row, matching SymbolInfo.quote_asset.",
+        description="Quote currency for all price-denominated fields on this row, matching SymbolInfo.quote.",
     )
     price: float = Field(
         ...,
