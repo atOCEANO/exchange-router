@@ -8,7 +8,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from tools.auditor.aggregator import ErrorType, ProbeResult
-from tools.auditor.config import API_URL, HTTP_BODY_PREVIEW_CHARS, MIN_REST_INTERVAL_MS, VENUE_MIN_INTERVAL_MS
+from tools.auditor.config import API_URL, HTTP_BODY_PREVIEW_CHARS, MIN_REST_INTERVAL_MS, REST_INTERVAL_MS, VENUE_MIN_INTERVAL_MS
 
 
 @dataclass
@@ -38,12 +38,12 @@ def _exchange_from_endpoint(endpoint: str) -> Optional[str]:
 
 
 async def _await_rest_spacing(endpoint: str) -> None:
-    if MIN_REST_INTERVAL_MS <= 0:
-        return
     exchange = _exchange_from_endpoint(endpoint)
     if not exchange:
         return
-    interval_s = MIN_REST_INTERVAL_MS / 1000.0
+    interval_s = max(MIN_REST_INTERVAL_MS, REST_INTERVAL_MS.get(exchange, 0.0)) / 1000.0
+    if interval_s <= 0:
+        return
     async with _rest_throttle_lock:
         now = time.monotonic()
         next_slot = max(now, _rest_next_slot_at.get(exchange, 0.0) + interval_s)

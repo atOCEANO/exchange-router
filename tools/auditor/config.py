@@ -14,6 +14,10 @@ MAX_CONCURRENT_REST_PER_EXCHANGE = int  (os.getenv("MAX_CONCURRENT_REST_PER_EXCH
 MAX_CONCURRENT_WS_PER_EXCHANGE   = int  (os.getenv("MAX_CONCURRENT_WS_PER_EXCHANGE",   "32"))
 MIN_REST_INTERVAL_MS             = float(os.getenv("MIN_REST_INTERVAL_MS",             "250"))
 
+REST_INTERVAL_MS: Dict[str, float] = {
+    "hyperliquid": 3000.0,
+}
+
 LATENCY_WARN_MS       = float(os.getenv("LATENCY_WARN_MS",       "5000"))
 SNAPSHOT_FRESHNESS_MS = int  (os.getenv("SNAPSHOT_FRESHNESS_MS", "300000"))
 THEORETICAL_MAX_RATIO = 0.9
