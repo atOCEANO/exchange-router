@@ -8,7 +8,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from tools.auditor.aggregator import ErrorType, ProbeResult
-from tools.auditor.config import API_URL, HTTP_BODY_PREVIEW_CHARS, MIN_REST_INTERVAL_MS
+from tools.auditor.config import API_URL, HTTP_BODY_PREVIEW_CHARS, MIN_REST_INTERVAL_MS, VENUE_MIN_INTERVAL_MS
 
 
 @dataclass
@@ -69,6 +69,33 @@ async def fetch(client: httpx.AsyncClient, endpoint: str, params: Optional[Dict]
         return None, None, f"network: {e}"
     except Exception as e:
         return None, None, f"unexpected: {e}"
+
+
+_venue_next_slot_at: Dict[str, float] = {}
+_venue_lock = asyncio.Lock()
+
+
+async def venue_fetch(client: httpx.AsyncClient, url: str, params: Optional[Dict] = None) -> Any:
+    host = url.split("/", 3)[2]
+    async with _venue_lock:
+        now       = time.monotonic()
+        next_slot = max(now, _venue_next_slot_at.get(host, 0.0) + VENUE_MIN_INTERVAL_MS / 1000.0)
+        _venue_next_slot_at[host] = next_slot
+    if next_slot > now:
+        await asyncio.sleep(next_slot - now)
+    try:
+        return (await client.get(url, params=params)).json()
+    except Exception:
+        return None
+
+
+def dig(data: Any, path: Tuple) -> Any:
+    for key in path:
+        try:
+            data = data[key]
+        except (KeyError, IndexError, TypeError):
+            return None
+    return data
 
 
 def validate_one(data: Any, model: Type[BaseModel]) -> Optional[Tuple[str, Dict[str, Any]]]:

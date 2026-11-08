@@ -4,14 +4,30 @@ from typing import Any, Dict, List, Optional, Tuple, Type
 from pydantic import BaseModel
 
 from tools.auditor.config import (
-    SAMPLE_MAX_ITEMS, THEORETICAL_MAX_RATIO,
+    GRID_INTERVALS, LIVE_READINGS, SAMPLE_MAX_ITEMS, THEORETICAL_MAX_RATIO,
     freshness_threshold_ms, interval_ms, theoretical_max,
 )
 from tools.auditor.aggregator import ErrorType, ProbeResult
 
 from tools.auditor.probes.base import (
-    Probe, ProbeContext, check_ascending_ts, fetch, validate_list,
+    Probe, ProbeContext, check_ascending_ts, fetch, now_ms, validate_list,
 )
+
+
+def cycle_findings(rows: List[dict]) -> List[Dict[str, Any]]:
+    stamps = [row["timestamp"] for row in rows]
+    gaps   = [None] + [round((b - a) / 1000) * 1000 for a, b in zip(stamps, stamps[1:])]
+    out    = []
+    for i in range(1, len(rows)):
+        neighbours = {gaps[i - 1], gaps[i + 1] if i + 1 < len(gaps) else None}
+        if gaps[i] in neighbours and rows[i]["rate"]["cycle_ms"] != gaps[i]:
+            out.append({"timestamp": stamps[i], "gap_ms": gaps[i], "cycle_ms": rows[i]["rate"]["cycle_ms"]})
+    return out
+
+
+def grid_findings(rows: List[dict], interval: str) -> List[int]:
+    step = interval_ms(interval)
+    return [row["timestamp"] for row in rows if row["timestamp"] % step]
 
 
 class PaginatedProbe(Probe):
@@ -121,7 +137,11 @@ class PaginatedProbe(Probe):
         big = self.big_limit if upstream_max is None else min(self.big_limit, upstream_max)
 
         out: List[ProbeResult] = []
-        out.append(await self._probe_recent(ctx, big, retention_ms))
+        recent = await self._probe_recent(ctx, big, retention_ms)
+        out.append(recent)
+        out.extend(self._meaning(ctx, recent.sample if recent.status != "fail" else None))
+        if (ctx.exchange, self.route) in LIVE_READINGS:
+            out.append(await self._probe_live_stamp(ctx))
         out.append(await self._probe_exact_count(ctx, "limit=1", 1))
         out.append(await self._probe_at_most(ctx, "limit=5", 5))
 
@@ -165,6 +185,46 @@ class PaginatedProbe(Probe):
             res.evidence.update({"count": n, "age_s": age_s, "ceiling": ceiling})
 
         res.sample = data[:SAMPLE_MAX_ITEMS]
+        return res
+
+
+    def _meaning(self, ctx: ProbeContext, rows: Optional[List[dict]]) -> List[ProbeResult]:
+        started = time.time()
+        if self.route == "funding_rate":
+            name = f"{self.name}:cycles"
+            if not rows or len(rows) < 3:
+                return [self.result(ctx, name, started, status="skip", error_type=ErrorType.SKIPPED, message="fewer than three rows; no gap repeats")]
+            findings = cycle_findings(rows)
+            if findings:
+                return [self.result(ctx, name, started, status="fail", error_type=ErrorType.LOGIC, message=f"{len(findings)} rows carry a cycle their repeated gap contradicts", evidence={"findings": findings[:5]})]
+            return [self.result(ctx, name, started, status="pass", error_type=ErrorType.OK, message="every repeated gap matches the cycle its row carries")]
+
+        if self.route == "candles" and self.period in GRID_INTERVALS:
+            name = f"{self.name}:utc_grid"
+            if not rows:
+                return [self.result(ctx, name, started, status="skip", error_type=ErrorType.SKIPPED, message="no bars to check")]
+            findings = grid_findings(rows, self.period)
+            if findings:
+                return [self.result(ctx, name, started, status="fail", error_type=ErrorType.LOGIC, message=f"{len(findings)} bars open off the UTC grid", evidence={"opens": findings[:5]})]
+            return [self.result(ctx, name, started, status="pass", error_type=ErrorType.OK, message="every bar opens on the UTC grid")]
+
+        return []
+
+
+    async def _probe_live_stamp(self, ctx: ProbeContext) -> ProbeResult:
+        before    = now_ms()
+        data, res = await self._probe(ctx, "live_stamp", {"limit": 1}, expect_empty_ok=False)
+        after     = now_ms()
+        if data is None:
+            return res
+        stamped = data[-1]["timestamp"]
+        if not (before - 5000 <= stamped <= after + 5000):
+            res.status     = "fail"
+            res.error_type = ErrorType.LOGIC
+            res.message    = f"a live reading is stamped {(after - stamped)/1000:.0f}s before it was read"
+        else:
+            res.message = "the live reading is stamped when read"
+        res.evidence.update({"read_from": before, "read_to": after, "stamped": stamped})
         return res
 
 

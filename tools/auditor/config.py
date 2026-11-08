@@ -46,6 +46,33 @@ FRESHNESS_OVERRIDE_MS: Dict[Tuple[str, str, str], int] = {
     ("kucoin", "inverse", "1m"): 600_000,
 }
 
+ROUTER_STAMPED = {
+    ("hyperliquid", "spot", "ticker"),
+    ("hyperliquid", "linear", "ticker"),
+    ("hyperliquid", "linear", "mark_price"),
+    ("kraken", "spot", "ticker"),
+    ("kucoin", "linear", "ticker"),
+    ("kucoin", "inverse", "ticker"),
+    ("binance", "spot", "book_ticker"),
+}
+
+MID_PRICED = {"hyperliquid"}
+
+LIVE_READINGS = {("hyperliquid", "open_interest")}
+
+GRID_INTERVALS = ("6h", "8h", "12h", "1d")
+
+VENUE_MIN_INTERVAL_MS = 250
+
+DEADLINES: Dict[Tuple[str, str], Tuple[str, Dict[str, str], Tuple]] = {
+    ("binance", "linear"):  ("https://fapi.binance.com/fapi/v1/premiumIndex", {"symbol": "{native}"}, ("nextFundingTime",)),
+    ("binance", "inverse"): ("https://dapi.binance.com/dapi/v1/premiumIndex", {"symbol": "{native}"}, (0, "nextFundingTime")),
+    ("bybit", "linear"):    ("https://api.bybit.com/v5/market/tickers", {"category": "linear", "symbol": "{native}"}, ("result", "list", 0, "nextFundingTime")),
+    ("bybit", "inverse"):   ("https://api.bybit.com/v5/market/tickers", {"category": "inverse", "symbol": "{native}"}, ("result", "list", 0, "nextFundingTime")),
+    ("okx", "linear"):      ("https://www.okx.com/api/v5/public/funding-rate", {"instId": "{native}"}, ("data", 0, "fundingTime")),
+    ("okx", "inverse"):     ("https://www.okx.com/api/v5/public/funding-rate", {"instId": "{native}"}, ("data", 0, "fundingTime")),
+}
+
 CRYPTO_EPOCH_MS = 1_262_304_000_000
 
 INTERVAL_MS: Dict[str, int] = {

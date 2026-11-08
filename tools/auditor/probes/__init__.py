@@ -58,12 +58,12 @@ def market_probes(caps_slice: Dict[str, Any]) -> List[Probe]:
         probes.append(PaginatedProbe("candles", Candle, big_limit=BIG_LIMITS["candles"], period=interval, period_param="interval"))
 
     oi_caps = caps_slice.get("open_interest", {}) or {}
-    for interval in oi_caps.get("intervals", ["1h"]) or ["1h"]:
-        probes.append(PaginatedProbe("open_interest", OpenInterest, big_limit=BIG_LIMITS["open_interest"], period=interval, period_param="period"))
+    for interval in oi_caps.get("intervals", ["1h"]) or [None]:
+        probes.append(PaginatedProbe("open_interest", OpenInterest, big_limit=BIG_LIMITS["open_interest"], period=interval, period_param="interval"))
 
     ls_caps = caps_slice.get("long_short_ratio", {}) or {}
     for interval in ls_caps.get("intervals", ["1h"]) or ["1h"]:
-        probes.append(PaginatedProbe("long_short_ratio", LongShortRatio, big_limit=BIG_LIMITS["long_short_ratio"], period=interval, period_param="period"))
+        probes.append(PaginatedProbe("long_short_ratio", LongShortRatio, big_limit=BIG_LIMITS["long_short_ratio"], period=interval, period_param="interval"))
 
     probes.append(CrossRouteConsistencyProbe())
 
