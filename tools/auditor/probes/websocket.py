@@ -12,7 +12,7 @@ from exchange_router.models import (
 from tools.auditor.config import API_URL, SAMPLE_MAX_ITEMS, WS_MIN_FRAMES, WS_OPEN_TIMEOUT, WS_TEST_DURATION
 from tools.auditor.aggregator import ErrorType, ProbeResult
 
-from tools.auditor.probes.base import Probe, ProbeContext, validate_one
+from tools.auditor.probes.base import Probe, ProbeContext, fetch, validate_one
 
 
 WS_CHANNEL_MODEL: Dict[str, Type[BaseModel]] = {
@@ -24,6 +24,16 @@ WS_CHANNEL_MODEL: Dict[str, Type[BaseModel]] = {
     "mark_price":   MarkPrice,
     "liquidations": Liquidation,
 }
+
+TRADE_CHANNELS = {"trades", "agg_trades"}
+
+
+def silent_window_verdict(stamps: List[int], start_ms: int, end_ms: int) -> str:
+    if any(start_ms <= stamp <= end_ms for stamp in stamps):
+        return "missed"
+    if stamps and min(stamps) < start_ms:
+        return "quiet"
+    return "unknown"
 
 
 class WebSocketProbe(Probe):
@@ -133,6 +143,23 @@ class WebSocketProbe(Probe):
         }
 
         sample = [item["frame"] for item in captured_frames[:SAMPLE_MAX_ITEMS]]
+
+        if frames_received == 0 and self.channel in TRADE_CHANNELS:
+            code, rows, _ = await fetch(ctx.client, f"/{ctx.exchange}/{ctx.market_type}/trades/{ctx.symbol}", {"limit": 100})
+            stamps = [row["timestamp"] for row in rows if isinstance(row, dict) and "timestamp" in row] if code == 200 and isinstance(rows, list) else []
+            evidence["venue_trades_in_window"] = silent_window_verdict(stamps, int(started * 1000), int(ended * 1000))
+            evidence["newest_trade"]           = max(stamps) if stamps else None
+            if evidence["venue_trades_in_window"] == "quiet":
+                r = self.result(
+                    ctx, self.name, started,
+                    status="skip",
+                    error_type=ErrorType.SKIPPED,
+                    message=f"no trade on the venue during the {WS_TEST_DURATION:.0f}s window; nothing to stream",
+                    evidence=evidence,
+                    ended=ended,
+                )
+                r.sample = sample
+                return [r]
 
         if frames_received == 0:
             if self.min_frames == 0:
