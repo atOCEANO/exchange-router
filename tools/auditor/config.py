@@ -63,8 +63,6 @@ ROUTER_STAMPED = {
     ("binance", "spot", "orderbook"),
 }
 
-LIVE_READINGS = {("hyperliquid", "open_interest")}
-
 GRID_INTERVALS = ("6h", "8h", "12h", "1d")
 
 VENUE_MIN_INTERVAL_MS = 250

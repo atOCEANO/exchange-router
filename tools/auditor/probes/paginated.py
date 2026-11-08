@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple, Type
 from pydantic import BaseModel
 
 from tools.auditor.config import (
-    GRID_INTERVALS, LIVE_READINGS, SAMPLE_MAX_ITEMS, THEORETICAL_MAX_RATIO,
+    GRID_INTERVALS, SAMPLE_MAX_ITEMS, THEORETICAL_MAX_RATIO,
     freshness_threshold_ms, interval_ms, theoretical_max,
 )
 from tools.auditor.aggregator import ErrorType, ProbeResult
@@ -28,6 +28,17 @@ def cycle_findings(rows: List[dict]) -> List[Dict[str, Any]]:
 def grid_findings(rows: List[dict], interval: str) -> List[int]:
     step = interval_ms(interval)
     return [row["timestamp"] for row in rows if row["timestamp"] % step]
+
+
+def open_bar_findings(rows: List[dict]) -> List[int]:
+    return [row["timestamp"] for row in rows[:-1] if not row["closed"]]
+
+
+def clock_findings(rows: List[dict]) -> List[Dict[str, Any]]:
+    return [
+        {"timestamp": row["timestamp"], "interval": row["interval"], "time_source": row["time_source"]}
+        for row in rows if row["time_source"] != ("router" if row["interval"] is None else "venue")
+    ]
 
 
 def quiet_since(stamps: List[int], since_ms: int) -> bool:
@@ -141,10 +152,10 @@ class PaginatedProbe(Probe):
         big = self.big_limit if upstream_max is None else min(self.big_limit, upstream_max)
 
         out: List[ProbeResult] = []
-        recent = await self._probe_recent(ctx, big, retention_ms)
+        rows, recent = await self._probe_recent(ctx, big, retention_ms)
         out.append(recent)
-        out.extend(self._meaning(ctx, recent.sample if recent.status != "fail" else None))
-        if (ctx.exchange, self.route) in LIVE_READINGS:
+        out.extend(self._meaning(ctx, rows if recent.status != "fail" else None))
+        if rc.get("intervals", []) is None:
             out.append(await self._probe_live_stamp(ctx))
         out.append(await self._probe_exact_count(ctx, "limit=1", 1))
         out.append(await self._probe_at_most(ctx, "limit=5", 5))
@@ -160,10 +171,10 @@ class PaginatedProbe(Probe):
         return out
 
 
-    async def _probe_recent(self, ctx: ProbeContext, big: int, retention_ms: Optional[int]) -> ProbeResult:
+    async def _probe_recent(self, ctx: ProbeContext, big: int, retention_ms: Optional[int]) -> Tuple[Optional[List[dict]], ProbeResult]:
         data, res = await self._probe(ctx, "recent", {"limit": big}, expect_empty_ok=False)
         if data is None:
-            return res
+            return None, res
 
         n       = len(data)
         last_ts = data[-1]["timestamp"]
@@ -193,7 +204,7 @@ class PaginatedProbe(Probe):
             res.evidence.update({"count": n, "age_s": age_s, "ceiling": ceiling})
 
         res.sample = data[:SAMPLE_MAX_ITEMS]
-        return res
+        return data, res
 
 
     def _meaning(self, ctx: ProbeContext, rows: Optional[List[dict]]) -> List[ProbeResult]:
@@ -207,14 +218,34 @@ class PaginatedProbe(Probe):
                 return [self.result(ctx, name, started, status="fail", error_type=ErrorType.LOGIC, message=f"{len(findings)} rows carry a cycle their repeated gap contradicts", evidence={"findings": findings[:5]})]
             return [self.result(ctx, name, started, status="pass", error_type=ErrorType.OK, message="every repeated gap matches the cycle its row carries")]
 
-        if self.route == "candles" and self.period in GRID_INTERVALS:
+        if self.route == "candles":
+            name  = f"{self.name}:open_bar"
+            opens = open_bar_findings(rows or [])
+            if not rows:
+                out = [self.result(ctx, name, started, status="skip", error_type=ErrorType.SKIPPED, message="no bars to check")]
+            elif opens:
+                out = [self.result(ctx, name, started, status="fail", error_type=ErrorType.LOGIC, message=f"{len(opens)} bars before the newest are still open", evidence={"opens": opens[:5]})]
+            else:
+                out = [self.result(ctx, name, started, status="pass", error_type=ErrorType.OK, message="no bar is open but the newest")]
+            if self.period not in GRID_INTERVALS:
+                return out
+
             name = f"{self.name}:utc_grid"
             if not rows:
-                return [self.result(ctx, name, started, status="skip", error_type=ErrorType.SKIPPED, message="no bars to check")]
+                return out + [self.result(ctx, name, started, status="skip", error_type=ErrorType.SKIPPED, message="no bars to check")]
             findings = grid_findings(rows, self.period)
             if findings:
-                return [self.result(ctx, name, started, status="fail", error_type=ErrorType.LOGIC, message=f"{len(findings)} bars open off the UTC grid", evidence={"opens": findings[:5]})]
-            return [self.result(ctx, name, started, status="pass", error_type=ErrorType.OK, message="every bar opens on the UTC grid")]
+                return out + [self.result(ctx, name, started, status="fail", error_type=ErrorType.LOGIC, message=f"{len(findings)} bars open off the UTC grid", evidence={"opens": findings[:5]})]
+            return out + [self.result(ctx, name, started, status="pass", error_type=ErrorType.OK, message="every bar opens on the UTC grid")]
+
+        if self.route == "open_interest":
+            name = f"{self.name}:clock"
+            if not rows:
+                return [self.result(ctx, name, started, status="skip", error_type=ErrorType.SKIPPED, message="no readings to check")]
+            findings = clock_findings(rows)
+            if findings:
+                return [self.result(ctx, name, started, status="fail", error_type=ErrorType.LOGIC, message=f"{len(findings)} readings carry the wrong clock: a live one the router's, a history row the venue's", evidence={"findings": findings[:5]})]
+            return [self.result(ctx, name, started, status="pass", error_type=ErrorType.OK, message="every reading carries the clock its interval calls for")]
 
         return []
 
@@ -226,7 +257,11 @@ class PaginatedProbe(Probe):
         if data is None:
             return res
         stamped = data[-1]["timestamp"]
-        if not (before - 5000 <= stamped <= after + 5000):
+        if data[-1]["interval"] is not None:
+            res.status     = "fail"
+            res.error_type = ErrorType.LOGIC
+            res.message    = f"a live reading carries interval {data[-1]['interval']!r}; it covers no window"
+        elif not (before - 5000 <= stamped <= after + 5000):
             res.status     = "fail"
             res.error_type = ErrorType.LOGIC
             res.message    = f"a live reading is stamped {(after - stamped)/1000:.0f}s before it was read"
