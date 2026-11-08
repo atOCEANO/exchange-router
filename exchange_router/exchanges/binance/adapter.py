@@ -9,7 +9,7 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention, build_step,
-    mark_trading, stamp_funding_cycles,
+    mark_trading, stamp_funding_cycles, venue_value,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -503,7 +503,7 @@ class BinanceAdapter(BaseExchange):
         if isinstance(data, list):
             data = data[0]
 
-        model_sym = self.get_model_symbol(data["symbol"], market_type)
+        model_sym = self.get_model_symbol(venue_value(data, "symbol", f"Binance's 24h ticker of {api_symbol}"), market_type)
         info      = await self._info_for(market_type, model_sym)
         quote     = info.quote_asset if info else ""
 
