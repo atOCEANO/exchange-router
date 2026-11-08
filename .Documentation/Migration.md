@@ -27,8 +27,68 @@
 
 ## Migration
 
-Six hops, newest first. `schema_version` has been 3 throughout: no field has been renamed, removed or retyped, so code written against an older release keeps parsing what a newer one sends. 3.3.0 corrects values and answers, 3.2.0 adds a route, and 3.1.0 two fields and five corrected values; the hops before them change the Python surface.
+Seven hops, newest first. 4.0.0 moves `schema_version` to 4: it renames and restructures what the wire and the SDK carry, so code written against 3.x changes as the first hop lists. Before it, `schema_version` was 3 throughout: no field was renamed, removed or retyped, so code written against an older 3.x release keeps parsing what a newer one sends. 3.3.0 corrects values and answers, 3.2.0 adds a route, and 3.1.0 two fields and five corrected values; the hops before them change the Python surface.
 
+<br>
+
+## 3.3.x to 4.0.0
+
+**Upgrade the SDK and the service together.** A 3.x SDK stops at its first call against a 4.0.0 service with `SchemaMismatch`, and the 4.0.0 SDK against a 3.x service, each naming which side to upgrade. A raw stream client is refused until its subscription names `"schema_version": 4`, and every REST answer says `Schema-Version: 4`. The decisions behind the new shapes are [0026, 0027 and 0028](Decisions.md).
+
+**Names and blocks on the wire.**
+
+| Where | 3.3.x | 4.0.0 |
+| :--- | :--- | :--- |
+| Every quantity block (`qty`, `volume`, `volume_24h`, `open_interest`, `bid_qty`, `ask_qty`) | `usd`, `usd_basis` with `method`, `close`, `close_ts` | `notional`, `notional_basis` with `method`, `price`, `ts`; `method` `close` is `row_price` |
+| Symbol info | `base_asset`, `quote_asset`, `price_precision`, `quantity_precision`, `tick_size`, `qty_step`, `min_qty`, `max_qty`, `min_notional`, `qty_unit`, `contract_size` | `base`, `quote`, a `price` block (`kind`, `tick` or `figures`, `decimals`), a `qty` block (`unit`, `contract_size`, `step`, `decimals`, `min`, `max`) and `notional.min`, with `market_type`, `status`, `timestamp` and `time_source` added |
+| Market list entries | `base_asset`, `quote_asset`, `qty_unit`, `contract_size` | `status`, `base`, `quote`, `qty` with `unit` and `contract_size` |
+| Order book | `qty_unit` after the levels | `qty` with `unit` and `contract_size` before them |
+| Mark price | `funding.valid_until_ts` | `funding.valid_until` with `kind`, `settlement` or `estimate`, and `ts` |
+| Funding history | `rate` | `funding` |
+| Capability map | `markets` | `market_types` |
+| Exchange overview and service root | `status`; overview entries keyed `name` | no `status`; entries keyed `market_type` |
+| `/{exchange}/status` | an adapter health string | removed |
+| Query keys `start` and `period` | accepted beside `end` and `interval` | refused with a `400` that names the key the route takes |
+
+The ticker gains `price_source`, the snapshots and open interest gain `time_source`, every candle gains `closed`, and the market list takes `?status=`. A kind is an open string, so a client meets a value it does not know as a value, not as a refused answer.
+
+**Null where nothing happened.**
+
+| Case | 3.3.x | 4.0.0 |
+| :--- | :--- | :--- |
+| Ticker with no last trade | `price` `0.0` | `price` `null`, and its notional `null` |
+| Ticker with no volume in 24 hours | the open, high, low and change each exchange sent, `0` on some | `null` |
+| Book side no one quotes | price and size `0.0` | `null` |
+| Hyperliquid's live open interest | `interval` as asked, `1h` by default, and `usd` `null` | `interval` `null`, priced at the mark Hyperliquid sends with it, `time_source` `"router"`; `interval` and `end` refused |
+| Symbol info of a market that does not trade | absent from `/markets/{symbol}` | served, with its `status` |
+| Ticker of a market that does not trade and has no statistics, as a contract Binance is settling | `502` | every price and `volume_24h` `null`, `time_source` `"router"` |
+
+**Errors.** Every error answer is one body, `{"error", "detail"}`, whose `error` is one of seven titles, and its status says who is at fault:
+
+* A path or query parameter that fails validation answers `400` `Invalid Request` with one sentence, where it answered `422` with a list. A method a path does not serve answers `404`, where it answered `405`.
+* A symbol the exchange does not list answers `400` titled `Unknown Symbol`; in Python it is still `BadRequest`, with `.error` saying which.
+* An answer the router cannot read answers `502` whatever error reading it raised, where it answered `400` or `500`, and an exchange error code other than an invalid argument answers `502`, where it answered `400`. An exchange's invalid-argument codes still answer `400`.
+* A stream that refuses or ends a subscription sends the error body first, and closes with `1003` when the subscription is at fault and `1011` when the exchange is. An unlisted symbol closes with `1003`, where it closed with `1008`, and an unregistered exchange or a market type the exchange does not offer is refused with the body after the connection opens, where the handshake failed with `403`.
+* A subscription the exchange refuses raises `BadRequest` in Python, where it raised `NotSupported`, and a market type the exchange does not offer raises `BadRequest` on a stream in both modes.
+
+**Streams.** The router sends `subscribed` when the exchange takes a subscription and `lost` when the exchange connection drops, then `subscribed` again when it takes the topic back; a raw client tells them from data by their single key. The SDK yields data only and warns once per gap with its bounds, its own reconnects included.
+
+**Python names.**
+
+| 3.3.x | 4.0.0 |
+| :--- | :--- |
+| `volume_usd`, `qty_usd`, `open_interest_usd`, `volume_24h_usd`, `bid_qty_usd`, `ask_qty_usd` | `volume_notional`, `qty_notional`, `open_interest_notional`, `volume_24h_notional`, `bid_qty_notional`, `ask_qty_notional` |
+| `df.attrs["usd_basis"]` | `df.attrs["notional_basis"]` |
+| funding frame columns `rate`, `cycle_ms` | `funding_per_cycle`, `funding_cycle_ms` |
+| open interest attr `oi_unit` | removed; `open_interest_unit` |
+| symbol info keys `base_asset`, `quote_asset`, `price_precision`, `quantity_precision`, `tick_size`, `qty_step`, `min_qty`, `max_qty`, `min_notional`, `contract_size` | `base`, `quote`, `price_kind`, `price_tick`, `price_figures`, `price_decimals`, `qty_unit`, `qty_contract_size`, `qty_step`, `qty_decimals`, `qty_min`, `qty_max`, `notional_min` |
+| `start=` and `period=` on series methods and `*_many` | removed; `end=` and `interval=` |
+| `get_markets(...)` returning `{"markets": [...]}` | `get_markets(...)` returning the list |
+| `get_exchange_status(exchange)` | removed |
+
+Candle frames lead with a `closed` column, ticker and book ticker rows carry `time_source` and the ticker `price_source`, mark price rows `funding_valid_until_kind`, the order book's `attrs` carry `qty_contract_size` and `time_source`, and open interest's `attrs` carry `time_source`. Every row and frame warns on a kind the SDK does not know and keeps the value.
+
+<br>
 <br>
 
 ## 3.2.x to 3.3.0
