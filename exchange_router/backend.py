@@ -27,8 +27,10 @@ from .exchanges.base import (
     SubscriptionRefused,
     UnknownSymbolError,
     UpstreamUnavailableError,
+    control_frame,
     join_open_interest_basis,
     series_interval,
+    stream_events,
     symbol_info_to_lite,
 )
 from .models import MarketType
@@ -38,6 +40,8 @@ from .version import SCHEMA_VERSION, VERSION
 logger = logging.getLogger(__name__)
 
 MAX_SLEEP_S = 60.0
+
+STREAM_BUFFER = 1024
 
 FATAL_CLOSE_CODES = (1003, 1008)
 
@@ -559,18 +563,44 @@ class LocalBackend(Backend):
             raise BadRequest(f"channel: '{channel}' is not a stream on {exchange} {mt.value}; /{exchange}/capabilities lists the channels", 400, "Invalid Request")
         method = getattr(adapter, f"stream_{channel}")
 
+        frames: asyncio.Queue = asyncio.Queue(maxsize=STREAM_BUFFER)
+
+        def event(kind: str, ts: int, reason: Optional[str] = None) -> None:
+            if frames.full():
+                frames.get_nowait()
+            frames.put_nowait(SubscriptionRefused(reason) if kind == "refused" else control_frame(kind, channel, listed, ts))
+
+        async def pump() -> None:
+            stream_events.set(event)
+            try:
+                async for item in method(mt, listed):
+                    await frames.put(to_jsonable_python(item))
+                await frames.put(None)
+            except Exception as exc:
+                await frames.put(exc)
+
         try:
-            symbol = await adapter.listed_symbol(mt, symbol)
-            async for item in method(mt, symbol):
-                yield to_jsonable_python(item)
-
-        except RouterError:
-            raise
-
+            listed = await adapter.listed_symbol(mt, symbol)
         except Exception as exc:
-            if is_retryable_stream_error(exc):
-                raise
             raise error_for_fault(exc) from exc
+
+        task = asyncio.create_task(pump())
+        try:
+            while True:
+                item = await frames.get()
+                if item is None:
+                    return
+                if isinstance(item, RouterError) or (isinstance(item, Exception) and is_retryable_stream_error(item) and not isinstance(item, UpstreamUnavailableError)):
+                    raise item
+                if isinstance(item, Exception):
+                    raise error_for_fault(item) from item
+                yield item
+        finally:
+            task.cancel()
+            try:
+                await task
+            except BaseException:
+                pass
 
 
     async def close(self) -> None:

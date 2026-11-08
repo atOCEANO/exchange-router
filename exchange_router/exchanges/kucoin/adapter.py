@@ -583,7 +583,7 @@ class KucoinAdapter(BaseExchange):
         q = await hub.subscribe(topic)
         try:
             while True:
-                msg = await q.get()
+                msg = await hub.next(q)
                 yield msg
         finally:
             await hub.unsubscribe(topic, q)

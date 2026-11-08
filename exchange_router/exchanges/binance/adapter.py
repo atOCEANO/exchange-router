@@ -502,7 +502,7 @@ class BinanceAdapter(BaseExchange):
 
         try:
             while True:
-                msg  = await q.get()
+                msg  = await hub.next(q)
                 data = msg.get("data") if isinstance(msg, dict) else None
                 if data is None:
                     continue

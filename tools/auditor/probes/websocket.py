@@ -63,6 +63,7 @@ class WebSocketProbe(Probe):
         started         = time.time()
         frames_received = 0
         first_frame_ms: Optional[float] = None
+        subscribed_ms: Optional[float]  = None
         last_error: Optional[str]       = None
         bad_frame: Optional[Dict[str, Any]] = None
 
@@ -83,8 +84,6 @@ class WebSocketProbe(Probe):
                         break
 
                     arrived = (time.time() - started) * 1000.0
-                    if first_frame_ms is None:
-                        first_frame_ms = arrived
 
                     try:
                         msg = json.loads(raw)
@@ -92,9 +91,21 @@ class WebSocketProbe(Probe):
                         bad_frame = {"reason": "non-json", "preview": str(raw)[:120]}
                         break
 
+                    if isinstance(msg, dict) and len(msg) == 1 and next(iter(msg)) in ("subscribed", "lost"):
+                        if subscribed_ms is None and "subscribed" in msg:
+                            subscribed_ms = arrived
+                        continue
+
                     if isinstance(msg, dict) and msg.get("error"):
-                        bad_frame = {"reason": "upstream_error", "error": msg["error"]}
+                        bad_frame = {"reason": "upstream_error", "error": f"{msg['error']}: {msg.get('detail')}"}
                         break
+
+                    if subscribed_ms is None:
+                        bad_frame = {"reason": "order", "error": "a data frame came before subscribed"}
+                        break
+
+                    if first_frame_ms is None:
+                        first_frame_ms = arrived
 
                     if self.model is not None:
                         shape_err = validate_one(msg, self.model)
@@ -135,11 +146,22 @@ class WebSocketProbe(Probe):
                 ended=ended,
             )]
 
+        if subscribed_ms is None:
+            return [self.result(
+                ctx, self.name, started,
+                status="fail",
+                error_type=ErrorType.LOGIC,
+                message="no subscribed frame: the router never said the venue took the subscription",
+                evidence={"channel": self.channel, "url": ws_url},
+                ended=ended,
+            )]
+
         evidence = {
             "channel":         self.channel,
             "frames_received": frames_received,
             "min_required":    self.min_frames,
             "first_frame_ms":  first_frame_ms,
+            "subscribed_ms":   subscribed_ms,
             "window_s":        WS_TEST_DURATION,
         }
 

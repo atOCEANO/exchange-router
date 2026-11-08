@@ -516,7 +516,7 @@ class HyperliquidAdapter(BaseExchange):
             raise
         try:
             while True:
-                msg = await q.get()
+                msg = await hub.next(q)
                 yield msg
         finally:
             await self._release_topic(topic, q, hub)

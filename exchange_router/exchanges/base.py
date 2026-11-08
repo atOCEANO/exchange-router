@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import decimal
 import itertools
 import logging
@@ -18,6 +19,7 @@ from exchange_router.models import (
     FundingCurrent, FundingDeadline, FundingHistorical, FundingConvention,
     QtyUnit, QtyGrid, PriceTick, PriceSignificantFigures, Notional,
 )
+from exchange_router.version import SCHEMA_VERSION
 
 
 logger = logging.getLogger(__name__)
@@ -50,6 +52,14 @@ class UnknownSymbolError(RequestError):
 
 
 UNREADABLE = (UpstreamDataError, ValueError, KeyError, TypeError, IndexError, AttributeError, httpx.HTTPStatusError)
+
+stream_events: contextvars.ContextVar = contextvars.ContextVar("stream_events", default=None)
+
+
+def control_frame(kind: str, channel: str, symbol: str, ts: int) -> Dict[str, Any]:
+    if kind == "subscribed":
+        return {kind: {"channel": channel, "symbol": symbol, "schema_version": SCHEMA_VERSION, "ts": ts}}
+    return {kind: {"channel": channel, "symbol": symbol, "ts": ts}}
 
 
 _request_ids = itertools.count(1)
@@ -391,6 +401,14 @@ async def join_open_interest_basis(adapter, market_type: MarketType, symbol: str
     return joined
 
 
+class StreamEvent:
+
+    def __init__(self, kind: str, ts: int, detail: Optional[str] = None):
+        self.kind   = kind
+        self.ts     = ts
+        self.detail = detail
+
+
 class StreamHub:
     ANSWER_S = 30
 
@@ -421,6 +439,9 @@ class StreamHub:
         self._subscribed_topics: Set[str] = set()
         self._answers: Dict[str, asyncio.Future] = {}
         self._requests: Dict[str, List[str]] = {}
+        self._events: Dict[asyncio.Queue, Callable[[str, int, Optional[str]], None]] = {}
+        self._live_queues: Set[asyncio.Queue] = set()
+        self._live: Set[str] = set()
         self._lock      = asyncio.Lock()
         self._connected = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
@@ -441,6 +462,9 @@ class StreamHub:
                 if self._answer is not None:
                     self._answers[topic] = asyncio.get_running_loop().create_future()
             self._queues[topic].append(q)
+            event = stream_events.get()
+            if event is not None:
+                self._events[q] = event
             answered = self._answers.get(topic)
             if not self._closed and (self._task is None or self._task.done()):
                 self._task = asyncio.create_task(self._run())
@@ -467,6 +491,10 @@ class StreamHub:
                     raise UpstreamUnavailableError(f"{self.name} gave no answer in {self.ANSWER_S} s to the subscription of {topic}")
                 if refusal is not None:
                     raise SubscriptionRefused(f"{self.name} refused {topic}: {refusal}")
+            elif self._connected.is_set():
+                self._live.add(topic)
+            if topic in self._live:
+                self._mark_live(topic)
         except BaseException:
             await self.unsubscribe(topic, q)
             raise
@@ -478,6 +506,8 @@ class StreamHub:
         drop_topic = False
 
         async with self._lock:
+            self._events.pop(q, None)
+            self._live_queues.discard(q)
             qs = self._queues.get(topic) or []
             qs = [x for x in qs if x is not q]
             if qs:
@@ -487,6 +517,7 @@ class StreamHub:
                 drop_topic = True
                 self._subscribed_topics.discard(topic)
                 self._answers.pop(topic, None)
+                self._live.discard(topic)
                 self._requests = {key: [t for t in topics if t != topic] for key, topics in self._requests.items() if topics != [topic]}
 
         if drop_topic and self._connected.is_set():
@@ -547,10 +578,63 @@ class StreamHub:
             answered = self._answers.get(topic)
             if answered is None:
                 continue
+            if refusal is None:
+                self._live.add(topic)
+                self._mark_live(topic)
             if not answered.done():
                 answered.set_result(refusal)
             elif refusal is not None:
                 self._log.warning(f"{topic} refused on resubscription: {refusal}")
+                for q in list(self._queues.get(topic) or []):
+                    self._tell(q, "refused", f"{self.name} refused {topic}: {refusal}")
+
+
+    def _tell(self, q: asyncio.Queue, kind: str, detail: Optional[str] = None) -> None:
+        if q in self._events:
+            self._offer(q, StreamEvent(kind, int(time.time() * 1000), detail))
+
+
+    @staticmethod
+    def _offer(q: asyncio.Queue, item: Any) -> None:
+        try:
+            q.put_nowait(item)
+        except asyncio.QueueFull:
+            try:
+                q.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            try:
+                q.put_nowait(item)
+            except asyncio.QueueFull:
+                pass
+
+
+    async def next(self, q: asyncio.Queue) -> Any:
+        while True:
+            item = await q.get()
+            if not isinstance(item, StreamEvent):
+                return item
+            event = self._events.get(q)
+            if event is None:
+                continue
+            try:
+                event(item.kind, item.ts, item.detail)
+            except Exception as e:
+                self._log.warning(f"stream event {item.kind} failed: {e!r}")
+
+
+    def _mark_live(self, topic: str) -> None:
+        for q in self._queues.get(topic) or []:
+            if q not in self._live_queues:
+                self._live_queues.add(q)
+                self._tell(q, "subscribed")
+
+
+    def _mark_lost(self) -> None:
+        self._live.clear()
+        for q in list(self._live_queues):
+            self._tell(q, "lost")
+        self._live_queues.clear()
 
 
     async def _keepalive_loop(self, ws: Any) -> None:
@@ -604,6 +688,10 @@ class StreamHub:
                     self._subscribed_topics = set(topics)
                 if topics:
                     await self._send_payloads(self._sub_payload(topics), topics)
+                    if self._answer is None:
+                        for topic in topics:
+                            self._live.add(topic)
+                            self._mark_live(topic)
 
                 self._connected.set()
 
@@ -626,19 +714,8 @@ class StreamHub:
                     topic = self._route(msg)
                     if topic is None:
                         continue
-                    queues = self._queues.get(topic) or []
-                    for q in queues:
-                        try:
-                            q.put_nowait(msg)
-                        except asyncio.QueueFull:
-                            try:
-                                q.get_nowait()
-                            except asyncio.QueueEmpty:
-                                pass
-                            try:
-                                q.put_nowait(msg)
-                            except asyncio.QueueFull:
-                                pass
+                    for q in self._queues.get(topic) or []:
+                        self._offer(q, msg)
 
             except asyncio.CancelledError:
                 break
@@ -647,6 +724,8 @@ class StreamHub:
             finally:
                 self._connected.clear()
                 self._ws = None
+                if not self._closed:
+                    self._mark_lost()
                 if ka_task is not None:
                     ka_task.cancel()
                 if ws is not None:

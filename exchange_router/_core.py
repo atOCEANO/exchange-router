@@ -1,5 +1,6 @@
 import asyncio
 import inspect
+import time
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -444,18 +445,32 @@ class AsyncCore:
         return result
 
 
-    async def subscribe(self, exchange: str, market_type: str, channel: str, symbol: str):
+    async def _messages(self, exchange: str, market_type: str, channel: str, symbol: str, gap: Dict[str, int]):
         self._check_open()
         await self._ensure_handshake()
 
         async for message in self._backend.stream(exchange, market_type, channel, symbol):
+            control = next(iter(message)) if isinstance(message, dict) and len(message) == 1 else None
+            if control == "lost":
+                gap.setdefault("from", message["lost"]["ts"])
+                continue
+            if control == "subscribed":
+                if "from" in gap:
+                    emit([f"stream {exchange}/{market_type}/{channel}/{symbol}: the venue was lost from {gap.pop('from')} to {message['subscribed']['ts']}; messages between the two may be missing"], True)
+                continue
+            yield message
+
+
+    async def subscribe(self, exchange: str, market_type: str, channel: str, symbol: str):
+        async for message in self._messages(exchange, market_type, channel, symbol, {}):
             yield message
 
 
     async def stream(self, exchange: str, market_type: str, channel: str, symbol: str, reconnect: bool = True):
+        gap: Dict[str, int] = {}
         while True:
             try:
-                async for message in self.subscribe(exchange, market_type, channel, symbol):
+                async for message in self._messages(exchange, market_type, channel, symbol, gap):
                     yield message
 
                 if not reconnect:
@@ -465,4 +480,5 @@ class AsyncCore:
                 if not reconnect or not is_retryable_stream_error(error):
                     raise
 
+                gap.setdefault("from", int(time.time() * 1000))
                 await asyncio.sleep(2)
