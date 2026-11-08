@@ -819,13 +819,12 @@ class BybitAdapter(BaseExchange):
                 quote         = quote,
                 interval      = period,
                 open_interest = build_oi_value(
-                    native          = float(i["openInterest"]),
-                    oi_unit         = oi_unit,
-                    contract_size   = contract_size,
-                    candle_close    = None,
-                    candle_close_ts = None,
+                    native        = float(i["openInterest"]),
+                    oi_unit       = oi_unit,
+                    contract_size = contract_size,
                 ),
                 timestamp     = self.normalize_timestamp(i["timestamp"]),
+                time_source   = "venue",
             ) for i in data["list"]]
 
             return sorted(res_list, key=lambda x: x.timestamp)

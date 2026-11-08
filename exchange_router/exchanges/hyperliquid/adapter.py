@@ -782,8 +782,10 @@ class HyperliquidAdapter(BaseExchange):
             raise NotImplementedError(f"{self.name} does not support open_interest for {market_type.value}")
         model_sym, coin, quote = await self._lookup(market_type, symbol)
 
-        ctx = await self._asset_ctx(market_type, coin)
-        oi  = ctx.get("openInterest")
+        ctx  = await self._asset_ctx(market_type, coin)
+        read = int(time.time() * 1000)
+        oi   = ctx.get("openInterest")
+        mark = ctx.get("markPx")
         if oi is None:
             raise ValueError(f"Hyperliquid returned no open interest for {coin}")
 
@@ -791,15 +793,17 @@ class HyperliquidAdapter(BaseExchange):
             symbol        = model_sym,
             market_type   = market_type,
             quote         = quote,
-            interval      = period,
+            interval      = None,
             open_interest = build_oi_value(
-                native          = float(oi),
-                oi_unit         = "base",
-                contract_size   = None,
-                candle_close    = None,
-                candle_close_ts = None,
+                native        = float(oi),
+                oi_unit       = "base",
+                contract_size = None,
+                method        = "mark",
+                price         = float(mark) if mark is not None else None,
+                price_ts      = read if mark is not None else None,
             ),
-            timestamp     = int(time.time() * 1000),
+            timestamp     = read,
+            time_source   = "router",
         )]
 
 

@@ -921,10 +921,9 @@ class BinanceAdapter(BaseExchange):
                     native        = float(i["sumOpenInterest"]),
                     oi_unit       = oi_unit,
                     contract_size = contract_size,
-                    candle_close  = None,
-                    candle_close_ts = None,
                 ),
                 timestamp     = self.normalize_timestamp(i["timestamp"]),
+                time_source   = "venue",
             ) for i in data]
 
         return await self._paginate_backwards(fetch_batch_backward, limit, 500)

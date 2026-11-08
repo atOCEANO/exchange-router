@@ -426,6 +426,7 @@ class FakeExchange(BaseExchange):
                 interval      = period,
                 open_interest = build_oi_value(1000.0 + i, unit, size),
                 timestamp     = start + i * step,
+                time_source   = "venue",
             ))
 
         return out

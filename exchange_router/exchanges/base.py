@@ -99,7 +99,7 @@ def build_volume_value(native: float, volume_unit: str, contract_size: Optional[
     )
 
 
-def build_oi_value(native: float, oi_unit: str, contract_size: Optional[float], candle_close: Optional[float] = None, candle_close_ts: Optional[int] = None) -> OiValue:
+def build_oi_value(native: float, oi_unit: str, contract_size: Optional[float], method: str = "candle_close", price: Optional[float] = None, price_ts: Optional[int] = None) -> OiValue:
     if oi_unit == "contract":
         if contract_size is None:
             raise ValueError("build_oi_value: contract_size is required when oi_unit == 'contract'")
@@ -113,12 +113,12 @@ def build_oi_value(native: float, oi_unit: str, contract_size: Optional[float], 
             notional_basis = basis,
         )
 
-    if candle_close is not None and candle_close_ts is not None:
-        notional = native * candle_close
-        basis    = NotionalBasis(method="candle_close", price=candle_close, ts=candle_close_ts)
+    if price is not None and price_ts is not None:
+        notional = native * price
+        basis    = NotionalBasis(method=method, price=price, ts=price_ts)
     else:
         notional = None
-        basis    = NotionalBasis(method="candle_close", price=None, ts=None)
+        basis    = NotionalBasis(method=method, price=None, ts=None)
 
     return OiValue(
         native         = native,
@@ -325,7 +325,7 @@ def bar_closed(opened: int, interval: str) -> bool:
 async def join_open_interest_basis(adapter, market_type: MarketType, symbol: str, period: str,
                                    start_time: Optional[int], limit: int,
                                    oi_rows: List[OpenInterest]) -> List[OpenInterest]:
-    if market_type != MarketType.LINEAR or not oi_rows:
+    if market_type != MarketType.LINEAR or not any(row.open_interest.notional_basis.method == "candle_close" for row in oi_rows):
         return oi_rows
 
     intervals = route_block(adapter.get_capabilities(), market_type, "candles").get("intervals")
@@ -348,17 +348,17 @@ async def join_open_interest_basis(adapter, market_type: MarketType, symbol: str
     joined = []
     for oi_row in oi_rows:
         matching_close = close_by_close_ts.get(oi_row.timestamp)
-        if matching_close is None:
+        if matching_close is None or oi_row.open_interest.notional_basis.method != "candle_close":
             joined.append(oi_row)
             continue
 
         oi_obj = oi_row.open_interest
         new_oi_value = build_oi_value(
-            native          = oi_obj.native,
-            oi_unit         = oi_obj.unit,
-            contract_size   = oi_obj.contract_size,
-            candle_close    = matching_close,
-            candle_close_ts = oi_row.timestamp,
+            native        = oi_obj.native,
+            oi_unit       = oi_obj.unit,
+            contract_size = oi_obj.contract_size,
+            price         = matching_close,
+            price_ts      = oi_row.timestamp,
         )
         joined.append(oi_row.model_copy(update={"open_interest": new_oi_value}))
 

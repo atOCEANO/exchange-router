@@ -29,7 +29,7 @@ ATTRS: Dict[str, List[str]] = {
     "trades":           ["quote", "qty_unit", "contract_size"],
     "agg_trades":       ["quote", "qty_unit", "contract_size"],
     "funding_rate":     ["quote", "funding_kind"],
-    "open_interest":    ["quote", "interval", "oi_unit", "open_interest_unit", "contract_size", "notional_basis"],
+    "open_interest":    ["quote", "interval", "oi_unit", "open_interest_unit", "contract_size", "notional_basis", "time_source"],
     "liquidations":     ["quote", "qty_unit", "contract_size"],
     "long_short_ratio": ["interval", "account_scope"],
 }
@@ -208,6 +208,7 @@ def _open_interest(rows: List[Dict], ctx: Dict[str, Any]) -> Tuple[pd.DataFrame,
     attrs["open_interest_unit"] = attrs["oi_unit"]
     attrs["contract_size"]      = _const(df, "open_interest_contract_size")
     attrs["notional_basis"]     = _const(df, "open_interest_notional_basis_method")
+    attrs["time_source"]        = _const(df, "time_source")
 
     warnings: List[str] = []
     if "open_interest_notional" in df.columns:

@@ -82,6 +82,7 @@ async def test_the_sdk_frame_reports_the_same_notionals_the_wire_does(router):
     assert notional[0] != notional[0]
     assert notional[1:] == pytest.approx([(1000.0 + i) * (100.0 + i - 1) for i in range(1, LIMIT)])
     assert df.attrs["notional_basis"] == "candle_close"
+    assert df.attrs["time_source"] == "venue"
 
 
 async def test_a_spot_market_has_no_open_interest_at_all(wire):

@@ -1268,13 +1268,12 @@ class KrakenAdapter(BaseExchange):
             quote         = quote,
             interval      = period,
             open_interest = build_oi_value(
-                native          = float(e["value"]),
-                oi_unit         = oi_unit,
-                contract_size   = contract_size,
-                candle_close    = None,
-                candle_close_ts = None,
+                native        = float(e["value"]),
+                oi_unit       = oi_unit,
+                contract_size = contract_size,
             ),
             timestamp     = self.normalize_timestamp(e["time"]),
+            time_source   = "venue",
         ) for e in elements]
         results.sort(key=lambda x: x.timestamp)
         if start_time:

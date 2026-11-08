@@ -727,17 +727,21 @@ class OpenInterest(BaseModel):
         ...,
         description="Quote currency.",
     )
-    interval: str = Field(
+    interval: Optional[str] = Field(
         ...,
-        description="Bucket size as a canonical string, e.g. '5m', '1h'. Matches the route's `period` parameter.",
+        description="Bucket size as a canonical string, e.g. '5m', '1h', matching the route's `period` parameter; null on a live reading, which samples no interval.",
     )
     open_interest: OiValue = Field(
         ...,
-        description="Open interest, with its notional in quote: contracts times contract_size on inverse; on linear, the close of the candle that ends at timestamp, joined by the router.",
+        description="Open interest, with its notional in quote: contracts times contract_size on inverse; on linear, the close of the candle that ends at timestamp, joined by the router, or on a live reading the mark price read with it.",
     )
     timestamp: int = Field(
         ...,
-        description="Bucket close time in unix milliseconds (end of `interval`).",
+        description="The moment the reading was taken, in unix milliseconds, by the clock time_source names: the end of interval on history, the time of the read on a live reading.",
+    )
+    time_source: str = Field(
+        ...,
+        description="Whose clock stamped the row. Known values: venue, the venue's own time for the reading; router, the router's clock when it read a live value the venue sends without one. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
     )
 
 

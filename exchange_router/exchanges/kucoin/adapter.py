@@ -1134,13 +1134,12 @@ class KucoinAdapter(BaseExchange):
                         quote         = quote,
                         interval      = period,
                         open_interest = build_oi_value(
-                            native          = native_value,
-                            oi_unit         = oi_unit_local,
-                            contract_size   = cs,
-                            candle_close    = None,
-                            candle_close_ts = None,
+                            native        = native_value,
+                            oi_unit       = oi_unit_local,
+                            contract_size = cs,
                         ),
                         timestamp     = ts,
+                        time_source   = "venue",
                     ))
                 except (ValueError, TypeError):
                     continue

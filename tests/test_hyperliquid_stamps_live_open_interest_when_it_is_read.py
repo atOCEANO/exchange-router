@@ -1,5 +1,6 @@
 import time
 
+from exchange_router.exchanges.base import join_open_interest_basis
 from exchange_router.exchanges.hyperliquid.adapter import HyperliquidAdapter
 from exchange_router.models import MarketType
 
@@ -46,6 +47,25 @@ async def test_the_live_reading_is_stamped_when_read_not_at_the_last_boundary():
     assert len(rows) == 1
     assert before <= rows[0].timestamp <= after
     assert rows[0].open_interest.native == 41522.0623
+    assert (rows[0].interval, rows[0].time_source) == (None, "router")
+
+
+async def test_the_live_reading_is_priced_at_the_mark_read_with_it_and_reads_no_candle():
+    async def no_candles(*args, **kwargs):
+        raise AssertionError("a reading priced at the mark reads no candle")
+
+    adapter = HyperliquidAdapter()
+    adapter._make_request = hyperliquid()
+    adapter.get_candles   = no_candles
+    try:
+        rows   = await adapter.get_open_interest(MarketType.LINEAR, "BTCUSDC", "1h", None, 1)
+        joined = await join_open_interest_basis(adapter, MarketType.LINEAR, "BTCUSDC", "1h", None, 1, rows)
+    finally:
+        await adapter.shutdown()
+
+    value = joined[0].open_interest
+    assert value.notional == 41522.0623 * 75765.0
+    assert value.notional_basis.model_dump() == {"method": "mark", "price": 75765.0, "ts": joined[0].timestamp}
 
 
 async def test_the_capability_lists_no_intervals_for_a_live_reading():
