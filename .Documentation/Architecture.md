@@ -101,7 +101,7 @@ The route resolves the exchange name to its registered adapter, the adapter make
 
 WebSocket streams do not follow the same path as REST. The `StreamManager` in `exchange_router/service/stream_manager.py` sits between clients and the adapter's streaming methods.
 
-When a client subscribes to a `(channel, symbol)` tuple on an exchange, the symbol is first checked against the exchange's listing, and one it does not list closes the connection with `1008`. The manager then builds a key of the form `{exchange}:{market_type}:{channel}:{symbol}` and checks whether an upstream task already exists for it.
+When a client subscribes to a `(channel, symbol)` tuple on an exchange, the symbol is first checked against the exchange's listing, and one it does not list is refused with the `Unknown Symbol` error body and a close with `1003`. The manager then builds a key of the form `{exchange}:{market_type}:{channel}:{symbol}` and checks whether an upstream task already exists for it.
 
 <div align="center">
   <img src="imgs/204647.png" alt="WebSocket fan-out lifecycle" width="90%" />
@@ -110,10 +110,10 @@ When a client subscribes to a `(channel, symbol)` tuple on an exchange, the symb
 
 <br>
 
-1. **First subscriber.** The manager starts an async task that opens a single upstream WebSocket via `adapter.stream_*(market_type, symbol)`. The adapter's hub subscribes at the exchange and waits up to 30 seconds for its answer; a refusal closes every client on the key with `1003` and the exchange's reason, and no answer closes them with `1011`. Every message produced by the adapter is fanned out to all local clients registered under the same key.
-2. **Additional subscribers.** New clients attach to the existing task. No new upstream connection is opened, which keeps the router well under per-IP connection limits on exchanges that enforce them.
-3. **Last subscriber leaves.** The manager cancels the upstream task and releases its resources. The next subscriber to the same tuple starts a fresh connection.
-4. **Upstream failure.** If the adapter's stream terminates (network drop, exchange-side reset), the manager closes every attached client with code `1011` and clears the entry. Clients are expected to reconnect and re-subscribe. A hub whose exchange stops answering its pings for two keepalive intervals reconnects on its own and subscribes again, and the clients stay attached.
+1. **First subscriber.** The manager starts an async task that opens a single upstream WebSocket via `adapter.stream_*(market_type, symbol)`. The adapter's hub subscribes at the exchange and waits up to 30 seconds for its answer: an acceptance sends every client on the key a `subscribed` frame, a refusal sends them the error body with the exchange's reason and closes them with `1003`, and no answer sends the `503` body and closes them with `1011`. Every message produced by the adapter is fanned out to all local clients registered under the same key.
+2. **Additional subscribers.** New clients attach to the existing task and get `subscribed` before any data, at once when the stream is already live. No new upstream connection is opened, which keeps the router well under per-IP connection limits on exchanges that enforce them.
+3. **Last subscriber leaves.** The manager cancels the upstream task and releases its resources, whether the client closed its connection or the manager closed it for not taking a frame within 5 seconds. The next subscriber to the same tuple starts a fresh connection.
+4. **Upstream failure.** If the adapter's stream terminates (network drop, exchange-side reset), the manager sends every attached client the error body, `503` when the exchange ended the stream, closes it with code `1011` and clears the entry. Clients are expected to reconnect and re-subscribe. A hub whose exchange connection drops, or stops answering its pings for two keepalive intervals, sends `lost`, reconnects on its own and subscribes again, and sends `subscribed` when the exchange takes the topic back; the clients stay attached. A topic the exchange refuses on that resubscription ends with its error body.
 
 This is also why re-subscribing on the same connection is not supported. Each connection is bound to one stream task, and the router has no mechanism for moving a client between tasks.
 
@@ -142,24 +142,23 @@ The router normalizes failures into a small set of HTTP responses. It helps to s
 
 Adapters raise six exception types:
 
-* **`ValueError`** for bad input or upstream validation failures (a symbol the exchange does not list, out-of-range limit, a `limit` beyond the page cap, an interval not declared in the capability map, adapter-side parameter rejections). A global exception handler in `main.py` converts these into `400 Bad Request`, preserving the message in `detail`. The route layer itself raises `ValueError` for undeclared `interval` values before the adapter is called, validated against the capability map, and for a symbol the exchange does not list, through `listed_symbol`.
+* **`RequestError`** (defined in `exchange_router/exchanges/base.py`, a subclass of `ValueError`) for a mistake in the request: an out-of-range limit, a `limit` beyond the page cap, an interval not declared in the capability map, an `interval` or `end` sent to a live reading, or an argument the exchange refused with its own invalid-argument code. A handler in `main.py` converts it into `400` titled `Invalid Request`, preserving the message in `detail`. Its subclass **`UnknownSymbolError`**, raised by `listed_symbol` for a symbol the exchange does not list, answers `400` titled `Unknown Symbol`. The route layer raises both itself before the adapter is called.
+* **Anything the router cannot read.** `UpstreamDataError` (also in `base.py`), raised when a record arrives without its own value, a trade without a price or a funding row without a rate, which the router will not fill in, and any `ValueError`, `KeyError`, `TypeError`, `IndexError`, `AttributeError` or HTTP status error that escapes an adapter, together `base.UNREADABLE`. Their handler returns `502 Bad Upstream Response`, since an answer the router cannot read is the exchange's fault, not the caller's.
 * **`UpstreamUnavailableError`** (defined in `exchange_router/exchanges/base.py`, a subclass of `AdapterError`, not `ValueError`) when the upstream is throttling or has banned the IP: active backoff windows past the adapter's fail-fast threshold (30s on Bybit and KuCoin, 60s on OKX), Bybit 403 bans, an upstream 5xx that survives the retry budget, an outage the exchange reports inside a `200` answer, and any adapter's exhausted retry budget (message `"Max retries exceeded for {url}"`). The handler in `main.py` converts these into `503 Service Unavailable` with a `Retry-After` header when the adapter knows the wait.
-* **`UpstreamDataError`** (also in `base.py`) when a record arrives without its own value, a trade without a price or a funding row without a rate, which the router will not fill in. Its handler returns `502 Bad Upstream Response`.
-* **`SubscriptionRefused`** (also in `base.py`) when an exchange refuses a stream subscription. The stream manager closes the client with `1003` and the exchange's reason; local mode raises it as `NotSupported`.
+* **`SubscriptionRefused`** (also in `base.py`) when an exchange refuses a stream subscription. The stream manager sends the client the `400` error body with the exchange's reason and closes it with `1003`; local mode raises it as `BadRequest`.
 * **`NotImplementedError`** when the adapter does not implement a method for a given market type. The base class raises this by default, and the route layer catches it and returns `501 Not Implemented`.
 * **`pydantic.ValidationError`** when an upstream response cannot be normalized into the schema. A `ValidationError` is not a `ValueError` in pydantic v2, and its own handler in `main.py` returns `502 Bad Upstream Response`. Any other uncaught exception falls through to a generic handler that returns `500 Internal Server Error`.
 
-The route layer adds three more responses that adapters never raise themselves:
+The route layer adds more responses that adapters never raise themselves:
 
-* **`404 Not Found`** when the exchange name is not in `EXCHANGE_REGISTRY`. Raised directly by `validate_request` before the adapter is ever called.
-* **`400 Bad Request`** when the market type is known but the adapter does not declare support for it. Also raised by `validate_request`, checked against each adapter's `supported_market_types` list.
-* **`422 Unprocessable Entity`** when a path or query parameter fails FastAPI's pydantic validation (for example, an unrecognised `market_type` enum value). Raised by FastAPI before the route handler runs.
+* **`404 Not Found`** when the exchange name is not in `EXCHANGE_REGISTRY`, raised by `validate_request` before the adapter is ever called, and for a path no route serves, whatever the method.
+* **`400 Invalid Request`** when the market type is known but the adapter does not declare support for it, also raised by `validate_request`; when a path or query parameter fails FastAPI's validation, which the handler turns into one sentence naming the parameter; and when the query carries a key the route does not take, refused by name before the route runs.
 
 One more condition does not correspond to an exception type at all:
 
 * **Upstream rate limiting** (429 or 418, or proactive detection via response headers) causes the adapter to wait for the declared backoff window before retrying. The client request is delayed, not rejected. When the wait exceeds the adapter's fail-fast threshold (30s on Bybit and KuCoin, 60s on OKX), the adapter raises `UpstreamUnavailableError` instead, which falls under the second bullet above. Binance and Kraken do not implement a single fail-fast cutoff; they sleep and retry until the upstream clears or the retry budget exhausts, then raise `UpstreamUnavailableError` (Kraken retries 8 times on Spot REST and 5 on Futures, and its waits are exponential to a 60s ceiling with 0.5x to 1.5x jitter, so a Spot budget runs out after roughly 1 to 3 minutes).
 
-The `detail` field in error responses always carries the underlying exception message, whether it came from the adapter or the upstream exchange, and every error body names its kind in `error`. Nothing is rewritten or swallowed.
+The `detail` field in error responses always carries the underlying exception message, whether it came from the adapter or the upstream exchange, and every error body names one of seven titles in `error`, on REST and on a stream before it closes. Nothing is rewritten or swallowed.
 
 <br>
 <br>
