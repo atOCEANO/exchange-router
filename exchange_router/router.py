@@ -361,5 +361,5 @@ class ExchangeRouterClient(Router):
     def __init__(self, base_url: str = "http://localhost:8040", timeout: int = 30, max_retries: int = 3,
                  verbose: bool = True, backend=None):
         warnings.warn(DEPRECATION, DeprecationWarning, stacklevel=2)
-        self._loop = _LoopThread()
         self._core = AsyncCore(base_url=base_url, timeout=timeout, max_retries=max_retries, verbose=verbose, backend=backend)
+        self._loop = _LoopThread()
