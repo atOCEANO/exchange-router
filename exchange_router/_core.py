@@ -270,14 +270,20 @@ class AsyncCore:
         v = self.verbose if verbose is None else verbose
 
         await self._preflight(exchange, market_type, "ticker", symbol=symbol, verbose=v)
-        return rows.ticker_row(await self._fetch("ticker", exchange, market_type, symbol))
+        data = await self._fetch("ticker", exchange, market_type, symbol)
+        emit([w for w in [frames._quote_warning(data.get("quote"), {"exchange": exchange, "market_type": market_type, "symbol": symbol}, "ticker")] if w], v)
+
+        return rows.ticker_row(data)
 
 
     async def get_book_ticker(self, exchange: str, market_type: str, symbol: str, verbose: Optional[bool] = None) -> rows.Row:
         v = self.verbose if verbose is None else verbose
 
         await self._preflight(exchange, market_type, "book_ticker", symbol=symbol, verbose=v)
-        return rows.book_ticker_row(await self._fetch("book_ticker", exchange, market_type, symbol))
+        data = await self._fetch("book_ticker", exchange, market_type, symbol)
+        emit([w for w in [frames._quote_warning(data.get("quote"), {"exchange": exchange, "market_type": market_type, "symbol": symbol}, "book_ticker")] if w], v)
+
+        return rows.book_ticker_row(data)
 
 
     async def get_mark_price(self, exchange: str, market_type: str, symbol: str, verbose: Optional[bool] = None) -> rows.Row:
