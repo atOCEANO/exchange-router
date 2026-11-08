@@ -23,6 +23,7 @@ from .errors import (
 )
 from .exchanges import EXCHANGE_REGISTRY, get_adapter, load_exchanges
 from .exchanges.base import (
+    SubscriptionRefused,
     UpstreamDataError,
     UpstreamUnavailableError,
     join_open_interest_basis,
@@ -39,7 +40,7 @@ MAX_SLEEP_S = 60.0
 
 FATAL_CLOSE_CODES = (1003, 1008)
 
-STREAM_RETRYABLE = (websockets.ConnectionClosed, websockets.WebSocketException, OSError)
+STREAM_RETRYABLE = (websockets.ConnectionClosed, websockets.WebSocketException, OSError, UpstreamUnavailableError)
 
 SERVICE_ROUTES = ("status", "version", "exchanges")
 
@@ -77,7 +78,7 @@ def error_for_fault(exc: Exception) -> RouterError:
     if isinstance(exc, (ValidationError, UpstreamDataError)):
         return RouterError(str(exc), 502)
 
-    if isinstance(exc, NotImplementedError):
+    if isinstance(exc, (NotImplementedError, SubscriptionRefused)):
         return NotSupported(str(exc), 501)
 
     if isinstance(exc, ValueError):

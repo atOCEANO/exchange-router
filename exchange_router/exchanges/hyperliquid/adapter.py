@@ -4,7 +4,7 @@ import random
 import time
 import websockets
 import logging
-from typing import List, AsyncGenerator, Dict, Any, Optional, Set
+from typing import List, AsyncGenerator, Dict, Any, Optional, Set, Tuple
 from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
@@ -423,6 +423,17 @@ class HyperliquidAdapter(BaseExchange):
         return out
 
 
+    def _answer(self, msg: Any) -> Optional[Tuple[str, Optional[str]]]:
+        if not isinstance(msg, dict) or msg.get("channel") != "subscriptionResponse":
+            return None
+        data = msg.get("data") or {}
+        sent = data.get("subscription")
+        if data.get("method") != "subscribe" or not isinstance(sent, dict):
+            return None
+        topic = next((t for t, arg in self._topic_args.items() if all(sent.get(k) == v for k, v in arg.items())), None)
+        return (topic, None) if topic else None
+
+
     def _route(self, msg: Any) -> Optional[str]:
         if not isinstance(msg, dict):
             return None
@@ -458,6 +469,7 @@ class HyperliquidAdapter(BaseExchange):
             route=self._route,
             keepalive_payload={"method": "ping"},
             keepalive_interval=50.0,
+            answer=self._answer,
         )
 
 
@@ -495,7 +507,11 @@ class HyperliquidAdapter(BaseExchange):
 
     async def _ws_connect(self, topic: str, sub_arg: Dict) -> AsyncGenerator[Dict, None]:
         hub = await self._acquire_topic(topic, sub_arg)
-        q   = await hub.subscribe(topic)
+        try:
+            q = await hub.subscribe(topic)
+        except BaseException:
+            await self._release_topic(topic, None, hub)
+            raise
         try:
             while True:
                 msg = await q.get()

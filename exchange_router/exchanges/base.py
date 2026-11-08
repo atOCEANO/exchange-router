@@ -1,5 +1,6 @@
 import asyncio
 import decimal
+import itertools
 import logging
 import math
 import time
@@ -32,6 +33,17 @@ class UpstreamUnavailableError(AdapterError):
 
 class UpstreamDataError(AdapterError):
     pass
+
+
+class SubscriptionRefused(AdapterError):
+    pass
+
+
+_request_ids = itertools.count(1)
+
+
+def next_request_id() -> int:
+    return next(_request_ids)
 
 
 def venue_value(record: Dict[str, Any], key: str, what: str) -> Any:
@@ -299,6 +311,9 @@ async def join_open_interest_basis(adapter, market_type: MarketType, symbol: str
 
 
 class StreamHub:
+    ANSWER_S = 30
+
+
     def __init__(self,
                  name: str,
                  connect: Callable[[], Awaitable[Any]],
@@ -307,7 +322,9 @@ class StreamHub:
                  route: Callable[[Any], Optional[str]],
                  keepalive_payload: Optional[Any] = None,
                  keepalive_interval: float = 0.0,
-                 queue_size: int = 1024):
+                 queue_size: int = 1024,
+                 answer: Optional[Callable[[Any], Optional[Tuple[str, Optional[str]]]]] = None,
+                 request_key: Optional[Callable[[Any], Optional[str]]] = None):
         self.name                = name
         self._connect            = connect
         self._sub_payload        = subscribe_payload
@@ -316,9 +333,13 @@ class StreamHub:
         self._keepalive_payload  = keepalive_payload
         self._keepalive_interval = keepalive_interval
         self._queue_size         = queue_size
+        self._answer             = answer
+        self._request_key        = request_key or self._payload_id
 
         self._queues: Dict[str, List[asyncio.Queue]] = {}
         self._subscribed_topics: Set[str] = set()
+        self._answers: Dict[str, asyncio.Future] = {}
+        self._requests: Dict[str, List[str]] = {}
         self._lock      = asyncio.Lock()
         self._connected = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
@@ -336,29 +357,43 @@ class StreamHub:
             if topic not in self._queues:
                 self._queues[topic] = []
                 is_new_topic       = True
+                if self._answer is not None:
+                    self._answers[topic] = asyncio.get_running_loop().create_future()
             self._queues[topic].append(q)
+            answered = self._answers.get(topic)
             if not self._closed and (self._task is None or self._task.done()):
                 self._task = asyncio.create_task(self._run())
 
-        if is_new_topic:
-            try:
-                await asyncio.wait_for(self._connected.wait(), timeout=30)
-            except asyncio.TimeoutError:
-                self._log.warning(f"subscribe({topic}) timed out waiting for connection; will pick up on reconnect")
-                return q
+        try:
+            if is_new_topic:
+                try:
+                    await asyncio.wait_for(self._connected.wait(), timeout=self.ANSWER_S)
+                except asyncio.TimeoutError:
+                    raise UpstreamUnavailableError(f"{self.name} could not reach the venue in {self.ANSWER_S} s to subscribe {topic}")
 
-            send_now = False
-            async with self._lock:
-                if topic not in self._subscribed_topics:
-                    self._subscribed_topics.add(topic)
-                    send_now = True
-            if send_now:
-                await self._send_payloads(self._sub_payload([topic]))
+                send_now = False
+                async with self._lock:
+                    if topic not in self._subscribed_topics:
+                        self._subscribed_topics.add(topic)
+                        send_now = True
+                if send_now:
+                    await self._send_payloads(self._sub_payload([topic]), [topic])
+
+            if answered is not None:
+                try:
+                    refusal = await asyncio.wait_for(asyncio.shield(answered), timeout=self.ANSWER_S)
+                except asyncio.TimeoutError:
+                    raise UpstreamUnavailableError(f"{self.name} gave no answer in {self.ANSWER_S} s to the subscription of {topic}")
+                if refusal is not None:
+                    raise SubscriptionRefused(f"{self.name} refused {topic}: {refusal}")
+        except BaseException:
+            await self.unsubscribe(topic, q)
+            raise
 
         return q
 
 
-    async def unsubscribe(self, topic: str, q: asyncio.Queue) -> None:
+    async def unsubscribe(self, topic: str, q: Optional[asyncio.Queue]) -> None:
         drop_topic = False
 
         async with self._lock:
@@ -370,6 +405,8 @@ class StreamHub:
                 self._queues.pop(topic, None)
                 drop_topic = True
                 self._subscribed_topics.discard(topic)
+                self._answers.pop(topic, None)
+                self._requests = {key: [t for t in topics if t != topic] for key, topics in self._requests.items() if topics != [topic]}
 
         if drop_topic and self._connected.is_set():
             await self._send_payloads(self._unsub_payload([topic]))
@@ -389,12 +426,18 @@ class StreamHub:
                 pass
 
 
-    async def _send_payloads(self, payloads: Iterable[Any]) -> None:
+    async def _send_payloads(self, payloads: Iterable[Any], topics: Iterable[str] = ()) -> None:
         ws = self._ws
         if ws is None:
             return
 
-        for payload in payloads:
+        payloads = list(payloads)
+        topics   = list(topics)
+        one_each = len(payloads) == len(topics)
+        for i, payload in enumerate(payloads):
+            key = self._request_key(payload) if topics else None
+            if key is not None:
+                self._requests[key] = [topics[i]] if one_each else topics
             try:
                 if isinstance(payload, (str, bytes)):
                     await ws.send(payload)
@@ -403,6 +446,30 @@ class StreamHub:
             except Exception as e:
                 self._log.warning(f"send failed: {e}")
                 return
+
+
+    @staticmethod
+    def _payload_id(payload: Any) -> Optional[str]:
+        if isinstance(payload, dict):
+            for key in ("id", "req_id"):
+                if payload.get(key) is not None:
+                    return str(payload[key])
+        return None
+
+
+    def _settle(self, key: str, refusal: Optional[str]) -> None:
+        topics = self._requests.pop(key, None)
+        if topics is None:
+            topics         = [key]
+            self._requests = {k: [t for t in ts if t != key] for k, ts in self._requests.items() if ts != [key]}
+        for topic in topics:
+            answered = self._answers.get(topic)
+            if answered is None:
+                continue
+            if not answered.done():
+                answered.set_result(refusal)
+            elif refusal is not None:
+                self._log.warning(f"{topic} refused on resubscription: {refusal}")
 
 
     async def _keepalive_loop(self, ws: Any) -> None:
@@ -455,7 +522,7 @@ class StreamHub:
                     topics                  = list(self._queues.keys())
                     self._subscribed_topics = set(topics)
                 if topics:
-                    await self._send_payloads(self._sub_payload(topics))
+                    await self._send_payloads(self._sub_payload(topics), topics)
 
                 self._connected.set()
 
@@ -470,6 +537,10 @@ class StreamHub:
                         stable          = True
                     msg = self._parse(raw)
                     if msg is None:
+                        continue
+                    answer = self._answer(msg) if self._answer is not None else None
+                    if answer is not None:
+                        self._settle(*answer)
                         continue
                     topic = self._route(msg)
                     if topic is None:

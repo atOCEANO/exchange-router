@@ -10,7 +10,7 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
-    build_step, count_decimals, mark_trading, stamp_funding_cycles, venue_value,
+    build_step, count_decimals, mark_trading, next_request_id, stamp_funding_cycles, venue_value,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -530,6 +530,13 @@ class KucoinAdapter(BaseExchange):
         return server["endpoint"], data["token"], int(server.get("pingInterval", 18000))
 
 
+    @staticmethod
+    def _answer(msg: Any) -> Optional[Tuple[str, Optional[str]]]:
+        if not isinstance(msg, dict) or msg.get("type") not in ("ack", "error") or not msg.get("id"):
+            return None
+        return msg["id"], None if msg["type"] == "ack" else str(msg.get("data") or msg.get("code"))
+
+
     async def _get_hub(self, market_type: MarketType) -> StreamHub:
         async with self._hubs_lock:
             hub = self._hubs.get(market_type)
@@ -542,9 +549,9 @@ class KucoinAdapter(BaseExchange):
                     await asyncio.wait_for(ws.recv(), timeout=10)
                     return ws
                 def _sub(topics: List[str]):
-                    return [{"id": str(int(time.time() * 1000)), "type": "subscribe",   "topic": t, "privateChannel": False, "response": False} for t in topics]
+                    return [{"id": str(next_request_id()), "type": "subscribe",   "topic": t, "privateChannel": False, "response": True} for t in topics]
                 def _unsub(topics: List[str]):
-                    return [{"id": str(int(time.time() * 1000)), "type": "unsubscribe", "topic": t, "privateChannel": False, "response": False} for t in topics]
+                    return [{"id": str(next_request_id()), "type": "unsubscribe", "topic": t, "privateChannel": False, "response": False} for t in topics]
                 def _route(msg):
                     if not isinstance(msg, dict):
                         return None
@@ -559,6 +566,7 @@ class KucoinAdapter(BaseExchange):
                     route=_route,
                     keepalive_payload={"id": "keepalive", "type": "ping"},
                     keepalive_interval=15.0,
+                    answer=self._answer,
                 )
                 self._hubs[market_type] = hub
             return hub

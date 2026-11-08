@@ -4,12 +4,12 @@ import random
 import time
 import websockets
 import logging
-from typing import List, AsyncGenerator, Dict, Any, Optional
+from typing import List, AsyncGenerator, Dict, Any, Optional, Tuple
 from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention, build_step,
-    build_margin_tier, mark_trading, stamp_funding_cycles,
+    build_margin_tier, mark_trading, next_request_id, stamp_funding_cycles,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -456,6 +456,13 @@ class BybitAdapter(BaseExchange):
         raise UpstreamUnavailableError(f"Max retries exceeded for {url}", retry_after=remaining if remaining > 0 else None)
 
 
+    @staticmethod
+    def _answer(msg: Any) -> Optional[Tuple[str, Optional[str]]]:
+        if not isinstance(msg, dict) or msg.get("op") != "subscribe" or not msg.get("req_id"):
+            return None
+        return msg["req_id"], None if msg.get("success") else msg.get("ret_msg")
+
+
     async def _get_hub(self, market_type: MarketType) -> StreamHub:
         async with self._hubs_lock:
             hub = self._hubs.get(market_type)
@@ -466,11 +473,12 @@ class BybitAdapter(BaseExchange):
                 hub = StreamHub(
                     name=f"bybit_{market_type.value}",
                     connect=_connect,
-                    subscribe_payload=lambda ts: [{"op": "subscribe",   "args": ts, "req_id": f"sub-{int(time.time() * 1000)}"}],
-                    unsubscribe_payload=lambda ts: [{"op": "unsubscribe", "args": ts, "req_id": f"unsub-{int(time.time() * 1000)}"}],
+                    subscribe_payload=lambda ts: [{"op": "subscribe",   "args": ts, "req_id": f"sub-{next_request_id()}"}],
+                    unsubscribe_payload=lambda ts: [{"op": "unsubscribe", "args": ts, "req_id": f"unsub-{next_request_id()}"}],
                     route=lambda msg: msg.get("topic") if isinstance(msg, dict) else None,
                     keepalive_payload={"op": "ping"},
                     keepalive_interval=20.0,
+                    answer=self._answer,
                 )
                 self._hubs[market_type] = hub
             return hub

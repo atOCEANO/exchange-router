@@ -5,12 +5,12 @@ import random
 import time
 import websockets
 import logging
-from typing import List, AsyncGenerator, Dict, Any, Optional, Deque
+from typing import List, AsyncGenerator, Dict, Any, Optional, Deque, Tuple
 from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention, build_step,
-    build_margin_tier, mark_trading, stamp_funding_cycles,
+    build_margin_tier, mark_trading, next_request_id, stamp_funding_cycles,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -112,6 +112,15 @@ class OkxAdapter(BaseExchange):
 
 
     @staticmethod
+    def _answer(msg: Any) -> Optional[Tuple[str, Optional[str]]]:
+        if not isinstance(msg, dict) or not msg.get("id") or msg.get("event") not in ("subscribe", "error"):
+            return None
+        if msg["event"] == "subscribe" and isinstance(msg.get("arg"), dict):
+            return OkxAdapter._topic_key_for_arg(msg["arg"]), None
+        return msg["id"], None if msg["event"] == "subscribe" else msg.get("msg") or msg.get("code")
+
+
+    @staticmethod
     def _topic_key_for_arg(arg: Dict[str, Any]) -> str:
         ch = arg.get("channel", "")
         val = arg.get("instId") or arg.get("instType") or ""
@@ -125,7 +134,7 @@ class OkxAdapter(BaseExchange):
                     return await websockets.connect(self.ws_url, ping_interval=None)
                 def _sub(topics: List[str]):
                     args = [self._topic_args[t] for t in topics if t in self._topic_args]
-                    return [{"op": "subscribe", "args": args}] if args else []
+                    return [{"id": str(next_request_id()), "op": "subscribe", "args": args}] if args else []
                 def _unsub(topics: List[str]):
                     args = [self._topic_args[t] for t in topics if t in self._topic_args]
                     return [{"op": "unsubscribe", "args": args}] if args else []
@@ -144,6 +153,7 @@ class OkxAdapter(BaseExchange):
                     route=_route,
                     keepalive_payload="ping",
                     keepalive_interval=25.0,
+                    answer=self._answer,
                 )
             return self._hub
 

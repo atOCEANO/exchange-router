@@ -4,12 +4,12 @@ import random
 import time
 import websockets
 import logging
-from typing import List, AsyncGenerator, Dict, Any, Optional
+from typing import List, AsyncGenerator, Dict, Any, Optional, Tuple
 from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention, build_step,
-    mark_trading, stamp_funding_cycles, venue_value,
+    mark_trading, next_request_id, stamp_funding_cycles, venue_value,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -456,6 +456,14 @@ class BinanceAdapter(BaseExchange):
         return self.ws_urls[market_type]
 
 
+    @staticmethod
+    def _answer(msg: Any) -> Optional[Tuple[str, Optional[str]]]:
+        if not isinstance(msg, dict) or msg.get("id") is None or "stream" in msg:
+            return None
+        error = msg.get("error")
+        return str(msg["id"]), (error.get("msg") if isinstance(error, dict) else str(error)) if error else None
+
+
     async def _get_hub(self, market_type: MarketType, topic: str) -> StreamHub:
         key = self._hub_key(market_type, topic)
         async with self._hubs_lock:
@@ -467,9 +475,10 @@ class BinanceAdapter(BaseExchange):
                 hub = StreamHub(
                     name=f"binance_{key}",
                     connect=_connect,
-                    subscribe_payload=lambda ts: [{"method": "SUBSCRIBE",   "params": ts, "id": int(time.time() * 1000)}],
-                    unsubscribe_payload=lambda ts: [{"method": "UNSUBSCRIBE", "params": ts, "id": int(time.time() * 1000)}],
+                    subscribe_payload=lambda ts: [{"method": "SUBSCRIBE",   "params": ts, "id": next_request_id()}],
+                    unsubscribe_payload=lambda ts: [{"method": "UNSUBSCRIBE", "params": ts, "id": next_request_id()}],
                     route=lambda msg: msg.get("stream") if isinstance(msg, dict) else None,
+                    answer=self._answer,
                 )
                 self._hubs[key] = hub
             return hub

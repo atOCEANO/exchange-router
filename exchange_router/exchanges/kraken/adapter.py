@@ -10,7 +10,8 @@ from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError,
     build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
-    build_step, build_step_from_decimals, count_decimals, mark_trading, venue_value,
+    build_step, build_step_from_decimals, count_decimals, mark_trading, next_request_id,
+    venue_value,
 )
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -695,8 +696,13 @@ class KrakenAdapter(BaseExchange):
                     for t in topics:
                         p = self._topic_payloads.get(t)
                         if p is not None:
-                            out.append(p)
+                            out.append(dict(p, req_id=next_request_id()))
                     return out
+                def _answer(msg):
+                    if not isinstance(msg, dict) or msg.get("method") != "subscribe" or msg.get("req_id") is None:
+                        return None
+                    return str(msg["req_id"]), None if msg.get("success") else msg.get("error")
+                request_key = None
                 def _unsub(topics: List[str]):
                     out = []
                     for t in topics:
@@ -743,6 +749,16 @@ class KrakenAdapter(BaseExchange):
                     if feed.endswith("_snapshot"):
                         feed = feed[: -len("_snapshot")]
                     return f"{feed}:{pid}"
+                def _answer(msg):
+                    if not isinstance(msg, dict):
+                        return None
+                    if msg.get("event") == "subscribed":
+                        return f"{msg.get('feed')}:{(msg.get('product_ids') or [''])[0]}", None
+                    if msg.get("event") == "alert" and "`" in str(msg.get("message")):
+                        return str(msg["message"]).split("`")[1], msg["message"]
+                    return None
+                def request_key(payload):
+                    return (payload.get("product_ids") or [None])[0]
 
             hub = StreamHub(
                 name=f"kraken_{hub_key}",
@@ -750,6 +766,8 @@ class KrakenAdapter(BaseExchange):
                 subscribe_payload=_sub,
                 unsubscribe_payload=_unsub,
                 route=_route,
+                answer=_answer,
+                request_key=request_key,
             )
             self._hubs[hub_key] = hub
             return hub

@@ -3,6 +3,7 @@ import logging
 import uuid
 from typing import Dict, Optional, Set
 from fastapi import WebSocket
+from exchange_router.exchanges.base import SubscriptionRefused
 
 
 def close_reason(text: str) -> str:
@@ -58,9 +59,9 @@ class StreamManager:
             await asyncio.gather(*list(self._closing), return_exceptions=True)
 
 
-    async def _close_client(self, client: WebSocket, reason: str) -> None:
+    async def _close_client(self, client: WebSocket, reason: str, code: int = 1011) -> None:
         try:
-            await asyncio.wait_for(client.close(code=1011, reason=reason), timeout=5.0)
+            await asyncio.wait_for(client.close(code=code, reason=close_reason(reason)), timeout=5.0)
         except Exception:
             pass
 
@@ -72,6 +73,7 @@ class StreamManager:
 
 
     async def _upstream_handler(self, key, adapter, market_type, channel, symbol) -> None:
+        reason, code = "Upstream disconnected", 1011
         try:
             if   channel == "ticker":       stream = adapter.stream_ticker(market_type, symbol)
             elif channel == "book_ticker":  stream = adapter.stream_book_ticker(market_type, symbol)
@@ -111,8 +113,11 @@ class StreamManager:
                         break
         except asyncio.CancelledError:
             pass
+        except SubscriptionRefused as e:
+            reason, code = str(e), 1003
         except Exception as e:
             logging.error(f"Upstream stream error for {key}: {e}")
+            reason = str(e) or reason
         finally:
             close_tasks = []
             async with self._lock:
@@ -121,7 +126,7 @@ class StreamManager:
                     bucket = self.active_streams.pop(key, None)
                     if bucket:
                         for client in bucket.values():
-                            close_tasks.append(asyncio.create_task(self._close_client(client, "Upstream disconnected")))
+                            close_tasks.append(asyncio.create_task(self._close_client(client, reason, code)))
             for t in close_tasks:
                 try:
                     await t
