@@ -376,36 +376,28 @@ class HyperliquidAdapter(BaseExchange):
         raise ValueError(f"Coin {coin} not found on Hyperliquid linear")
 
 
-    async def _high_low_24h(self, coin: str) -> Any:
+    async def _day_range(self, coin: str) -> Any:
         now  = int(time.time() * 1000)
         body = {"type": "candleSnapshot", "req": {"coin": coin, "interval": "1h", "startTime": now - 86_400_000, "endTime": now}}
         rows = await self._make_request("candleSnapshot", body)
         if not rows:
-            return None, None
-        high = max(float(r["h"]) for r in rows)
-        low  = min(float(r["l"]) for r in rows)
-        return high, low
+            return 0.0, 0.0, 0.0
+        first = float(rows[0]["o"])
+        high  = max(float(r["h"]) for r in rows)
+        low   = min(float(r["l"]) for r in rows)
+        return first, high, low
 
 
-    async def _high_low_24h_cached(self, coin: str, close: float) -> Any:
+    async def _day_range_cached(self, coin: str) -> Any:
         entry = self._hl_cache.get(coin)
         if entry is None or time.monotonic() - entry[0] >= self._TICKER_RESEED_S:
             lock = self._hl_locks.setdefault(coin, asyncio.Lock())
             async with lock:
                 entry = self._hl_cache.get(coin)
                 if entry is None or time.monotonic() - entry[0] >= self._TICKER_RESEED_S:
-                    high, low            = await self._high_low_24h(coin)
-                    entry                = (time.monotonic(), high, low)
+                    entry                = (time.monotonic(), *await self._day_range(coin))
                     self._hl_cache[coin] = entry
-
-        seeded, high, low = entry
-        if close > 0:
-            if high is None or close > high:
-                high = close
-            if low is None or close < low:
-                low = close
-            self._hl_cache[coin] = (seeded, high, low)
-        return high, low
+        return entry[1:]
 
 
     async def _funding_interval_ms_for(self, market_type: MarketType, model_symbol: str) -> Optional[int]:
@@ -519,9 +511,9 @@ class HyperliquidAdapter(BaseExchange):
         px  = ctx.get("midPx") or ctx.get("markPx")
         if px is None:
             raise ValueError(f"Hyperliquid returned no price for {coin}")
-        close     = float(px)
-        high, low = await self._high_low_24h_cached(coin, close)
-        prev      = float(ctx.get("prevDayPx") or 0)
+        close            = float(px)
+        first, high, low = await self._day_range_cached(coin)
+        prev             = float(ctx.get("prevDayPx") or 0) or first
 
         return Ticker(
             symbol               = model_sym,
@@ -529,8 +521,8 @@ class HyperliquidAdapter(BaseExchange):
             quote                = quote,
             price                = close,
             open_24h             = prev,
-            high_24h             = high if high is not None else close,
-            low_24h              = low if low is not None else close,
+            high_24h             = high,
+            low_24h              = low,
             volume_24h           = build_volume_value(
                 native        = float(ctx.get("dayBaseVlm") or 0),
                 volume_unit   = "base",
@@ -958,10 +950,10 @@ class HyperliquidAdapter(BaseExchange):
     async def stream_ticker(self, market_type: MarketType, symbol: str) -> AsyncGenerator[Ticker, None]:
         model_sym, coin, quote = await self._lookup(market_type, symbol)
 
-        high, low = await self._high_low_24h(coin)
-        reseed_at = time.time() + self._TICKER_RESEED_S
-        topic     = f"activeAssetCtx:{coin}"
-        sub_arg   = {"type": "activeAssetCtx", "coin": coin}
+        first, high, low = await self._day_range(coin)
+        reseed_at        = time.time() + self._TICKER_RESEED_S
+        topic            = f"activeAssetCtx:{coin}"
+        sub_arg          = {"type": "activeAssetCtx", "coin": coin}
 
         async for msg in self._ws_connect(topic, sub_arg):
             try:
@@ -969,16 +961,10 @@ class HyperliquidAdapter(BaseExchange):
                 close = float(ctx.get("midPx") or ctx.get("markPx") or 0)
                 if close <= 0:
                     continue
-                if high is None or close > high:
-                    high = close
-                if low is None or close < low:
-                    low = close
                 if time.time() >= reseed_at:
-                    reseed_at = time.time() + self._TICKER_RESEED_S
-                    h2, l2    = await self._high_low_24h(coin)
-                    if h2 is not None:
-                        high, low = h2, l2
-                prev = float(ctx.get("prevDayPx") or 0)
+                    reseed_at        = time.time() + self._TICKER_RESEED_S
+                    first, high, low = await self._day_range(coin)
+                prev = float(ctx.get("prevDayPx") or 0) or first
                 yield Ticker(
                     symbol               = model_sym,
                     market_type          = market_type,
