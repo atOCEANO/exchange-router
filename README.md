@@ -441,7 +441,7 @@ with Router.local(exchanges=["binance"]) as client:
     print(result["BTCUSDT"].tail())
 ```
 
-`result` behaves like a dict over the symbols that returned, with `.ok`, `.degraded`, and `.failed` for triage.
+`result` is a read-only mapping over the symbols that returned, with `.ok`, `.degraded`, and `.failed` for triage.
 
 **Managing the client lifecycle explicitly.** The `with` block above constructs the client and closes it for you. When a `with` block does not fit your structure, construct the client, make your calls, and close it yourself, ideally in a `finally` so teardown always runs. This works for every method, including `candles_many`.
 

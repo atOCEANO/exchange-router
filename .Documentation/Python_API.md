@@ -41,7 +41,7 @@ The return surface follows one rule:
 | Point snapshot (ticker, book_ticker, mark_price, symbol_info) | `Row`, a flat `dict` with attribute access and a `.raw` wire-dict escape hatch |
 | Order book | one `DataFrame` with columns `side, price, qty` |
 | Margin tiers | one `DataFrame` with a plain row index, one row per tier |
-| Batch (`*_many`) | `BatchResult`, behaves like a dict over the symbols that returned |
+| Batch (`*_many`) | `BatchResult`, a read-only mapping over the symbols that returned |
 | Discovery (exchanges, market_types, capabilities, markets) | `dict` / `list` |
 
 Upgrading from `exchange-router-client`, or from an older client major, is covered in [Migration](Migration.md).
@@ -139,7 +139,12 @@ The router holds persistent connections and, in local mode, live adapters. Relea
 
 Keep one local router alive at a time. Every local router in the process shares the same adapters, and each runs them on a loop of its own, so re-running a notebook cell that builds one, before closing the router it built the last time, leaves two routers over one set of adapters, and calls on the second can fail with a lock or an event bound to a different event loop. Close the first, or build it in a `with` block.
 
-The `start` parameter, where applicable, follows the [router's pagination contract](HTTP_Reference.md#pagination-semantics): pass the oldest timestamp you already have to walk further back.
+The `end` parameter, where applicable, follows the [router's pagination contract](HTTP_Reference.md#pagination-semantics): pass the oldest timestamp you already have, minus one, to walk further back. Before 3.3.0 it was called `start`, and the bucket of `open_interest` and `long_short_ratio` was called `period`; both older names still work.
+
+```python
+oldest = int(df.index[0].timestamp() * 1000)
+older  = client.get_candles("binance", "spot", "BTCUSDT", interval="1h", limit=500, end=oldest - 1)
+```
 
 <br>
 <br>
@@ -166,7 +171,7 @@ Iterate every market in a category as handles:
 
 ```python
 for m in client.markets("binance", "linear"):
-    oi = m.open_interest(period="1h", limit=30)
+    oi = m.open_interest(interval="1h", limit=30)
 ```
 
 The handle forwards to the flat `client.get_*` methods, which remain available for one-off calls and for code that iterates raw symbol strings.
@@ -183,7 +188,7 @@ Series methods return a plain `pandas.DataFrame`. Nothing is wrapped, so `concat
 * a **stable** column set: a route always returns the same columns, NaN where a value is absent (no column that appears or disappears with the data),
 * per-query constants in `df.attrs`, read right after the call,
 * numeric columns coerced to numbers, text columns (`side`, `id`, the trade-id fields) left as objects,
-* an empty DataFrame (with the route's columns) for an empty response, never `None`.
+* an empty DataFrame for an empty response, never `None`, shaped like a full one: the route's columns and dtypes, an empty UTC `DatetimeIndex`, and the route's `attrs` keys set to `None`.
 
 Columns and `df.attrs` per route:
 
@@ -193,9 +198,11 @@ Columns and `df.attrs` per route:
 | trades | `price, qty, qty_usd, side, id` | `quote, qty_unit, contract_size` |
 | agg_trades | `price, qty, qty_usd, side, agg_id, first_trade_id, last_trade_id` | `quote, qty_unit, contract_size` |
 | funding_rate | `rate, funding_per_hour, cycle_ms` | `quote, funding_kind` |
-| open_interest | `open_interest, open_interest_usd` | `quote, interval, oi_unit, contract_size, usd_basis` |
+| open_interest | `open_interest, open_interest_usd` | `quote, interval, open_interest_unit, oi_unit, contract_size, usd_basis` |
 | liquidations | `price, qty, qty_usd, side` | `quote, qty_unit, contract_size` |
 | long_short_ratio | `ratio, long_account, short_account` | `interval, account_scope` |
+
+`open_interest_unit` and `oi_unit` hold the same value; `open_interest_unit` follows the `x_unit` naming every other column uses, and `oi_unit` is the older name.
 
 Every frame's `attrs` also carries `exchange, market_type, symbol, schema_version, warnings`. `schema_version` is the wire schema the client was built against, pinned as a constant in the client, not the number the running service reported; when the two disagree, this field speaks for the client side.
 
@@ -310,8 +317,10 @@ frames = [
     with_provenance(client.get_candles("bybit",   "inverse", "BTCUSD",  interval="1h", limit=500)),
 ]
 both = pd.concat(frames)
-both.groupby("exchange")["volume_usd"].sum()   # exchange, symbol, quote, unit ride per-row
+both.groupby("exchange")["volume_usd"].sum()   # exchange, market_type, symbol, quote, unit ride per-row
 ```
+
+`market_type` rides along so the spot and perpetual frames of one symbol stay apart after the concat.
 
 <br>
 <br>
@@ -333,24 +342,24 @@ df = client.get_open_interest("binance", "linear", "BTCUSDT", verbose=False)
 Warnings fire only when a result deviates from the clean case you would expect, never for facts that are always true of a market type. They surface through Python's `warnings` module under the `RouterDataWarning` category, so a test can promote them to errors and a consumer can filter them. They are also attached to the result's `df.attrs["warnings"]`.
 
 ```python
-df = client.get_open_interest("binance", "linear", "BTCUSDT", period="5m", limit=30)
+df = client.get_open_interest("binance", "linear", "BTCUSDT", interval="5m", limit=30)
 df.attrs["warnings"]
 # ['open_interest binance/linear/BTCUSDT: 2 of 30 rows have usd=NaN (join missed; native is populated)']
 ```
 
-What warns: open-interest rows with `NaN` `usd`, fewer rows than requested on a paginated route, a mark price with no index or no funding, an opaque long/short scope (the account columns are `NaN`), trades with null ids, a funding cycle that changed mid-window, a non-USD quote currency, a margin tiers table with no tiers, and an empty response.
+What warns: open-interest rows with `NaN` `usd`, fewer rows than requested on a paginated route (the exchange holds nothing older), a mark price with no index or no funding, an opaque long/short scope (the account columns are `NaN`), trades with null ids, a funding cycle that changed mid-window, a quote currency outside the dollar family on a frame, a ticker or a book ticker, a margin tiers table with no tiers, an empty response, and `funding_paid` handed a frame that lost its `funding_kind`.
 
 <br>
 <br>
 
 ## Batch fetching
 
-The `*_many` methods fetch many symbols concurrently (the sync client still runs them in parallel under the hood) and return a `BatchResult` that behaves like a dict for the common case where everything worked, with diagnostics there when you need them. Each value is a DataFrame.
+The `*_many` methods fetch many symbols concurrently (the sync client still runs them in parallel under the hood) and return a `BatchResult`, a read-only mapping for the common case where everything worked, with diagnostics there when you need them. Each value is a DataFrame.
 
 ```python
 symbols = [m["symbol"] for m in client.get_markets("binance", "linear")["markets"]]
 
-result = client.open_interest_many("binance", "linear", symbols, period="1h", limit=100)
+result = client.open_interest_many("binance", "linear", symbols, interval="1h", limit=100)
 
 for symbol, df in result.items():     # every symbol that returned data
     ...
@@ -373,19 +382,19 @@ print(result.report())    # the summary, then every symbol that was not clean
     FOOUSDT   BadRequest: ...
 ```
 
-A symbol is `degraded` when the result carries warnings (in `df.attrs["warnings"]`), `failed` when the request raised, `ok` otherwise. There is a `*_many` for every series route (`candles_many`, `trades_many`, `agg_trades_many`, `funding_rate_many`, `open_interest_many`, `liquidations_many`, `long_short_ratio_many`). Iterating a `BatchResult`, `len()`, `in` and `result[symbol]` all read `data()`, so a failed symbol is simply absent rather than present as `None`.
+A symbol is `degraded` when the result carries warnings (in `df.attrs["warnings"]`), `failed` when the request raised, `ok` otherwise. There is a `*_many` for every series route (`candles_many`, `trades_many`, `agg_trades_many`, `funding_rate_many`, `open_interest_many`, `liquidations_many`, `long_short_ratio_many`). Every mapping read, iteration, `len()`, `in`, `result[symbol]`, `keys()`, `items()`, `get()` and `dict(result)`, reads `data()`, so a failed symbol is simply absent rather than present as `None`.
 
 They are one function underneath, and it is public. `fetch_many` takes the route by name and passes the route's own parameters through, so code that walks several routes over one universe needs no branch per route:
 
 ```python
-routes = {"candles": {"interval": "1h"}, "funding_rate": {}, "open_interest": {"period": "1h"}}
+routes = {"candles": {"interval": "1h"}, "funding_rate": {}, "open_interest": {"interval": "1h"}}
 
 for route, params in routes.items():
     result = client.fetch_many(route, "binance", "linear", symbols, limit=100, **params)
     print(route, result.summary())
 ```
 
-A route that is not a series route raises `BadRequest`.
+A route that is not a series route raises `BadRequest`, and so does a keyword the route does not take, before any symbol is fetched.
 
 <br>
 <br>
@@ -409,7 +418,7 @@ with Router.local(exchanges=["binance"]) as client:
     print(per_hour_view(mark))
 ```
 
-These are plain functions, not coroutines, so they are never awaited. `funding_paid` handles both discrete (settlement events) and continuous (sample integration) funding correctly. Both helpers accept every shape the client produces: the `get_funding_rate` DataFrame, a single row of it, the `get_mark_price` Row (rate read from its flat `funding_*` fields), and raw wire-format rows.
+These are plain functions, not coroutines, so they are never awaited. `funding_paid` handles both discrete (settlement events) and continuous (sample integration) funding correctly. It reads the kind from the frame's `funding_kind`, which `pd.concat` drops when the frames' `attrs` differ; such a frame is counted as discrete, with a warning, which misprices continuous funding such as Kraken's. Both helpers accept every shape the client produces: the `get_funding_rate` DataFrame, a single row of it, the `get_mark_price` Row (rate read from its flat `funding_*` fields), and raw wire-format rows.
 
 <br>
 <br>
@@ -420,14 +429,14 @@ The router raises a small typed tree, so failures are programmable without parsi
 
 | Exception | When | Modes |
 | :--- | :--- | :--- |
-| `BadRequest` | `400`, including an interval or period the route does not declare | both |
+| `BadRequest` | `400`, including an interval the route does not declare and a symbol the exchange does not list | both |
 | `NotFound` | `404`, an unknown exchange | both |
-| `RateLimited` | `429` from the service | `service` only |
+| `RateLimited` | `429`, which the router never sends; it can only come from a proxy between you and the service | `service` only |
 | `UpstreamUnavailable` | `503`, carries `.retry_after` | both |
 | `NotSupported` | the route is not exposed on this exchange and market, caught before the request, a server `501`, or a service older than the route (`margin_tiers` before 3.2.0) | both |
 | `RouterUnreachable` | transport failure, or retries exhausted | `service` only |
 | `SchemaMismatch` | the SDK and the service disagree on the wire contract; carries `.sdk_schema` and `.service_schema` | `service` only |
-| `RouterError` | any other status the server returns (for example `500` or a `502` upstream-shape failure), carrying `.status` | both |
+| `RouterError` | any other status the server returns (for example `500`, or a `502` for an exchange answer the router cannot read or a record that arrived without its own value), carrying `.status` | both |
 
 `SchemaMismatch` is raised on the first call, not at construction, because the check needs a round trip and a constructor cannot await one. It is fatal and deliberately has no compatibility range: `schema_version` only moves on a breaking wire change, so a mismatch means one side genuinely cannot read the other.
 
@@ -449,9 +458,9 @@ except UpstreamUnavailable as e:
 
 All of these inherit from `RouterError`, so `except RouterError` catches everything.
 
-Retries live in the transport, so the two modes spend them differently. In service mode the SDK retries `429` and transient `5xx` with jittered backoff, honoring the `Retry-After` header the router sends on `503`; if the window outlasts the retry budget it raises `UpstreamUnavailable` carrying that `retry_after` so you can wait the rest. In local mode there is no HTTP hop to retry: each adapter already backs off and retries the exchange itself, and surfaces exhaustion as `UpstreamUnavailable`, usually carrying a `retry_after` (Kraken is the one that does not). That is why a rate limit reaches you as `RateLimited` from a service and as `UpstreamUnavailable` from a local adapter; `except RouterError` covers both, and `except UpstreamUnavailable` covers both cases where waiting is the answer.
+Retries live in the transport, so the two modes spend them differently. In service mode the SDK retries `429` and transient `5xx` with jittered backoff, honoring the `Retry-After` header the router sends on `503`; if the window outlasts the retry budget it raises `UpstreamUnavailable` carrying that `retry_after` so you can wait the rest. In local mode there is no HTTP hop to retry: each adapter already backs off and retries the exchange itself, and surfaces exhaustion as `UpstreamUnavailable`, usually carrying a `retry_after` (Kraken is the one that does not). A rate limit therefore reaches you as `UpstreamUnavailable` in both modes, and so does an outage the exchange reports inside its answer; `except UpstreamUnavailable` covers every case where waiting is the answer.
 
-Symbol validity is left to the server, which normalizes case and separators. A bad symbol surfaces as one of the errors above on the call, rather than a client-side guess that could falsely reject a valid symbol.
+Symbol validity is left to the server, which normalizes case and separators. A symbol the exchange does not list raises `BadRequest` naming the markets route, in both modes, rather than a client-side guess that could falsely reject a valid symbol.
 
 <br>
 <br>
@@ -483,7 +492,7 @@ The batch methods on the sync router already run their fetches concurrently, so 
 
 ## Real-time streams
 
-`stream` yields messages as dicts and reconnects automatically, in both modes, when the upstream drops (over a service, the router closes the socket with code `1011`) or the transport fails. It does not retry a deliberate rejection, so a misconfigured call fails fast instead of reconnecting forever: an unsupported channel raises `NotSupported` and an unknown exchange raises `NotFound`, in both modes. A market type the adapter does not carry is the one place the modes still differ, `BadRequest` locally and `NotFound` over a service, because the service refuses it before the upgrade and a refused upgrade does not say which of the two causes it was. `except RouterError` catches both.
+`stream` checks the schema as every read does, then yields messages as dicts and reconnects automatically, in both modes, when the upstream drops or gives no answer to the subscription (over a service, the router closes the socket with code `1011`) or the transport fails. It does not retry a deliberate rejection, so a misconfigured call fails fast instead of reconnecting forever: an unsupported channel, or a subscription the exchange refuses, raises `NotSupported` with the exchange's reason; a symbol the exchange does not list raises `BadRequest`; and an unknown exchange raises `NotFound`, in both modes. A market type the adapter does not carry is the one place the modes still differ, `BadRequest` locally and `NotFound` over a service, because the service refuses it before the upgrade and a refused upgrade does not say which of the two causes it was. `except RouterError` catches both.
 
 ```python
 for msg in client.stream("binance", "spot", "ticker", "BTCUSDT"):
@@ -519,14 +528,16 @@ Signatures are for the sync `Router`. `AsyncRouter` is identical with `await`, a
 **Series (return DataFrames).**
 
 ```python
-get_candles(exchange, market_type, symbol, interval="1h", limit=100, start=None)
+get_candles(exchange, market_type, symbol, interval="1h", limit=100, end=None)
 get_trades(exchange, market_type, symbol, limit=100)
-get_agg_trades(exchange, market_type, symbol, limit=500, start=None)
-get_funding_rate(exchange, market_type, symbol, limit=100, start=None)
-get_open_interest(exchange, market_type, symbol, period="1h", limit=30, start=None)
-get_liquidations(exchange, market_type, symbol, limit=100, start=None)
-get_long_short_ratio(exchange, market_type, symbol, period="5m", limit=30, start=None)
+get_agg_trades(exchange, market_type, symbol, limit=500, end=None)
+get_funding_rate(exchange, market_type, symbol, limit=100, end=None)
+get_open_interest(exchange, market_type, symbol, interval="1h", limit=30, end=None)
+get_liquidations(exchange, market_type, symbol, limit=100, end=None)
+get_long_short_ratio(exchange, market_type, symbol, interval="5m", limit=30, end=None)
 ```
+
+Pass `end` and `interval` by keyword. The older names, `start` everywhere and `period` on open interest and long/short, keep their places in the signatures, so a call that passes them by position still works.
 
 **Handles.** `market(exchange, market_type, symbol)`, `markets(exchange, market_type)`.
 
@@ -534,9 +545,9 @@ get_long_short_ratio(exchange, market_type, symbol, period="5m", limit=30, start
 
 **Streams.** `stream(exchange, market_type, channel, symbol, reconnect=True)`, `subscribe(exchange, market_type, channel, symbol)`. Channels: `ticker`, `book_ticker`, `trades`, `agg_trades`, `orderbook`, `mark_price`, `liquidations`. Check `get_capabilities` to confirm a channel is supported.
 
-**Provenance helper.** `with_provenance(df)` returns a copy with `exchange`, `symbol`, `quote`, and `unit` promoted to columns.
+**Provenance helper.** `with_provenance(df)` returns a copy with `exchange`, `market_type`, `symbol`, `quote`, and `unit` promoted to columns.
 
-`verbose` overrides the router default for that call on every series method, on `get_ticker`, `get_book_ticker`, `get_mark_price`, `get_orderbook` and `get_margin_tiers`, and on every `*_many` method; `get_symbol_info` does not take it. On `get_ticker` and `get_book_ticker` it changes nothing visible today, since their only warning path is the preflight and the sole preflight warning is the orderbook depth snap.
+`verbose` overrides the router default for that call on every series method, on `get_ticker`, `get_book_ticker`, `get_mark_price`, `get_orderbook` and `get_margin_tiers`, and on every `*_many` method; `get_symbol_info` does not take it. On `get_ticker` and `get_book_ticker` it governs the warning for a quote outside the dollar family.
 
 <br>
 <br>
