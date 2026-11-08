@@ -10,7 +10,7 @@ from pydantic_core import to_jsonable_python
 from websockets.exceptions import InvalidHandshake
 
 from ._warnings import emit
-from .capabilities import market_block
+from .capabilities import KNOWN_WS_CHANNELS, market_block
 from .errors import (
     BadRequest,
     NotFound,
@@ -41,7 +41,17 @@ MAX_SLEEP_S = 60.0
 
 FATAL_CLOSE_CODES = (1003, 1008)
 
-STREAM_RETRYABLE = (websockets.ConnectionClosed, websockets.WebSocketException, OSError, UpstreamUnavailableError)
+STREAM_RETRYABLE = (websockets.ConnectionClosed, websockets.WebSocketException, OSError, UpstreamUnavailableError, UpstreamUnavailable)
+
+ERROR_STATUS = {
+    "Invalid Request":       400,
+    "Unknown Symbol":        400,
+    "Not Found":             404,
+    "Not Implemented":       501,
+    "Bad Upstream Response": 502,
+    "Upstream Unavailable":  503,
+    "Internal Server Error": 500,
+}
 
 SERVICE_ROUTES = ("status", "version", "exchanges")
 
@@ -76,10 +86,10 @@ def error_for_fault(exc: Exception) -> RouterError:
     if isinstance(exc, UpstreamUnavailableError):
         return UpstreamUnavailable(str(exc), 503, getattr(exc, "retry_after", None), "Upstream Unavailable")
 
-    if isinstance(exc, (NotImplementedError, SubscriptionRefused)):
+    if isinstance(exc, NotImplementedError):
         return NotSupported(str(exc), 501, "Not Implemented")
 
-    if isinstance(exc, RequestError):
+    if isinstance(exc, (RequestError, SubscriptionRefused)):
         return BadRequest(str(exc), 400, "Unknown Symbol" if isinstance(exc, UnknownSymbolError) else "Invalid Request")
 
     if isinstance(exc, UNREADABLE):
@@ -268,8 +278,10 @@ class RemoteBackend(Backend):
                 await ws.send(json.dumps({"channel": channel, "symbol": symbol}))
 
                 while True:
-                    message = await ws.recv()
-                    yield json.loads(message)
+                    message = json.loads(await ws.recv())
+                    if isinstance(message, dict) and set(message) == {"error", "detail"}:
+                        raise error_for_status(ERROR_STATUS.get(message["error"], 500), message["detail"], None, message["error"])
+                    yield message
 
         except websockets.ConnectionClosed as exc:
             error = error_for_close(exc, exchange, market_type, channel)
@@ -543,12 +555,9 @@ class LocalBackend(Backend):
         mt      = self._market_type(market_type)
         adapter = self._adapter(exchange, mt)
 
-        method = getattr(adapter, f"stream_{channel}", None)
-        if method is None:
-            raise NotSupported(
-                f"channel '{channel}' has no stream here; get_capabilities lists the ones served",
-                501,
-            )
+        if channel not in KNOWN_WS_CHANNELS:
+            raise BadRequest(f"channel: '{channel}' is not a stream on {exchange} {mt.value}; /{exchange}/capabilities lists the channels", 400, "Invalid Request")
+        method = getattr(adapter, f"stream_{channel}")
 
         try:
             symbol = await adapter.listed_symbol(mt, symbol)

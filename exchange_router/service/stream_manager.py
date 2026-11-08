@@ -3,11 +3,7 @@ import logging
 import uuid
 from typing import Dict, Optional, Set
 from fastapi import WebSocket
-from exchange_router.exchanges.base import SubscriptionRefused
-
-
-def close_reason(text: str) -> str:
-    return text.encode("utf-8")[:123].decode("utf-8", "ignore")
+from exchange_router.service.answers import close_reason, refuse, status_of
 
 
 class StreamManager:
@@ -73,7 +69,7 @@ class StreamManager:
 
 
     async def _upstream_handler(self, key, adapter, market_type, channel, symbol) -> None:
-        reason, code = "Upstream disconnected", 1011
+        status, error, detail = 503, None, f"the venue ended the {channel} stream of {symbol}; subscribe again"
         try:
             if   channel == "ticker":       stream = adapter.stream_ticker(market_type, symbol)
             elif channel == "book_ticker":  stream = adapter.stream_book_ticker(market_type, symbol)
@@ -113,11 +109,10 @@ class StreamManager:
                         break
         except asyncio.CancelledError:
             pass
-        except SubscriptionRefused as e:
-            reason, code = str(e), 1003
         except Exception as e:
             logging.error(f"Upstream stream error for {key}: {e}")
-            reason = str(e) or reason
+            status, error = status_of(e)
+            detail        = str(e) or detail
         finally:
             close_tasks = []
             async with self._lock:
@@ -126,7 +121,7 @@ class StreamManager:
                     bucket = self.active_streams.pop(key, None)
                     if bucket:
                         for client in bucket.values():
-                            close_tasks.append(asyncio.create_task(self._close_client(client, reason, code)))
+                            close_tasks.append(asyncio.create_task(refuse(client, status, detail, error)))
             for t in close_tasks:
                 try:
                     await t

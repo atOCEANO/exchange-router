@@ -6,7 +6,7 @@ import websockets
 
 from exchange_router import AsyncRouter
 from exchange_router.backend import Backend, error_for_fault, is_retryable_stream_error
-from exchange_router.errors import NotSupported, SchemaMismatch
+from exchange_router.errors import BadRequest, NotSupported, SchemaMismatch
 from exchange_router.exchanges.base import StreamHub, SubscriptionRefused, UpstreamUnavailableError
 from exchange_router.exchanges.binance.adapter import BinanceAdapter
 from exchange_router.exchanges.bybit.adapter import BybitAdapter
@@ -206,6 +206,11 @@ class Client:
 
     def __init__(self):
         self.closed = None
+        self.sent   = []
+
+
+    async def send_json(self, data):
+        self.sent.append(data)
 
 
     async def close(self, code=1000, reason=""):
@@ -226,13 +231,14 @@ async def test_the_service_closes_a_refused_stream_with_1003_and_the_venues_reas
     await manager.subscribe("kraken:spot:trades:NOSUCHUSD", client, Refusing(), "spot", "trades", "NOSUCHUSD")
     await asyncio.sleep(0.1)
 
+    assert client.sent   == [{"error": "Invalid Request", "detail": "kraken_spot refused trade:NOSUCH/USD: Currency pair not supported NOSUCH/USD"}]
     assert client.closed == (1003, "kraken_spot refused trade:NOSUCH/USD: Currency pair not supported NOSUCH/USD")
 
 
 def test_local_mode_raises_the_same_refusal_the_service_closes_with():
     error = error_for_fault(SubscriptionRefused("bybit_linear refused publicTrade.X: error:handler not found"))
 
-    assert isinstance(error, NotSupported)
+    assert isinstance(error, BadRequest) and error.error == "Invalid Request"
     assert error.detail == "bybit_linear refused publicTrade.X: error:handler not found"
 
 

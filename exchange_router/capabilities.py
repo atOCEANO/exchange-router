@@ -1,6 +1,9 @@
 from typing import Any, Dict, Optional
 
 
+KNOWN_WS_CHANNELS = {"ticker", "book_ticker", "mark_price", "agg_trades", "trades", "orderbook", "liquidations"}
+
+
 def market_block(capabilities: Optional[Dict[str, Any]], market_type: Any) -> Dict[str, Any]:
     markets = (capabilities or {}).get("market_types") or {}
 

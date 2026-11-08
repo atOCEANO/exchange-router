@@ -11,19 +11,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 from contextlib import asynccontextmanager
 from typing import Optional
-from exchange_router.capabilities import market_block, route_block
+from exchange_router.capabilities import KNOWN_WS_CHANNELS, market_block, route_block
 from exchange_router.exchanges import EXCHANGE_REGISTRY, get_adapter, shutdown_exchanges, startup_exchanges
 from exchange_router.exchanges.base import UNREADABLE, RequestError, UnknownSymbolError, UpstreamUnavailableError, join_open_interest_basis, series_interval, symbol_info_to_lite
 from exchange_router.models import MarketType
-from exchange_router.service.stream_manager import StreamManager, close_reason
+from exchange_router.service.answers import TITLES, refuse, status_of
+from exchange_router.service.stream_manager import StreamManager
 from exchange_router.version import SCHEMA_VERSION, VERSION
 
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s - %(message)s")
 
 stream_manager = StreamManager()
-
-KNOWN_WS_CHANNELS = {"ticker", "book_ticker", "mark_price", "agg_trades", "trades", "orderbook", "liquidations"}
 
 WS_HANDSHAKE_TIMEOUT_S = 10.0
 
@@ -75,16 +74,6 @@ async def schema_version_header(request: Request, call_next):
     response = await call_next(request)
     response.headers["Schema-Version"] = str(SCHEMA_VERSION)
     return response
-
-
-TITLES = {
-    400: "Invalid Request",
-    404: "Not Found",
-    500: "Internal Server Error",
-    501: "Not Implemented",
-    502: "Bad Upstream Response",
-    503: "Upstream Unavailable",
-}
 
 
 def error_body(status: int, detail: str, error: Optional[str] = None, headers: Optional[dict] = None) -> JSONResponse:
@@ -342,48 +331,61 @@ async def get_margin_tiers(exchange: str, market_type: MarketType, symbol: str):
 
 
 @app.websocket("/ws/{exchange}/{market_type}")
-async def websocket_endpoint(websocket: WebSocket, exchange: str, market_type: MarketType):
-    adapter = get_adapter(exchange)
-    if not adapter or market_type not in adapter.supported_market_types:
-        await websocket.close(code=1008)
-        return
-
+async def websocket_endpoint(websocket: WebSocket, exchange: str, market_type: str):
     await websocket.accept()
 
     key: Optional[str] = None
     client_id: Optional[uuid.UUID] = None
 
     try:
-        data = await asyncio.wait_for(websocket.receive_json(), timeout=WS_HANDSHAKE_TIMEOUT_S)
-        channel, symbol = data.get("channel"), data.get("symbol")
-        if not isinstance(channel, str) or not isinstance(symbol, str) or not channel or not symbol:
-            await websocket.close(code=1003)
+        adapter = get_adapter(exchange)
+        if not adapter:
+            await refuse(websocket, 404, f"exchange '{exchange}' is not enabled; / lists the exchanges")
             return
-        if channel not in KNOWN_WS_CHANNELS:
-            await websocket.close(code=1003)
+        if market_type not in {mt.value for mt in MarketType}:
+            await refuse(websocket, 400, f"market_type: '{market_type}' is not a market type; give spot, linear or inverse")
             return
-
-        if not route_block(adapter.get_capabilities(), market_type, channel).get("ws"):
-            await websocket.close(code=1003, reason=f"channel {channel!r} not supported on {exchange}/{market_type.value}")
+        market = MarketType(market_type)
+        if market not in adapter.supported_market_types:
+            await refuse(websocket, 400, f"market_type: '{market_type}' is not offered on {exchange}; /{exchange}/market_types lists them")
             return
 
         try:
-            symbol = await adapter.listed_symbol(market_type, symbol)
-        except RequestError as e:
-            await websocket.close(code=1008, reason=close_reason(str(e)))
+            data = await asyncio.wait_for(websocket.receive_json(), timeout=WS_HANDSHAKE_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            await refuse(websocket, 400, f"no subscription arrived in {WS_HANDSHAKE_TIMEOUT_S:.0f} s; send channel and symbol after connecting")
             return
-        except Exception as e:
-            await websocket.close(code=1011, reason=close_reason(str(e)))
+        except (ValueError, TypeError, KeyError):
+            await refuse(websocket, 400, "the subscription must be a JSON object naming channel and symbol")
             return
 
-        key       = f"{exchange}:{market_type.value}:{channel}:{symbol}"
-        client_id = await stream_manager.subscribe(key, websocket, adapter, market_type, channel, symbol)
+        subscription = data if isinstance(data, dict) else {}
+        channel      = subscription.get("channel")
+        symbol       = subscription.get("symbol")
+        for name, given in (("channel", channel), ("symbol", symbol)):
+            if not isinstance(given, str) or not given:
+                await refuse(websocket, 400, f"{name}: missing; the subscription names channel and symbol")
+                return
+        if channel not in KNOWN_WS_CHANNELS:
+            await refuse(websocket, 400, f"channel: '{channel}' is not a stream on {exchange} {market_type}; /{exchange}/capabilities lists the channels")
+            return
+        if not route_block(adapter.get_capabilities(), market, channel).get("ws"):
+            await refuse(websocket, 501, f"{channel} is not streamed on {exchange} {market_type}")
+            return
+
+        try:
+            symbol = await adapter.listed_symbol(market, symbol)
+        except Exception as e:
+            status, error = status_of(e)
+            await refuse(websocket, status, str(e), error)
+            return
+
+        key       = f"{exchange}:{market_type}:{channel}:{symbol}"
+        client_id = await stream_manager.subscribe(key, websocket, adapter, market, channel, symbol)
 
         while True:
             await websocket.receive_text()
 
-    except asyncio.TimeoutError:
-        await websocket.close(code=1008, reason="no subscription received")
     except WebSocketDisconnect:
         pass
     except Exception as e:

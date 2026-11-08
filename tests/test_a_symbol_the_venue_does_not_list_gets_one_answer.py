@@ -18,6 +18,7 @@ class Socket:
     def __init__(self, subscription):
         self.subscription = subscription
         self.closed       = None
+        self.sent         = []
 
 
     async def accept(self):
@@ -26,6 +27,10 @@ class Socket:
 
     async def receive_json(self):
         return self.subscription
+
+
+    async def send_json(self, data):
+        self.sent.append(data)
 
 
     async def close(self, code=1000, reason=""):
@@ -65,9 +70,9 @@ async def test_a_local_stream_for_an_unlisted_symbol_is_the_same_bad_request():
 async def test_a_service_stream_for_an_unlisted_symbol_closes_with_the_same_answer():
     socket = Socket({"channel": "ticker", "symbol": "NOSUCHUSDT"})
 
-    await websocket_endpoint(socket, "fake", MarketType.SPOT)
+    await websocket_endpoint(socket, "fake", "spot")
 
-    assert socket.closed == (1008, UNLISTED)
+    assert (socket.sent, socket.closed) == ([{"error": "Unknown Symbol", "detail": UNLISTED}], (1003, UNLISTED))
 
 
 async def test_a_symbol_listed_after_the_list_was_read_is_found_by_one_refresh():
@@ -89,8 +94,9 @@ async def test_a_service_stream_closes_1011_when_the_venue_fails_the_symbol_chec
     monkeypatch.setattr(registry.EXCHANGE_REGISTRY["fake"], "listed_symbol", down)
     socket = Socket({"channel": "ticker", "symbol": "BTCUSDT"})
 
-    await websocket_endpoint(socket, "fake", MarketType.SPOT)
+    await websocket_endpoint(socket, "fake", "spot")
 
+    assert socket.sent   == [{"error": "Upstream Unavailable", "detail": "fake is unavailable (50013): Systems are busy"}]
     assert socket.closed == (1011, "fake is unavailable (50013): Systems are busy")
 
 
@@ -98,9 +104,9 @@ async def test_a_close_reason_fits_a_close_frame_whatever_its_alphabet():
     cyrillic  = Socket({"channel": "ticker", "symbol": "Б" * 40})
     malformed = Socket({"channel": "ticker", "symbol": 7})
 
-    await websocket_endpoint(cyrillic, "fake", MarketType.SPOT)
-    await websocket_endpoint(malformed, "fake", MarketType.SPOT)
+    await websocket_endpoint(cyrillic, "fake", "spot")
+    await websocket_endpoint(malformed, "fake", "spot")
 
-    assert cyrillic.closed[0] == 1008
+    assert cyrillic.closed[0] == 1003
     assert len(cyrillic.closed[1].encode("utf-8")) <= 123
-    assert malformed.closed == (1003, "")
+    assert malformed.closed == (1003, "symbol: missing; the subscription names channel and symbol")
