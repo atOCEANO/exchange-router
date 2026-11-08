@@ -160,10 +160,12 @@ def _endpoint(route: str, exchange: Optional[str], market_type: Optional[str], s
     if route == "markets":
         return f"{exchange}/{market_type}/markets"
 
-    if route == "symbol_info":
-        return f"{exchange}/{market_type}/markets/{symbol}"
+    segment = (symbol or "").replace("/", "")
 
-    return f"{exchange}/{market_type}/{route}/{symbol}"
+    if route == "symbol_info":
+        return f"{exchange}/{market_type}/markets/{segment}"
+
+    return f"{exchange}/{market_type}/{route}/{segment}"
 
 
 class Backend:
