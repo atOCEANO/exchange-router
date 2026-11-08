@@ -217,10 +217,10 @@ async def test_funding_rate_reports_both_conventions_and_a_per_hour_column(route
     df    = await router.get_funding_rate(EX, market_type, symbol, limit=3)
     cycle = FUNDING_CYCLE_MS[MarketType(market_type)]
 
-    assert list(df.columns) == ["rate", "funding_per_hour", "cycle_ms"]
+    assert list(df.columns) == ["funding_per_cycle", "funding_cycle_ms", "funding_per_hour"]
     assert len(df) == 3
-    assert df["rate"].iloc[0] == 0.0001
-    assert list(df["cycle_ms"]) == [cycle, cycle, cycle]
+    assert df["funding_per_cycle"].iloc[0] == 0.0001
+    assert list(df["funding_cycle_ms"]) == [cycle, cycle, cycle]
     assert df["funding_per_hour"].iloc[0] == pytest.approx(0.0001 / (cycle / 3_600_000))
     assert (df.index[1] - df.index[0]) == pd.Timedelta(milliseconds=cycle)
 

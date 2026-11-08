@@ -41,13 +41,13 @@ def settlements(*stamps):
         symbol      = "BTCUSDT",
         market_type = MarketType.LINEAR,
         quote       = "USDT",
-        rate        = FundingHistorical(kind="discrete", per_cycle=0.0001, cycle_ms=0),
+        funding     = FundingHistorical(kind="discrete", per_cycle=0.0001, cycle_ms=0),
         timestamp   = stamp,
     ) for stamp in stamps]
 
 
 def hours(rows):
-    return [row.rate.cycle_ms / HOUR for row in rows]
+    return [row.funding.cycle_ms / HOUR for row in rows]
 
 
 def test_a_steady_cycle_stays_what_it_is():

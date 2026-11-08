@@ -274,7 +274,7 @@ async def test_kraken_refuses_a_funding_row_without_its_rate():
 
     whole = await read(KRAKEN_FUNDING)
 
-    assert [row.rate.per_cycle for row in whole] == [1.6419145833333e-05, 1.632215e-05]
+    assert [row.funding.per_cycle for row in whole] == [1.6419145833333e-05, 1.632215e-05]
 
     with pytest.raises(UpstreamDataError, match="arrived without relativeFundingRate"):
         await read([KRAKEN_FUNDING[0], without(KRAKEN_FUNDING[1], "relativeFundingRate")])

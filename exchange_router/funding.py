@@ -8,19 +8,14 @@ from ._warnings import RouterDataWarning
 
 def _rate_fields(row: Any) -> Tuple[str, float, float]:
     if isinstance(row, Mapping):
-        block = row.get("rate") or row.get("funding")
+        block = row.get("funding")
         if isinstance(block, Mapping):
             return block["kind"], float(block["per_cycle"]), float(block["cycle_ms"])
-        if "rate_per_cycle" in row:
-            return row["rate_kind"], float(row["rate_per_cycle"]), float(row["rate_cycle_ms"])
         if row.get("funding_per_cycle") is not None:
             return row["funding_kind"], float(row["funding_per_cycle"]), float(row["funding_cycle_ms"])
 
-    if isinstance(row, pd.Series):
-        if "rate_per_cycle" in row.index:
-            return row["rate_kind"], float(row["rate_per_cycle"]), float(row["rate_cycle_ms"])
-        if "funding_per_cycle" in row.index:
-            return row["funding_kind"], float(row["funding_per_cycle"]), float(row["funding_cycle_ms"])
+    if isinstance(row, pd.Series) and "funding_kind" in row.index:
+        return row["funding_kind"], float(row["funding_per_cycle"]), float(row["funding_cycle_ms"])
 
     raise ValueError("Unrecognized funding row shape; expected a wire row, a flattened row, or a funding DataFrame row")
 
@@ -39,8 +34,8 @@ def _clean_frame_rows(df: pd.DataFrame) -> List[Tuple[int, str, float, float]]:
     out = []
     for idx, row in df.iterrows():
         ts        = int(pd.Timestamp(idx).value // 1_000_000)
-        per_cycle = float(row["rate"])
-        cycle_ms  = float(row["cycle_ms"])
+        per_cycle = float(row["funding_per_cycle"])
+        cycle_ms  = float(row["funding_cycle_ms"])
         out.append((ts, kind, per_cycle, cycle_ms))
 
     return out
@@ -48,7 +43,7 @@ def _clean_frame_rows(df: pd.DataFrame) -> List[Tuple[int, str, float, float]]:
 
 def _normalized_rows(rows: Any) -> List[Tuple[int, str, float, float]]:
     if isinstance(rows, pd.DataFrame):
-        if "rate" in rows.columns:
+        if "funding_kind" not in rows.columns:
             return _clean_frame_rows(rows)
 
         out = []

@@ -168,7 +168,7 @@ def stamp_funding_cycles(rows: List[FundingRate], current_ms: Optional[int]) -> 
         cycle = cycle if cycle is not None else current_ms
         if cycle is None:
             raise ValueError(f"stamp_funding_cycles: the cycle of {row.symbol} at {row.timestamp} cannot be read from its neighbours and the venue states no current cycle")
-        out.append(row.model_copy(update={"rate": row.rate.model_copy(update={"cycle_ms": cycle})}))
+        out.append(row.model_copy(update={"funding": row.funding.model_copy(update={"cycle_ms": cycle})}))
     return out
 
 

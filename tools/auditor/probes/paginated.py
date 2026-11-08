@@ -20,8 +20,8 @@ def cycle_findings(rows: List[dict]) -> List[Dict[str, Any]]:
     out    = []
     for i in range(1, len(rows)):
         neighbours = {gaps[i - 1], gaps[i + 1] if i + 1 < len(gaps) else None}
-        if gaps[i] in neighbours and rows[i]["rate"]["cycle_ms"] != gaps[i]:
-            out.append({"timestamp": stamps[i], "gap_ms": gaps[i], "cycle_ms": rows[i]["rate"]["cycle_ms"]})
+        if gaps[i] in neighbours and rows[i]["funding"]["cycle_ms"] != gaps[i]:
+            out.append({"timestamp": stamps[i], "gap_ms": gaps[i], "cycle_ms": rows[i]["funding"]["cycle_ms"]})
     return out
 
 

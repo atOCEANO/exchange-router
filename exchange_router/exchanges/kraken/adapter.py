@@ -1229,7 +1229,7 @@ class KrakenAdapter(BaseExchange):
                 symbol      = model_sym,
                 market_type = market_type,
                 quote       = quote,
-                rate        = build_funding_historical(
+                funding     = build_funding_historical(
                     kind      = "continuous",
                     per_cycle = float(venue_value(r, "relativeFundingRate", f"Kraken funding of {api_symbol} at {ts}")),
                     cycle_ms  = 3_600_000,

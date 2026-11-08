@@ -237,9 +237,9 @@ class FundingCurrent(BaseModel):
 
 
 class FundingHistorical(BaseModel):
-    kind: Literal["discrete", "continuous"] = Field(
+    kind: str = Field(
         ...,
-        description="Funding model. 'discrete' rows are settlement events; 'continuous' rows are sample observations.",
+        description="Funding model. Known values: discrete, rows are settlement events; continuous, rows are sample observations. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
     )
     per_cycle: float = Field(
         ...,
@@ -704,13 +704,13 @@ class FundingRate(BaseModel):
         ...,
         description="Quote currency.",
     )
-    rate: FundingHistorical = Field(
+    funding: FundingHistorical = Field(
         ...,
-        description="Historical funding view nested as kind + per_cycle + cycle_ms. See FundingHistorical.",
+        description="Funding at this row's time, under the name the mark price and the symbol info give the same block. See FundingHistorical.",
     )
     timestamp: int = Field(
         ...,
-        description="Settlement time (discrete) or sample observation time (continuous), in unix milliseconds.",
+        description="Settlement time (discrete) or sample observation time (continuous), in unix milliseconds, by the venue's clock.",
     )
 
 

@@ -397,7 +397,7 @@ class FakeExchange(BaseExchange):
                 symbol      = symbol,
                 market_type = market_type,
                 quote       = QUOTES[market_type],
-                rate        = build_funding_historical(kind, 0.0001 + i * 0.00001, cycle),
+                funding     = build_funding_historical(kind, 0.0001 + i * 0.00001, cycle),
                 timestamp   = start + i * cycle,
             ))
 

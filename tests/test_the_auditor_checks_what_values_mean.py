@@ -16,7 +16,7 @@ def ctx(exchange, market_type="linear"):
 
 
 def funding_rows(cycles):
-    return [{"timestamp": stamp, "rate": {"kind": "discrete", "per_cycle": 0.0001, "cycle_ms": cycle * HOUR}} for stamp, cycle in zip(CAT_STAMPS, cycles)]
+    return [{"timestamp": stamp, "funding": {"kind": "discrete", "per_cycle": 0.0001, "cycle_ms": cycle * HOUR}} for stamp, cycle in zip(CAT_STAMPS, cycles)]
 
 
 def test_a_cycle_is_checked_against_its_gap_wherever_the_gap_repeats():

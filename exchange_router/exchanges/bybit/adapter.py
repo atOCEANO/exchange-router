@@ -777,7 +777,7 @@ class BybitAdapter(BaseExchange):
                 symbol      = model_sym,
                 market_type = market_type,
                 quote       = quote,
-                rate        = build_funding_historical(
+                funding     = build_funding_historical(
                     kind      = "discrete",
                     per_cycle = float(i["fundingRate"]),
                     cycle_ms  = current_ms or 0,

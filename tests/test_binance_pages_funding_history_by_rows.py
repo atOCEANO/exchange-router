@@ -67,5 +67,5 @@ async def test_a_page_ending_at_start_holds_the_newest_rows_before_it():
         await adapter.shutdown()
 
     assert [row.timestamp for row in rows]               == [1791946800004, 1791950400005, 1791964800001, 1791979200000]
-    assert [row.rate.cycle_ms / HOUR for row in rows]    == [1, 1, 4, 4]
-    assert [row.rate.per_cycle for row in rows]          == [0.0000125, -0.00003168, -0.00006988, -0.00005128]
+    assert [row.funding.cycle_ms / HOUR for row in rows]    == [1, 1, 4, 4]
+    assert [row.funding.per_cycle for row in rows]          == [0.0000125, -0.00003168, -0.00006988, -0.00005128]

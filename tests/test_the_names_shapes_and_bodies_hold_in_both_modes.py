@@ -84,7 +84,7 @@ def test_an_empty_frame_is_built_like_a_full_one():
 
 def test_an_empty_funding_frame_has_a_full_ones_dtypes():
     ctx      = {"exchange": "fake", "market_type": "linear", "symbol": "BTCUSDT"}
-    row      = {"symbol": "BTCUSDT", "market_type": "linear", "quote": "USDT", "rate": {"kind": "discrete", "per_cycle": 0.0001, "cycle_ms": 28_800_000}, "timestamp": 1_794_096_000_000}
+    row      = {"symbol": "BTCUSDT", "market_type": "linear", "quote": "USDT", "funding": {"kind": "discrete", "per_cycle": 0.0001, "cycle_ms": 28_800_000}, "timestamp": 1_794_096_000_000}
     empty, _ = frames.build("funding_rate", [], ctx)
     full, _  = frames.build("funding_rate", [row], ctx)
 

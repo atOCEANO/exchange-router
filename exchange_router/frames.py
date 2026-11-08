@@ -9,7 +9,7 @@ USD_FAMILY = {"USD", "USDT", "USDC", "USDD", "TUSD", "FDUSD", "BUSD", "DAI", "PY
 
 TEXT_COLUMNS = {"side", "id", "agg_id", "first_trade_id", "last_trade_id", "exchange", "market_type", "symbol", "quote", "unit"}
 
-INT_COLUMNS = {"cycle_ms"}
+INT_COLUMNS = {"funding_cycle_ms"}
 
 BOOL_COLUMNS = {"closed"}
 
@@ -17,7 +17,7 @@ COLUMNS: Dict[str, List[str]] = {
     "candles":          ["closed", "open", "high", "low", "close", "volume", "volume_notional"],
     "trades":           ["price", "qty", "qty_notional", "side", "id"],
     "agg_trades":       ["price", "qty", "qty_notional", "side", "agg_id", "first_trade_id", "last_trade_id"],
-    "funding_rate":     ["rate", "funding_per_hour", "cycle_ms"],
+    "funding_rate":     ["funding_per_cycle", "funding_cycle_ms", "funding_per_hour"],
     "open_interest":    ["open_interest", "open_interest_notional"],
     "liquidations":     ["price", "qty", "qty_notional", "side"],
     "long_short_ratio": ["ratio", "long_account", "short_account"],
@@ -179,17 +179,16 @@ def _agg_trades(rows: List[Dict], ctx: Dict[str, Any]) -> Tuple[pd.DataFrame, Li
 
 def _funding_rate(rows: List[Dict], ctx: Dict[str, Any]) -> Tuple[pd.DataFrame, List[str]]:
     df = _indexed(rows)
-    df = df.rename(columns={"rate_per_cycle": "rate", "rate_cycle_ms": "cycle_ms"})
 
-    cycle_hours = df["cycle_ms"] / 3_600_000
-    df["funding_per_hour"] = df["rate"].where(cycle_hours == 0, df["rate"] / cycle_hours)
+    cycle_hours = df["funding_cycle_ms"] / 3_600_000
+    df["funding_per_hour"] = df["funding_per_cycle"].where(cycle_hours == 0, df["funding_per_cycle"] / cycle_hours)
 
     attrs = _base_attrs(ctx)
     attrs["quote"]        = _const(df, "quote")
-    attrs["funding_kind"] = _const(df, "rate_kind")
+    attrs["funding_kind"] = _const(df, "funding_kind")
 
     warnings: List[str] = []
-    if df["cycle_ms"].nunique(dropna=True) > 1:
+    if df["funding_cycle_ms"].nunique(dropna=True) > 1:
         warnings.append(f"funding_rate {ctx['exchange']}/{ctx['market_type']}/{ctx['symbol']}: funding cycle changed within the window; funding_per_hour is per-row correct")
     short = _short_result_warning(df, ctx, "funding_rate")
     if short:

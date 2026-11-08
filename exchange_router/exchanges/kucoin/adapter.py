@@ -1068,7 +1068,7 @@ class KucoinAdapter(BaseExchange):
                         symbol      = model_sym,
                         market_type = market_type,
                         quote       = quote,
-                        rate        = build_funding_historical(
+                        funding     = build_funding_historical(
                             kind      = "discrete",
                             per_cycle = float(venue_value(r, "fundingRate", f"KuCoin funding of {api_symbol} at {ts}")),
                             cycle_ms  = current_ms or 0,
