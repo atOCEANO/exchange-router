@@ -40,6 +40,8 @@ class BybitAdapter(BaseExchange):
         self._hubs_lock = asyncio.Lock()
 
         self._funding_interval_cache: Dict[MarketType, Dict[str, int]] = {}
+        self._native_of: Dict[MarketType, Dict[str, str]] = {}
+        self._model_of: Dict[MarketType, Dict[str, str]] = {}
 
         self._capabilities = self._build_capabilities()
 
@@ -314,22 +316,18 @@ class BybitAdapter(BaseExchange):
             raise ValueError(f"Invalid Bybit timestamp: {ts}")
 
 
-    def normalize_symbol(self, symbol: str) -> str:
-        return symbol.upper()
-
-
     def get_api_symbol(self, symbol: str, market_type: MarketType) -> str:
         s = self.normalize_symbol(symbol)
         if s.endswith("_PERP"):
-            return s.replace("_PERP", "")
-        return s
+            s = s.replace("_PERP", "")
+        return self._native_of.get(market_type, {}).get(s, s)
 
 
     def get_model_symbol(self, api_symbol: str, market_type: MarketType) -> str:
         s = api_symbol.upper()
         if s.endswith("_PERP"):
             s = s[:-5]
-        return s
+        return self._model_of.get(market_type, {}).get(s, s)
 
 
     def _get_category(self, market_type: MarketType) -> str:
@@ -869,7 +867,9 @@ class BybitAdapter(BaseExchange):
             if cursor:
                 logger.warning(f"Bybit instruments-info stopped at the {pages}-page cap with a cursor still set")
 
-        results = []
+        results   = []
+        native_of = {}
+        model_of  = {}
         for s in instruments:
             if market_type == MarketType.LINEAR and s.get("contractType") != "LinearPerpetual":
                 continue
@@ -916,12 +916,16 @@ class BybitAdapter(BaseExchange):
                         funding_interval_ms = None
                 funding_block = build_funding_convention("discrete")
 
+            model_sym             = f"{s['baseCoin']}{s['quoteCoin']}".upper()
+            native_of[model_sym]  = s["symbol"]
+            model_of[s["symbol"]] = model_sym
+
             self._funding_interval_cache.setdefault(market_type, {})
             if funding_interval_ms is not None:
-                self._funding_interval_cache[market_type][s["symbol"]] = funding_interval_ms
+                self._funding_interval_cache[market_type][model_sym] = funding_interval_ms
 
             results.append(mark_trading(SymbolInfo(
-                symbol             = s["symbol"],
+                symbol             = model_sym,
                 native_symbol      = s["symbol"],
                 base_asset         = s["baseCoin"],
                 quote_asset        = s["quoteCoin"],
@@ -936,6 +940,9 @@ class BybitAdapter(BaseExchange):
                 tick_size          = build_step(tick),
                 qty_step           = build_step(step),
             ), s["status"] == "Trading"))
+
+        self._native_of[market_type] = native_of
+        self._model_of[market_type]  = model_of
         return results
 
 

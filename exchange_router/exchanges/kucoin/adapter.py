@@ -312,6 +312,7 @@ class KucoinAdapter(BaseExchange):
     def normalize_symbol(self, symbol: str) -> str:
         s = symbol.upper().replace("/", "").replace("-", "")
         if s.endswith("USDTM"): return s[:-1]
+        if s.endswith("USDCM"): return s[:-1]
         if s.endswith("USDM"): return s[:-1]
         return s
 
