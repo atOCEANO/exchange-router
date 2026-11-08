@@ -1,8 +1,12 @@
 import asyncio
 import logging
 import uuid
+from http import HTTPStatus
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 from contextlib import asynccontextmanager
@@ -43,6 +47,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def schema_version_header(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Schema-Version"] = str(SCHEMA_VERSION)
+    return response
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(_request: Request, exc: StarletteHTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": HTTPStatus(exc.status_code).phrase, "detail": exc.detail},
+        headers=getattr(exc, "headers", None),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(_request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={"error": "Unprocessable Entity", "detail": jsonable_encoder(exc.errors())},
+    )
 
 
 @app.exception_handler(UpstreamUnavailableError)
@@ -96,6 +124,7 @@ async def unhandled_exception_handler(_request: Request, exc: Exception):
     return JSONResponse(
         status_code=500,
         content={"error": "Internal Server Error", "detail": str(exc)},
+        headers={"Schema-Version": str(SCHEMA_VERSION)},
     )
 
 
