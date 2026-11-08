@@ -1,6 +1,9 @@
+import warnings
 from typing import Any, List, Mapping, Tuple
 
 import pandas as pd
+
+from ._warnings import RouterDataWarning
 
 
 def _rate_fields(row: Any) -> Tuple[str, float, float]:
@@ -23,7 +26,15 @@ def _rate_fields(row: Any) -> Tuple[str, float, float]:
 
 
 def _clean_frame_rows(df: pd.DataFrame) -> List[Tuple[int, str, float, float]]:
-    kind = df.attrs.get("funding_kind", "discrete")
+    kind = df.attrs.get("funding_kind")
+    if kind is None:
+        warnings.warn(
+            "funding_paid: the frame carries no funding_kind, as after pd.concat of frames whose attrs differ; "
+            "it is counted as discrete, which misprices continuous funding such as Kraken's",
+            RouterDataWarning,
+            stacklevel=4,
+        )
+        kind = "discrete"
 
     out = []
     for idx, row in df.iterrows():
