@@ -4,6 +4,7 @@ import itertools
 import logging
 import math
 import time
+import httpx
 import orjson
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any, Set, Tuple, Union, AsyncGenerator, Callable, Awaitable, Iterable
@@ -38,6 +39,17 @@ class UpstreamDataError(AdapterError):
 
 class SubscriptionRefused(AdapterError):
     pass
+
+
+class RequestError(ValueError):
+    pass
+
+
+class UnknownSymbolError(RequestError):
+    pass
+
+
+UNREADABLE = (UpstreamDataError, ValueError, KeyError, TypeError, IndexError, AttributeError, httpx.HTTPStatusError)
 
 
 _request_ids = itertools.count(1)
@@ -266,11 +278,11 @@ def build_margin_tier(up_to: Any, max_leverage: Any, maintenance_margin_rate: An
     )
 
 
-def validate_interval(adapter, market_type: MarketType, route: str, label: str, value: str) -> None:
+def validate_interval(adapter, market_type: MarketType, route: str, value: str) -> None:
     intervals = route_block(adapter.get_capabilities(), market_type, route).get("intervals")
 
     if intervals and value not in intervals:
-        raise ValueError(f"{label} '{value}' is not valid for {adapter.name} {market_type.value} {route}")
+        raise RequestError(f"interval: '{value}' is not offered on {adapter.name} {market_type.value} {route}; /{adapter.name}/capabilities lists the intervals")
 
 
 def symbol_info_to_lite(info: SymbolInfo) -> Dict[str, Any]:
@@ -695,7 +707,7 @@ class BaseExchange(ABC):
         wanted = total_limit + extra_rows
 
         if wanted > max_requests * limit_per_req:
-            raise ValueError(f"limit {total_limit} is more than {self.name} serves in one request; the most is {max_requests * limit_per_req - extra_rows}")
+            raise RequestError(f"limit: {total_limit} is more than {self.name} serves in one request; the most is {max_requests * limit_per_req - extra_rows}")
 
         while collected < wanted and req_count < max_requests:
             batch = await fetch_func_by_end(current_end, limit_per_req)
@@ -721,7 +733,7 @@ class BaseExchange(ABC):
             current_end = next_end
 
         if req_count >= max_requests and collected < wanted:
-            raise ValueError(f"limit {total_limit} took more than {max_requests} pages on {self.name}; the most one request reached is {max(collected - extra_rows, 0)}")
+            raise RequestError(f"limit: {total_limit} took more than {max_requests} pages on {self.name}; the most one request reached is {max(collected - extra_rows, 0)}")
 
         chunks.reverse()
         out = [item for chunk in chunks for item in chunk]
@@ -838,7 +850,7 @@ class BaseExchange(ABC):
 
     async def _listed_info(self, market_type: MarketType, status: str = "trading") -> Dict[str, SymbolInfo]:
         if status != "all" and status not in STATUSES:
-            raise ValueError(f"status: '{status}' is not a market state; give all, {', '.join(STATUSES[:-1])} or {STATUSES[-1]}")
+            raise RequestError(f"status: '{status}' is not a market state; give all, {', '.join(STATUSES[:-1])} or {STATUSES[-1]}")
 
         cache = await self._ensure_info_cache(market_type)
         if status == "all":
@@ -852,7 +864,7 @@ class BaseExchange(ABC):
         record = cache.get(name)
 
         if record is None:
-            raise ValueError(f"symbol '{symbol}' is not listed on {self.name} {market_type.value}; see /{self.name}/{market_type.value}/markets")
+            raise UnknownSymbolError(f"{symbol} is not listed on {self.name} {market_type.value}; /{self.name}/{market_type.value}/markets lists the symbols")
         return record
 
 
@@ -878,7 +890,7 @@ class BaseExchange(ABC):
             name  = self._listed_name(cache, market_type, symbol)
 
         if name is None:
-            raise ValueError(f"symbol '{symbol}' is not listed on {self.name} {market_type.value}; see /{self.name}/{market_type.value}/markets")
+            raise UnknownSymbolError(f"{symbol} is not listed on {self.name} {market_type.value}; /{self.name}/{market_type.value}/markets lists the symbols")
         return name
 
 
@@ -923,7 +935,7 @@ class BaseExchange(ABC):
 
 
     async def get_mark_price(self, market_type: MarketType, symbol: str) -> MarkPrice:
-        raise NotImplementedError(f"Mark Price not supported on {self.name} {market_type}")
+        raise NotImplementedError(f"mark_price is not served on {self.name} {market_type.value}")
 
 
     @abstractmethod
@@ -958,12 +970,12 @@ class BaseExchange(ABC):
 
     async def stream_mark_price(self, market_type: MarketType, symbol: str) -> AsyncGenerator[MarkPrice, None]:
         if False: yield
-        raise NotImplementedError(f"Mark Price stream not supported on {self.name} {market_type}")
+        raise NotImplementedError(f"mark_price is not streamed on {self.name} {market_type.value}")
 
 
     async def stream_agg_trades(self, market_type: MarketType, symbol: str) -> AsyncGenerator[AggTrade, None]:
         if False: yield
-        raise NotImplementedError(f"AggTrade stream not supported on {self.name} {market_type}")
+        raise NotImplementedError(f"agg_trades is not streamed on {self.name} {market_type.value}")
 
 
     @abstractmethod
@@ -978,24 +990,24 @@ class BaseExchange(ABC):
 
     async def stream_liquidations(self, market_type: MarketType, symbol: str) -> AsyncGenerator[Liquidation, None]:
         if False: yield
-        raise NotImplementedError(f"Liquidation stream not supported on {self.name} {market_type}")
+        raise NotImplementedError(f"liquidations is not streamed on {self.name} {market_type.value}")
 
 
     async def get_open_interest(self, market_type: MarketType, symbol: str, period: str = "1h", start_time: Optional[int] = None, limit: int = 30) -> List[OpenInterest]:
-        raise NotImplementedError(f"Open Interest not supported on {self.name} {market_type}")
+        raise NotImplementedError(f"open_interest is not served on {self.name} {market_type.value}")
 
 
     async def get_funding_rate(self, market_type: MarketType, symbol: str, start_time: Optional[int] = None, limit: int = 100) -> List[FundingRate]:
-        raise NotImplementedError(f"Funding Rate not supported on {self.name} {market_type}")
+        raise NotImplementedError(f"funding_rate is not served on {self.name} {market_type.value}")
 
 
     async def get_liquidations(self, market_type: MarketType, symbol: str, start_time: Optional[int] = None, limit: int = 100) -> List[Liquidation]:
-        raise NotImplementedError(f"Liquidations not supported on {self.name} {market_type}")
+        raise NotImplementedError(f"liquidations is not served on {self.name} {market_type.value}")
 
 
     async def get_long_short_ratio(self, market_type: MarketType, symbol: str, period: str = "5m", start_time: Optional[int] = None, limit: int = 30) -> List[LongShortRatio]:
-        raise NotImplementedError(f"L/S Ratio not supported on {self.name} {market_type}")
+        raise NotImplementedError(f"long_short_ratio is not served on {self.name} {market_type.value}")
 
 
     async def get_margin_tiers(self, market_type: MarketType, symbol: str) -> MarginTiers:
-        raise NotImplementedError(f"Margin tiers not supported on {self.name} {market_type.value}")
+        raise NotImplementedError(f"margin_tiers is not served on {self.name} {market_type.value}")

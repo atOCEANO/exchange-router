@@ -7,7 +7,7 @@ import websockets
 import logging
 from typing import List, AsyncGenerator, Dict, Any, Optional, Tuple
 from exchange_router.exchanges.base import (
-    BaseExchange, StreamHub, UpstreamUnavailableError, bar_closed,
+    BaseExchange, StreamHub, UpstreamUnavailableError, UpstreamDataError, RequestError, bar_closed,
     build_qty_unit, build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
     build_notional, build_price_tick, build_qty_grid, build_step,
@@ -25,6 +25,7 @@ logger = logging.getLogger("kucoin_adapter")
 class KucoinAdapter(BaseExchange):
     SPOT_QUOTES       = ["USDT", "USDC", "TUSD", "USD", "BTC", "ETH", "EUR", "GBP", "DAI", "KCS"]
     UNAVAILABLE_CODES = {"429000", "500000"}
+    ARGUMENT_CODES    = {"400100"}
 
     _STATUS: Dict[str, str] = {
         "Open":    "trading",
@@ -403,7 +404,7 @@ class KucoinAdapter(BaseExchange):
             "1w":  "1week",
         }
         if interval not in mapping:
-            raise ValueError(f"KuCoin does not support interval {interval}")
+            raise RequestError(f"KuCoin does not support interval {interval}")
         return mapping[interval]
 
 
@@ -422,7 +423,7 @@ class KucoinAdapter(BaseExchange):
             "1w":  10080,
         }
         if interval not in mapping:
-            raise ValueError(f"KuCoin does not support interval {interval}")
+            raise RequestError(f"KuCoin does not support interval {interval}")
         return mapping[interval]
 
 
@@ -436,7 +437,7 @@ class KucoinAdapter(BaseExchange):
             "1d":  "1day",
         }
         if period not in mapping:
-            raise ValueError(f"KuCoin does not support interval {period}")
+            raise RequestError(f"KuCoin does not support interval {period}")
         return mapping[period]
 
 
@@ -499,8 +500,10 @@ class KucoinAdapter(BaseExchange):
                     code = body.get("code", "200000")
                     if code in self.UNAVAILABLE_CODES:
                         raise UpstreamUnavailableError(f"KuCoin is unavailable ({code}): {body.get('msg', 'Unknown error')}", retry_after=2)
+                    if code in self.ARGUMENT_CODES:
+                        raise RequestError(f"KuCoin API Error ({code}): {body.get('msg', 'Unknown error')}")
                     if code != "200000":
-                        raise ValueError(f"KuCoin API Error ({code}): {body.get('msg', 'Unknown error')}")
+                        raise UpstreamDataError(f"KuCoin API Error ({code}): {body.get('msg', 'Unknown error')}")
                     return body.get("data")
 
                 resp.raise_for_status()
@@ -516,7 +519,7 @@ class KucoinAdapter(BaseExchange):
                 logger.error(f"HTTP Error: {e}")
                 raise e
             except Exception as e:
-                if isinstance(e, ValueError):
+                if isinstance(e, (ValueError, UpstreamDataError)):
                     raise e
                 logger.error(f"Request Error: {e}")
                 retries -= 1
@@ -854,7 +857,7 @@ class KucoinAdapter(BaseExchange):
 
 
     async def get_agg_trades(self, market_type: MarketType, symbol: str, start_time: Optional[int] = None, limit: int = 500) -> List[AggTrade]:
-        raise NotImplementedError(f"{self.name} does not support agg_trades for {market_type.value}")
+        raise NotImplementedError(f"agg_trades is not served on {self.name} {market_type.value}")
 
 
     async def get_candles(self, market_type: MarketType, symbol: str, interval: str, start_time: Optional[int] = None, limit: int = 100) -> List[Candle]:
@@ -997,7 +1000,7 @@ class KucoinAdapter(BaseExchange):
 
     async def get_mark_price(self, market_type: MarketType, symbol: str) -> MarkPrice:
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"{self.name} does not support mark_price for {market_type.value}")
+            raise NotImplementedError(f"mark_price is not served on {self.name} {market_type.value}")
         api_symbol = await self._resolve_symbol(symbol, market_type)
         model_sym  = self.get_model_symbol(api_symbol, market_type)
         info       = await self._info_for(market_type, model_sym)
@@ -1048,7 +1051,7 @@ class KucoinAdapter(BaseExchange):
 
     async def get_funding_rate(self, market_type: MarketType, symbol: str, start_time: Optional[int] = None, limit: int = 100) -> List[FundingRate]:
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"{self.name} does not support funding_rate for {market_type.value}")
+            raise NotImplementedError(f"funding_rate is not served on {self.name} {market_type.value}")
         api_symbol        = await self._resolve_symbol(symbol, market_type)
         model_sym         = self.get_model_symbol(api_symbol, market_type)
         info              = await self._info_for(market_type, model_sym)
@@ -1097,7 +1100,7 @@ class KucoinAdapter(BaseExchange):
 
     async def get_open_interest(self, market_type: MarketType, symbol: str, period: str = "1h", start_time: Optional[int] = None, limit: int = 30) -> List[OpenInterest]:
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"{self.name} does not support open_interest for {market_type.value}")
+            raise NotImplementedError(f"open_interest is not served on {self.name} {market_type.value}")
         api_symbol    = await self._resolve_symbol(symbol, market_type)
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         interval      = self._map_oi_interval(period)
@@ -1606,7 +1609,7 @@ class KucoinAdapter(BaseExchange):
 
     async def stream_mark_price(self, market_type: MarketType, symbol: str) -> AsyncGenerator[MarkPrice, None]:
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"{self.name} does not support stream_mark_price for {market_type.value}")
+            raise NotImplementedError(f"mark_price is not streamed on {self.name} {market_type.value}")
         api_symbol = await self._resolve_symbol(symbol, market_type)
         model_sym  = self.get_model_symbol(api_symbol, market_type)
         info       = await self._info_for(market_type, model_sym)

@@ -37,24 +37,30 @@ async def test_every_error_body_names_its_error_and_every_answer_its_schema():
         fine    = await client.get("/fake/spot/ticker/BTCUSDT")
 
     assert unknown.status_code == 404
-    assert unknown.json() == {"error": "Not Found", "detail": "Exchange 'nosuch' not found or not enabled"}
-    assert invalid.status_code == 422
-    assert invalid.json()["error"] == "Unprocessable Entity"
-    assert isinstance(invalid.json()["detail"], list)
+    assert unknown.json() == {"error": "Not Found", "detail": "exchange 'nosuch' is not enabled; / lists the exchanges"}
+    assert invalid.status_code == 400
+    assert invalid.json() == {"error": "Invalid Request", "detail": "limit: must be 1 or more, got 0"}
     assert [r.headers["Schema-Version"] for r in (unknown, invalid, fine)] == ["3", "3", "3"]
 
 
-async def test_an_internal_error_also_names_its_error_and_its_schema(monkeypatch):
-    async def broken(market_type, symbol):
+async def test_an_unreadable_answer_and_a_router_fault_each_name_their_error_and_schema(monkeypatch):
+    async def unreadable(market_type, symbol):
         raise KeyError("lastPrice")
 
-    monkeypatch.setattr(registry.EXCHANGE_REGISTRY["fake"], "get_ticker", broken)
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False), base_url="http://router.test") as client:
-        failed = await client.get("/fake/spot/ticker/BTCUSDT")
+    async def faulty(market_type, symbol):
+        raise RuntimeError("the router lost its place")
 
-    assert failed.status_code == 500
-    assert failed.json() == {"error": "Internal Server Error", "detail": "'lastPrice'"}
-    assert failed.headers["Schema-Version"] == "3"
+    answers = []
+    for broken in (unreadable, faulty):
+        monkeypatch.setattr(registry.EXCHANGE_REGISTRY["fake"], "get_ticker", broken)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False), base_url="http://router.test") as client:
+            answers.append(await client.get("/fake/spot/ticker/BTCUSDT"))
+
+    assert [(a.status_code, a.json()) for a in answers] == [
+        (502, {"error": "Bad Upstream Response", "detail": "'lastPrice'"}),
+        (500, {"error": "Internal Server Error", "detail": "the router lost its place"}),
+    ]
+    assert {a.headers["Schema-Version"] for a in answers} == {"3"}
 
 
 async def test_interval_and_end_read_as_period_and_start_in_both_modes(router):

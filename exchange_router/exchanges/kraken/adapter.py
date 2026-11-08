@@ -7,7 +7,7 @@ import websockets
 import logging
 from typing import List, AsyncGenerator, Dict, Any, Optional, Tuple
 from exchange_router.exchanges.base import (
-    BaseExchange, StreamHub, UpstreamUnavailableError, bar_closed,
+    BaseExchange, StreamHub, UpstreamUnavailableError, UpstreamDataError, RequestError, bar_closed,
     build_qty_unit, build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
     build_notional, build_price_tick, build_qty_grid, build_step_from_decimals,
@@ -25,6 +25,7 @@ logger = logging.getLogger("kraken_adapter")
 class KrakenAdapter(BaseExchange):
     FUT_TICKERS_TTL_S  = 1.0
     UNAVAILABLE_ERRORS = ("EService:Unavailable", "EService:Busy", "EService:Deadline elapsed", "EGeneral:Internal error", "EDatabase:Internal error")
+    ARGUMENT_ERRORS    = ("EQuery:", "EGeneral:Invalid arguments")
 
 
     def __init__(self):
@@ -416,7 +417,7 @@ class KrakenAdapter(BaseExchange):
             "1w": 10080,
         }
         if interval not in mapping:
-            raise ValueError(f"Kraken does not support interval {interval}")
+            raise RequestError(f"Kraken does not support interval {interval}")
         return mapping[interval]
 
 
@@ -432,7 +433,7 @@ class KrakenAdapter(BaseExchange):
             "1d": 86400,
         }
         if interval not in mapping:
-            raise ValueError(f"Kraken does not support interval {interval}")
+            raise RequestError(f"Kraken does not support interval {interval}")
         return mapping[interval]
 
 
@@ -610,9 +611,11 @@ class KrakenAdapter(BaseExchange):
                                 wait = await self._set_backoff(attempt, None, strong=False)
                                 logger.warning(f"Kraken {url} unavailable body ({err_str}), backing off {wait:.1f}s (attempt {attempt + 1}/{max_retries})")
                                 continue
-                            raise ValueError(f"Kraken Spot API Error: {err}")
+                            if any(code in err_str for code in self.ARGUMENT_ERRORS):
+                                raise RequestError(f"Kraken Spot API Error: {err}")
+                            raise UpstreamDataError(f"Kraken Spot API Error: {err}")
                         if data.get("result") == "error":
-                            raise ValueError(f"Kraken Futures API Error: {data.get('errors', data)}")
+                            raise UpstreamDataError(f"Kraken Futures API Error: {data.get('errors', data)}")
                         if "result" in data and isinstance(data["result"], dict) and not url.startswith(self.futures_chart_url):
                             return data["result"]
                     return data
@@ -622,8 +625,8 @@ class KrakenAdapter(BaseExchange):
             except httpx.HTTPStatusError as e:
                 if e.response.status_code >= 500:
                     raise UpstreamUnavailableError(f"Kraken API Error ({e.response.status_code}) on {url}: {e.response.text}")
-                raise ValueError(f"Kraken API Error ({e.response.status_code}) on {url}: {e.response.text}")
-            except ValueError:
+                raise UpstreamDataError(f"Kraken API Error ({e.response.status_code}) on {url}: {e.response.text}")
+            except (ValueError, UpstreamDataError):
                 raise
             except Exception as e:
                 last_body_error = f"{type(e).__name__}: {e}"
@@ -1035,7 +1038,7 @@ class KrakenAdapter(BaseExchange):
 
 
     async def get_agg_trades(self, market_type: MarketType, symbol: str, start_time: Optional[int] = None, limit: int = 500) -> List[AggTrade]:
-        raise NotImplementedError(f"{self.name} does not support agg_trades for {market_type.value}")
+        raise NotImplementedError(f"agg_trades is not served on {self.name} {market_type.value}")
 
 
     async def get_candles(self, market_type: MarketType, symbol: str, interval: str, start_time: Optional[int] = None, limit: int = 100) -> List[Candle]:
@@ -1099,7 +1102,7 @@ class KrakenAdapter(BaseExchange):
                 "1w": 604800,
             }
             if interval not in interval_secs_map:
-                raise ValueError(f"Kraken does not support interval {interval}")
+                raise RequestError(f"Kraken does not support interval {interval}")
             interval_secs = interval_secs_map[interval]
             now_secs = int(time.time())
             anchor_secs = int(start_time / 1000) if start_time else now_secs
@@ -1148,7 +1151,7 @@ class KrakenAdapter(BaseExchange):
 
                 from_ts = last_ts_secs + interval_secs
             else:
-                raise ValueError(f"limit {limit} took more than 20 pages on {self.name}; the most one request reached is {len(all_candles)}")
+                raise RequestError(f"limit: {limit} took more than 20 pages on {self.name}; the most one request reached is {len(all_candles)}")
 
             all_candles.sort(key=lambda c: c.timestamp)
             if start_time:
@@ -1158,7 +1161,7 @@ class KrakenAdapter(BaseExchange):
 
     async def get_mark_price(self, market_type: MarketType, symbol: str) -> MarkPrice:
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"{self.name} does not support mark_price for {market_type.value}")
+            raise NotImplementedError(f"mark_price is not served on {self.name} {market_type.value}")
         api_symbol = self.get_api_symbol(symbol, market_type)
         model_sym  = self.get_model_symbol(api_symbol, market_type)
         info       = await self._info_for(market_type, model_sym)
@@ -1210,7 +1213,7 @@ class KrakenAdapter(BaseExchange):
 
     async def get_funding_rate(self, market_type: MarketType, symbol: str, start_time: Optional[int] = None, limit: int = 100) -> List[FundingRate]:
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"{self.name} does not support funding_rate for {market_type.value}")
+            raise NotImplementedError(f"funding_rate is not served on {self.name} {market_type.value}")
         api_symbol = self.get_api_symbol(symbol, market_type)
 
         data = await self._make_request("GET", f"{self.futures_rest_url}/historical-funding-rates", {"symbol": api_symbol})
@@ -1243,7 +1246,7 @@ class KrakenAdapter(BaseExchange):
 
     async def get_open_interest(self, market_type: MarketType, symbol: str, period: str = "1h", start_time: Optional[int] = None, limit: int = 30) -> List[OpenInterest]:
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"{self.name} does not support open_interest for {market_type.value}")
+            raise NotImplementedError(f"open_interest is not served on {self.name} {market_type.value}")
         api_symbol = self.get_api_symbol(symbol, market_type)
 
         interval_secs = self._map_analytics_interval(period)
@@ -1283,12 +1286,12 @@ class KrakenAdapter(BaseExchange):
 
 
     async def get_liquidations(self, market_type: MarketType, symbol: str, start_time: Optional[int] = None, limit: int = 100) -> List[Liquidation]:
-        raise NotImplementedError(f"{self.name} does not support liquidations for {market_type.value}")
+        raise NotImplementedError(f"liquidations is not served on {self.name} {market_type.value}")
 
 
     async def get_long_short_ratio(self, market_type: MarketType, symbol: str, period: str = "5m", start_time: Optional[int] = None, limit: int = 30) -> List[LongShortRatio]:
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"{self.name} does not support long_short_ratio for {market_type.value}")
+            raise NotImplementedError(f"long_short_ratio is not served on {self.name} {market_type.value}")
         api_symbol = self.get_api_symbol(symbol, market_type)
 
         interval_secs = self._map_analytics_interval(period)
@@ -1775,7 +1778,7 @@ class KrakenAdapter(BaseExchange):
 
     async def stream_mark_price(self, market_type: MarketType, symbol: str) -> AsyncGenerator[MarkPrice, None]:
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"{self.name} does not support stream_mark_price for {market_type.value}")
+            raise NotImplementedError(f"mark_price is not streamed on {self.name} {market_type.value}")
         api_symbol = self.get_api_symbol(symbol, market_type)
         model_sym  = self.get_model_symbol(api_symbol, market_type)
         info       = await self._info_for(market_type, model_sym)

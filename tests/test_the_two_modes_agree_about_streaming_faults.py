@@ -8,6 +8,7 @@ from exchange_router import exchanges as registry
 from exchange_router._warnings import RouterDataWarning
 from exchange_router.backend import LocalBackend, error_for_close, is_retryable_stream_error
 from exchange_router.errors import BadRequest, NotSupported, RouterError
+from exchange_router.exchanges.base import UnknownSymbolError
 
 from fake_exchange import FakeExchange
 
@@ -29,7 +30,7 @@ class DroppingExchange(FakeExchange):
 class FaultyExchange(FakeExchange):
 
     async def stream_trades(self, market_type, symbol):
-        raise ValueError("BTCUSDT is not listed")
+        raise UnknownSymbolError("BTCUSDT is not listed on fake spot; /fake/spot/markets lists the symbols")
         yield
 
 

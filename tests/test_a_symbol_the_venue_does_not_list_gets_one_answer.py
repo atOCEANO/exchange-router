@@ -10,7 +10,7 @@ from exchange_router.service.main import websocket_endpoint
 from fake_exchange import FakeExchange
 
 
-UNLISTED = "symbol 'NOSUCHUSDT' is not listed on fake spot; see /fake/spot/markets"
+UNLISTED = "NOSUCHUSDT is not listed on fake spot; /fake/spot/markets lists the symbols"
 
 
 class Socket:
@@ -77,7 +77,7 @@ async def test_a_symbol_listed_after_the_list_was_read_is_found_by_one_refresh()
     assert await adapter.listed_symbol(MarketType.SPOT, "sol-usdt") == "SOLUSDT"
     assert adapter.fetches == 2
 
-    with pytest.raises(ValueError, match="'NOSUCHUSDT' is not listed"):
+    with pytest.raises(ValueError, match="NOSUCHUSDT is not listed"):
         await adapter.listed_symbol(MarketType.SPOT, "NOSUCHUSDT")
     assert adapter.fetches == 2
 

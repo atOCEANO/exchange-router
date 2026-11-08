@@ -3,10 +3,11 @@ from typing import Optional
 
 class RouterError(Exception):
 
-    def __init__(self, detail: str, status: Optional[int] = None):
+    def __init__(self, detail: str, status: Optional[int] = None, error: Optional[str] = None):
         super().__init__(detail)
         self.detail = detail
         self.status = status
+        self.error  = error
 
 
     def __str__(self) -> str:
@@ -29,8 +30,8 @@ class RateLimited(RouterError):
 
 class UpstreamUnavailable(RouterError):
 
-    def __init__(self, detail: str, status: Optional[int] = None, retry_after: Optional[float] = None):
-        super().__init__(detail, status)
+    def __init__(self, detail: str, status: Optional[int] = None, retry_after: Optional[float] = None, error: Optional[str] = None):
+        super().__init__(detail, status, error)
         self.retry_after = retry_after
 
 
@@ -50,20 +51,20 @@ class SchemaMismatch(RouterError):
         self.service_schema = service_schema
 
 
-def error_for_status(status: int, detail: str, retry_after: Optional[float] = None) -> RouterError:
+def error_for_status(status: int, detail: str, retry_after: Optional[float] = None, error: Optional[str] = None) -> RouterError:
     if status == 400:
-        return BadRequest(detail, status)
+        return BadRequest(detail, status, error)
 
     if status == 404:
-        return NotFound(detail, status)
+        return NotFound(detail, status, error)
 
     if status == 429:
-        return RateLimited(detail, status)
+        return RateLimited(detail, status, error)
 
     if status == 501:
-        return NotSupported(detail, status)
+        return NotSupported(detail, status, error)
 
     if status == 503:
-        return UpstreamUnavailable(detail, status, retry_after)
+        return UpstreamUnavailable(detail, status, retry_after, error)
 
-    return RouterError(detail, status)
+    return RouterError(detail, status, error)

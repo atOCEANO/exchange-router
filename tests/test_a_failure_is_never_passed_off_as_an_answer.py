@@ -4,7 +4,7 @@ import time
 import httpx
 import pytest
 
-from exchange_router.exchanges.base import UpstreamUnavailableError, join_open_interest_basis
+from exchange_router.exchanges.base import RequestError, UpstreamDataError, UpstreamUnavailableError, join_open_interest_basis
 from exchange_router.exchanges.bybit.adapter import BybitAdapter
 from exchange_router.exchanges.hyperliquid.adapter import HyperliquidAdapter
 from exchange_router.exchanges.kraken.adapter import KrakenAdapter
@@ -85,7 +85,7 @@ async def test_a_limit_beyond_the_page_cap_is_refused_before_any_request():
         asked.append(end_ts)
         return []
 
-    with pytest.raises(ValueError, match="limit 1001 is more than fake serves in one request; the most is 1000"):
+    with pytest.raises(ValueError, match="limit: 1001 is more than fake serves in one request; the most is 1000"):
         await FakeExchange()._paginate_backwards(pages, 1001, 10)
     assert asked == []
 
@@ -110,10 +110,10 @@ async def test_kraken_refuses_a_futures_candle_walk_that_reaches_its_page_cap_sh
             await adapter.shutdown()
 
     assert [len(reads[0]), reads[0][-1].timestamp] == [3000, anchor]
-    assert reads[1] == "limit 50000 took more than 20 pages on kraken; the most one request reached is 40000"
+    assert reads[1] == "limit: 50000 took more than 20 pages on kraken; the most one request reached is 40000"
 
 
-async def test_each_venue_answers_its_busy_codes_with_a_503_and_its_other_codes_with_a_400():
+async def test_each_venue_answers_busy_codes_with_a_503_argument_codes_with_a_400_and_the_rest_with_a_502():
     busy = [
         (BybitAdapter(), {"retCode": 10016, "retMsg": "Server error.", "result": {}}, lambda a: a._make_request("GET", "/v5/market/time")),
         (OkxAdapter(), {"code": "50013", "msg": "Systems are busy. Please try again later.", "data": []}, lambda a: a._make_request("GET", "/api/v5/public/time")),
@@ -131,7 +131,18 @@ async def test_each_venue_answers_its_busy_codes_with_a_503_and_its_other_codes_
         (unthrottled(), {"error": ["EQuery:Unknown asset pair"]}, lambda a: a._make_request("GET", "https://api.kraken.com/0/public/Time")),
     ]
     for adapter, body, call in caller:
-        with pytest.raises(ValueError):
+        with pytest.raises(RequestError):
+            await answered(adapter, body, call)
+
+    unplaced = [
+        (BybitAdapter(), {"retCode": 10002, "retMsg": "Request expired.", "result": {}}, lambda a: a._make_request("GET", "/v5/market/time")),
+        (OkxAdapter(), {"code": "50030", "msg": "No permission to use this API.", "data": []}, lambda a: a._make_request("GET", "/api/v5/public/time")),
+        (KucoinAdapter(), {"code": "900001", "msg": "Symbol not exists"}, lambda a: a._make_request("GET", "https://api.kucoin.com", "/api/v1/timestamp")),
+        (unthrottled(), {"error": ["EGeneral:Unknown method"]}, lambda a: a._make_request("GET", "https://api.kraken.com/0/public/Time")),
+        (unthrottled(), {"result": "error", "errors": ["unknownError"]}, lambda a: a._make_request("GET", "https://futures.kraken.com/derivatives/api/v3/tickers")),
+    ]
+    for adapter, body, call in unplaced:
+        with pytest.raises(UpstreamDataError):
             await answered(adapter, body, call)
 
 
@@ -224,6 +235,6 @@ async def test_a_route_that_reads_one_row_more_names_the_callers_limit_and_its_o
         asked.append(end_ts)
         return []
 
-    with pytest.raises(ValueError, match="limit 1000 is more than fake serves in one request; the most is 999$"):
+    with pytest.raises(ValueError, match="limit: 1000 is more than fake serves in one request; the most is 999$"):
         await FakeExchange()._paginate_backwards(pages, 1000, 10, extra_rows=1)
     assert asked == []

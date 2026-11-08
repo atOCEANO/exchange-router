@@ -6,7 +6,7 @@ import websockets
 import logging
 from typing import List, AsyncGenerator, Dict, Any, Optional, Tuple
 from exchange_router.exchanges.base import (
-    BaseExchange, StreamHub, UpstreamUnavailableError, bar_closed,
+    BaseExchange, StreamHub, UpstreamUnavailableError, UpstreamDataError, RequestError, bar_closed,
     build_qty_unit, build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention, build_step,
     build_margin_tier, build_notional, build_price_tick, build_qty_grid,
@@ -24,6 +24,7 @@ logger = logging.getLogger("bybit_adapter")
 
 class BybitAdapter(BaseExchange):
     UNAVAILABLE_CODES = {10000, 10016, 10018, 10429, 170001, 170007, 170032, 170234}
+    ARGUMENT_CODES    = {10001}
 
     _STATUS: Dict[str, str] = {
         "Trading":   "trading",
@@ -419,8 +420,10 @@ class BybitAdapter(BaseExchange):
                         logger.warning(f"Bybit is unavailable ({data['retCode']}): {data['retMsg']}. Retrying after 2s.")
                         retries -= 1
                         continue
+                    if data["retCode"] in self.ARGUMENT_CODES:
+                        raise RequestError(f"Bybit API Error ({data['retCode']}): {data['retMsg']}")
                     if data["retCode"] != 0:
-                        raise ValueError(f"Bybit API Error ({data['retCode']}): {data['retMsg']}")
+                        raise UpstreamDataError(f"Bybit API Error ({data['retCode']}): {data['retMsg']}")
                     result = data["result"]
                     if isinstance(result, dict) and "time" in data:
                         result.setdefault("_envelope_ts", data["time"])
@@ -453,7 +456,7 @@ class BybitAdapter(BaseExchange):
                 logger.error(f"HTTP Error: {e}")
                 raise e
             except Exception as e:
-                if isinstance(e, (ValueError, UpstreamUnavailableError)):
+                if isinstance(e, (ValueError, UpstreamUnavailableError, UpstreamDataError)):
                     raise e
                 logger.error(f"Request Error: {e}")
                 retries -= 1
@@ -646,7 +649,7 @@ class BybitAdapter(BaseExchange):
 
 
     async def get_agg_trades(self, market_type: MarketType, symbol: str, start_time: Optional[int] = None, limit: int = 500) -> List[AggTrade]:
-        raise NotImplementedError(f"{self.name} does not support agg_trades for {market_type.value}")
+        raise NotImplementedError(f"agg_trades is not served on {self.name} {market_type.value}")
 
 
     async def get_candles(self, market_type: MarketType, symbol: str, interval: str, start_time: Optional[int] = None, limit: int = 100) -> List[Candle]:
@@ -705,7 +708,7 @@ class BybitAdapter(BaseExchange):
 
     async def get_mark_price(self, market_type: MarketType, symbol: str) -> MarkPrice:
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"{self.name} does not support mark_price for {market_type.value}")
+            raise NotImplementedError(f"mark_price is not served on {self.name} {market_type.value}")
         cat = self._get_category(market_type)
         api_symbol = self.get_api_symbol(symbol, market_type)
 
@@ -756,7 +759,7 @@ class BybitAdapter(BaseExchange):
 
     async def get_funding_rate(self, market_type: MarketType, symbol: str, start_time: Optional[int] = None, limit: int = 100) -> List[FundingRate]:
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"{self.name} does not support funding_rate for {market_type.value}")
+            raise NotImplementedError(f"funding_rate is not served on {self.name} {market_type.value}")
         cat        = self._get_category(market_type)
         api_symbol = self.get_api_symbol(symbol, market_type)
         model_sym  = self.get_model_symbol(api_symbol, market_type)
@@ -792,7 +795,7 @@ class BybitAdapter(BaseExchange):
 
     async def get_open_interest(self, market_type: MarketType, symbol: str, period: str = "1h", start_time: Optional[int] = None, limit: int = 30) -> List[OpenInterest]:
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"{self.name} does not support open_interest for {market_type.value}")
+            raise NotImplementedError(f"open_interest is not served on {self.name} {market_type.value}")
         cat = self._get_category(market_type)
         api_symbol = self.get_api_symbol(symbol, market_type)
         model_sym = self.get_model_symbol(api_symbol, market_type)
@@ -834,7 +837,7 @@ class BybitAdapter(BaseExchange):
 
     async def get_long_short_ratio(self, market_type: MarketType, symbol: str, period: str = "5m", start_time: Optional[int] = None, limit: int = 30) -> List[LongShortRatio]:
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"{self.name} does not support long_short_ratio for {market_type.value}")
+            raise NotImplementedError(f"long_short_ratio is not served on {self.name} {market_type.value}")
         cat        = self._get_category(market_type)
         api_symbol = self.get_api_symbol(symbol, market_type)
         interval   = self._map_metric_interval(period)
@@ -1253,7 +1256,7 @@ class BybitAdapter(BaseExchange):
 
     async def stream_liquidations(self, market_type: MarketType, symbol: str) -> AsyncGenerator[Liquidation, None]:
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"{self.name} does not support stream_liquidations for {market_type.value}")
+            raise NotImplementedError(f"liquidations is not streamed on {self.name} {market_type.value}")
         api_symbol = self.get_api_symbol(symbol, market_type)
         topic      = f"allLiquidation.{api_symbol}"
         model_sym  = self.get_model_symbol(api_symbol, market_type)

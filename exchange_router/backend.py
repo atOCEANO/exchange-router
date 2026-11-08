@@ -6,7 +6,6 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import httpx
 import websockets
-from pydantic import ValidationError
 from pydantic_core import to_jsonable_python
 from websockets.exceptions import InvalidHandshake
 
@@ -23,8 +22,10 @@ from .errors import (
 )
 from .exchanges import EXCHANGE_REGISTRY, get_adapter, load_exchanges
 from .exchanges.base import (
+    UNREADABLE,
+    RequestError,
     SubscriptionRefused,
-    UpstreamDataError,
+    UnknownSymbolError,
     UpstreamUnavailableError,
     join_open_interest_basis,
     symbol_info_to_lite,
@@ -65,26 +66,26 @@ SERIES_METHODS = {
 }
 
 INTERVAL_ROUTES = {
-    "candles":          ("interval", "Interval"),
-    "open_interest":    ("period",   "Period"),
-    "long_short_ratio": ("period",   "Period"),
+    "candles":          "interval",
+    "open_interest":    "period",
+    "long_short_ratio": "period",
 }
 
 
 def error_for_fault(exc: Exception) -> RouterError:
     if isinstance(exc, UpstreamUnavailableError):
-        return UpstreamUnavailable(str(exc), 503, getattr(exc, "retry_after", None))
-
-    if isinstance(exc, (ValidationError, UpstreamDataError)):
-        return RouterError(str(exc), 502)
+        return UpstreamUnavailable(str(exc), 503, getattr(exc, "retry_after", None), "Upstream Unavailable")
 
     if isinstance(exc, (NotImplementedError, SubscriptionRefused)):
-        return NotSupported(str(exc), 501)
+        return NotSupported(str(exc), 501, "Not Implemented")
 
-    if isinstance(exc, ValueError):
-        return BadRequest(str(exc), 400)
+    if isinstance(exc, RequestError):
+        return BadRequest(str(exc), 400, "Unknown Symbol" if isinstance(exc, UnknownSymbolError) else "Invalid Request")
 
-    return RouterError(str(exc), 500)
+    if isinstance(exc, UNREADABLE):
+        return RouterError(str(exc), 502, "Bad Upstream Response")
+
+    return RouterError(str(exc), 500, "Internal Server Error")
 
 
 def _is_fatal_close(error: Exception) -> bool:
@@ -123,6 +124,14 @@ def _detail(response: httpx.Response) -> str:
         return body.get("detail") or body.get("error") or str(body)
     except Exception:
         return response.text or f"HTTP {response.status_code}"
+
+
+def _title(response: httpx.Response) -> Optional[str]:
+    try:
+        body = response.json()
+    except Exception:
+        return None
+    return body.get("error") if isinstance(body, dict) else None
 
 
 def _retry_after(response: httpx.Response) -> Optional[float]:
@@ -235,11 +244,11 @@ class RemoteBackend(Backend):
                 retry_after = _retry_after(e.response)
 
                 if status not in (429, 500, 502, 503, 504):
-                    raise error_for_status(status, detail, retry_after)
+                    raise error_for_status(status, detail, retry_after, _title(e.response))
 
                 attempt += 1
                 if attempt > self.max_retries:
-                    raise error_for_status(status, detail, retry_after)
+                    raise error_for_status(status, detail, retry_after, _title(e.response))
 
                 await asyncio.sleep(_sleep_for(attempt, retry_after))
 
@@ -373,10 +382,10 @@ class LocalBackend(Backend):
 
         adapter = get_adapter(exchange)
         if adapter is None:
-            raise NotFound(f"Exchange '{exchange}' not found or not enabled", 404)
+            raise NotFound(f"exchange '{exchange}' is not enabled; / lists the exchanges", 404, "Not Found")
 
         if market_type is not None and market_type not in adapter.supported_market_types:
-            raise BadRequest(f"Market type '{market_type.value}' not supported on {exchange}", 400)
+            raise BadRequest(f"market_type: '{market_type.value}' is not offered on {exchange}; /{exchange}/market_types lists them", 400, "Invalid Request")
 
         return adapter
 
@@ -388,10 +397,7 @@ class LocalBackend(Backend):
         try:
             return MarketType(market_type)
         except ValueError:
-            raise RouterError(
-                f"market_type '{market_type}' is not a market type; use spot, linear or inverse",
-                422,
-            )
+            raise BadRequest(f"market_type: '{market_type}' is not a market type; give spot, linear or inverse", 400, "Invalid Request")
 
 
     async def fetch(self, route: str, exchange: Optional[str] = None, market_type: Optional[str] = None,
@@ -445,10 +451,9 @@ class LocalBackend(Backend):
             }
 
         if route in INTERVAL_ROUTES:
-            name, label = INTERVAL_ROUTES[route]
-            value       = params.get(name)
+            value = params.get(INTERVAL_ROUTES[route])
             if value is not None:
-                validate_interval(adapter, market_type, route, label, value)
+                validate_interval(adapter, market_type, route, value)
 
         if route != "symbol_info" and (route in POINT_METHODS or route in SERIES_METHODS or route == "orderbook"):
             symbol = await adapter.listed_symbol(market_type, symbol)

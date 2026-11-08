@@ -7,7 +7,7 @@ import websockets
 import logging
 from typing import List, AsyncGenerator, Dict, Any, Optional, Deque, Tuple
 from exchange_router.exchanges.base import (
-    BaseExchange, StreamHub, UpstreamUnavailableError, bar_closed,
+    BaseExchange, StreamHub, UpstreamUnavailableError, UpstreamDataError, RequestError, bar_closed,
     build_qty_unit, build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention, build_step,
     build_margin_tier, build_notional, build_price_tick, build_qty_grid,
@@ -26,6 +26,7 @@ logger = logging.getLogger("okx_adapter")
 class OkxAdapter(BaseExchange):
     SPOT_QUOTES       = ["USDT", "USDC", "USD", "BTC", "ETH", "EUR", "GBP", "DAI"]
     UNAVAILABLE_CODES = {"50001", "50004", "50005", "50011", "50013", "50026"}
+    ARGUMENT_CODES    = {"50014", "51000", "51001"}
 
     _STATUS: Dict[str, str] = {
         "live":    "trading",
@@ -577,8 +578,10 @@ class OkxAdapter(BaseExchange):
                     code = body.get("code", "0")
                     if code in self.UNAVAILABLE_CODES:
                         raise UpstreamUnavailableError(f"OKX is unavailable ({code}): {body.get('msg', 'Unknown error')}", retry_after=2)
+                    if code in self.ARGUMENT_CODES:
+                        raise RequestError(f"OKX API Error ({code}): {body.get('msg', 'Unknown error')}")
                     if code != "0":
-                        raise ValueError(f"OKX API Error ({code}): {body.get('msg', 'Unknown error')}")
+                        raise UpstreamDataError(f"OKX API Error ({code}): {body.get('msg', 'Unknown error')}")
                     return body.get("data", [])
 
                 resp.raise_for_status()
@@ -594,7 +597,7 @@ class OkxAdapter(BaseExchange):
                 logger.error(f"HTTP Error: {e}")
                 raise e
             except Exception as e:
-                if isinstance(e, ValueError):
+                if isinstance(e, (ValueError, UpstreamDataError)):
                     raise e
                 logger.error(f"Request Error: {e}")
                 retries -= 1
@@ -827,7 +830,7 @@ class OkxAdapter(BaseExchange):
 
 
     async def get_agg_trades(self, market_type: MarketType, symbol: str, start_time: Optional[int] = None, limit: int = 500) -> List[AggTrade]:
-        raise NotImplementedError(f"{self.name} does not support agg_trades for {market_type.value}")
+        raise NotImplementedError(f"agg_trades is not served on {self.name} {market_type.value}")
 
 
     async def get_candles(self, market_type: MarketType, symbol: str, interval: str, start_time: Optional[int] = None, limit: int = 100) -> List[Candle]:
@@ -920,7 +923,7 @@ class OkxAdapter(BaseExchange):
 
     async def get_mark_price(self, market_type: MarketType, symbol: str) -> MarkPrice:
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"{self.name} does not support mark_price for {market_type.value}")
+            raise NotImplementedError(f"mark_price is not served on {self.name} {market_type.value}")
         api_symbol = await self._resolve_symbol(symbol, market_type)
         mark_data  = await self._make_request("GET", "/api/v5/public/mark-price", {"instType": "SWAP", "instId": api_symbol})
         if not mark_data:
@@ -982,7 +985,7 @@ class OkxAdapter(BaseExchange):
 
     async def get_funding_rate(self, market_type: MarketType, symbol: str, start_time: Optional[int] = None, limit: int = 100) -> List[FundingRate]:
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"{self.name} does not support funding_rate for {market_type.value}")
+            raise NotImplementedError(f"funding_rate is not served on {self.name} {market_type.value}")
         api_symbol = await self._resolve_symbol(symbol, market_type)
         per_req = 100
 
@@ -1022,7 +1025,7 @@ class OkxAdapter(BaseExchange):
 
     async def get_open_interest(self, market_type: MarketType, symbol: str, period: str = "1h", start_time: Optional[int] = None, limit: int = 30) -> List[OpenInterest]:
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"{self.name} does not support open_interest for {market_type.value}")
+            raise NotImplementedError(f"open_interest is not served on {self.name} {market_type.value}")
         api_symbol    = await self._resolve_symbol(symbol, market_type)
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         bar           = self._map_candle_interval(period)
@@ -1081,7 +1084,7 @@ class OkxAdapter(BaseExchange):
 
     async def get_liquidations(self, market_type: MarketType, symbol: str, start_time: Optional[int] = None, limit: int = 100) -> List[Liquidation]:
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"{self.name} does not support liquidations for {market_type.value}")
+            raise NotImplementedError(f"liquidations is not served on {self.name} {market_type.value}")
         api_symbol    = await self._resolve_symbol(symbol, market_type)
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         uly           = api_symbol.replace("-SWAP", "")
@@ -1147,7 +1150,7 @@ class OkxAdapter(BaseExchange):
 
     async def get_long_short_ratio(self, market_type: MarketType, symbol: str, period: str = "5m", start_time: Optional[int] = None, limit: int = 30) -> List[LongShortRatio]:
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"{self.name} does not support long_short_ratio for {market_type.value}")
+            raise NotImplementedError(f"long_short_ratio is not served on {self.name} {market_type.value}")
         ccy = self._base_ccy(symbol, market_type)
         model_sym = self.get_model_symbol(self.get_api_symbol(symbol, market_type), market_type)
         bar = {"1h": "1H", "1d": "1D"}.get(period, period)
@@ -1568,7 +1571,7 @@ class OkxAdapter(BaseExchange):
 
     async def stream_mark_price(self, market_type: MarketType, symbol: str) -> AsyncGenerator[MarkPrice, None]:
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"{self.name} does not support stream_mark_price for {market_type.value}")
+            raise NotImplementedError(f"mark_price is not streamed on {self.name} {market_type.value}")
         api_symbol = await self._resolve_symbol(symbol, market_type)
         model_sym  = self.get_model_symbol(api_symbol, market_type)
         info       = await self._info_for(market_type, model_sym)
@@ -1593,7 +1596,7 @@ class OkxAdapter(BaseExchange):
 
     async def stream_liquidations(self, market_type: MarketType, symbol: str) -> AsyncGenerator[Liquidation, None]:
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"{self.name} does not support stream_liquidations for {market_type.value}")
+            raise NotImplementedError(f"liquidations is not streamed on {self.name} {market_type.value}")
         api_symbol    = await self._resolve_symbol(symbol, market_type)
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         info          = await self._info_for(market_type, model_sym)

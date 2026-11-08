@@ -54,7 +54,7 @@ async def test_a_venue_whose_tiers_are_off_refuses_them_on_every_market(adapter_
     adapter = adapter_class()
     try:
         for market_type in adapter.supported_market_types:
-            with pytest.raises(NotImplementedError, match=f"^Margin tiers not supported on {adapter.name} {market_type.value}$"):
+            with pytest.raises(NotImplementedError, match=f"^margin_tiers is not served on {adapter.name} {market_type.value}$"):
                 await adapter.get_margin_tiers(market_type, "BTCUSDT")
     finally:
         await adapter.shutdown()
@@ -69,7 +69,7 @@ async def test_the_service_answers_501_for_a_market_without_tiers():
         await backend.close()
 
     assert caught.value.status == 501
-    assert caught.value.detail == "Margin tiers not supported on fake spot"
+    assert caught.value.detail == "margin_tiers is not served on fake spot"
 
 
 async def test_an_older_service_is_named_instead_of_answering_not_found():

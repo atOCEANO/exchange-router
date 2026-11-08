@@ -6,7 +6,7 @@ import websockets
 import logging
 from typing import List, AsyncGenerator, Dict, Any, Optional, Set, Tuple
 from exchange_router.exchanges.base import (
-    BaseExchange, StreamHub, UpstreamUnavailableError, bar_closed,
+    BaseExchange, StreamHub, UpstreamUnavailableError, UpstreamDataError, RequestError, bar_closed,
     build_qty_unit, build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
     build_step_from_decimals, build_margin_tier,
@@ -309,7 +309,7 @@ class HyperliquidAdapter(BaseExchange):
                     continue
 
                 if resp.status_code == 422:
-                    raise ValueError(f"Hyperliquid rejected {info_type} request (422)")
+                    raise UpstreamDataError(f"Hyperliquid rejected {info_type} request (422)")
 
                 resp.raise_for_status()
 
@@ -324,7 +324,7 @@ class HyperliquidAdapter(BaseExchange):
                 logger.error(f"HTTP Error: {e}")
                 raise e
             except Exception as e:
-                if isinstance(e, (ValueError, UpstreamUnavailableError)):
+                if isinstance(e, (ValueError, UpstreamUnavailableError, UpstreamDataError)):
                     raise e
                 logger.error(f"Request Error: {e}")
                 retries -= 1
@@ -591,7 +591,7 @@ class HyperliquidAdapter(BaseExchange):
 
     async def get_mark_price(self, market_type: MarketType, symbol: str) -> MarkPrice:
         if market_type != MarketType.LINEAR:
-            raise NotImplementedError(f"{self.name} does not support mark_price for {market_type.value}")
+            raise NotImplementedError(f"mark_price is not served on {self.name} {market_type.value}")
         model_sym, coin, quote = await self._lookup(market_type, symbol)
 
         ctx      = await self._asset_ctx(market_type, coin)
@@ -686,7 +686,7 @@ class HyperliquidAdapter(BaseExchange):
 
 
     async def get_agg_trades(self, market_type: MarketType, symbol: str, start_time: Optional[int] = None, limit: int = 500) -> List[AggTrade]:
-        raise NotImplementedError(f"{self.name} does not support agg_trades for {market_type.value}")
+        raise NotImplementedError(f"agg_trades is not served on {self.name} {market_type.value}")
 
 
     async def get_candles(self, market_type: MarketType, symbol: str, interval: str, start_time: Optional[int] = None, limit: int = 100) -> List[Candle]:
@@ -694,7 +694,7 @@ class HyperliquidAdapter(BaseExchange):
 
         interval_ms = self._interval_to_ms(interval)
         if interval_ms <= 0:
-            raise ValueError(f"Unsupported candle interval {interval} for Hyperliquid")
+            raise RequestError(f"Unsupported candle interval {interval} for Hyperliquid")
         max_per_req = 5000
 
         async def fetch_by_end(end_ts, l):
@@ -745,7 +745,7 @@ class HyperliquidAdapter(BaseExchange):
 
     async def get_funding_rate(self, market_type: MarketType, symbol: str, start_time: Optional[int] = None, limit: int = 100) -> List[FundingRate]:
         if market_type != MarketType.LINEAR:
-            raise NotImplementedError(f"{self.name} does not support funding_rate for {market_type.value}")
+            raise NotImplementedError(f"funding_rate is not served on {self.name} {market_type.value}")
         model_sym, coin, quote = await self._lookup(market_type, symbol)
 
         cycle_ms = await self._funding_interval_ms_for(market_type, model_sym)
@@ -779,7 +779,7 @@ class HyperliquidAdapter(BaseExchange):
 
     async def get_open_interest(self, market_type: MarketType, symbol: str, period: str = "1h", start_time: Optional[int] = None, limit: int = 30) -> List[OpenInterest]:
         if market_type != MarketType.LINEAR:
-            raise NotImplementedError(f"{self.name} does not support open_interest for {market_type.value}")
+            raise NotImplementedError(f"open_interest is not served on {self.name} {market_type.value}")
         model_sym, coin, quote = await self._lookup(market_type, symbol)
 
         ctx  = await self._asset_ctx(market_type, coin)
@@ -1058,7 +1058,7 @@ class HyperliquidAdapter(BaseExchange):
 
     async def stream_mark_price(self, market_type: MarketType, symbol: str) -> AsyncGenerator[MarkPrice, None]:
         if market_type != MarketType.LINEAR:
-            raise NotImplementedError(f"{self.name} does not support mark_price for {market_type.value}")
+            raise NotImplementedError(f"mark_price is not served on {self.name} {market_type.value}")
         model_sym, coin, quote = await self._lookup(market_type, symbol)
 
         topic   = f"activeAssetCtx:{coin}"

@@ -273,7 +273,7 @@ class FakeExchange(BaseExchange):
     async def get_mark_price(self, market_type: MarketType, symbol: str) -> MarkPrice:
         self._known(market_type, symbol)
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"Mark Price not supported on fake {market_type}")
+            raise NotImplementedError(f"mark_price is not served on fake {market_type.value}")
 
         kind     = FUNDING_KIND[market_type]
         deadline = "settlement" if kind == "discrete" else "estimate"
@@ -385,7 +385,7 @@ class FakeExchange(BaseExchange):
     async def get_funding_rate(self, market_type: MarketType, symbol: str, start_time: Optional[int] = None, limit: int = 100) -> List[FundingRate]:
         self._known(market_type, symbol)
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"Funding Rate not supported on fake {market_type}")
+            raise NotImplementedError(f"funding_rate is not served on fake {market_type.value}")
 
         kind  = FUNDING_KIND[market_type]
         cycle = FUNDING_CYCLE_MS[market_type]
@@ -407,7 +407,7 @@ class FakeExchange(BaseExchange):
     async def get_open_interest(self, market_type: MarketType, symbol: str, period: str = "1h", start_time: Optional[int] = None, limit: int = 30) -> List[OpenInterest]:
         self._known(market_type, symbol)
         if market_type == MarketType.SPOT:
-            raise NotImplementedError(f"Open Interest not supported on fake {market_type}")
+            raise NotImplementedError(f"open_interest is not served on fake {market_type.value}")
 
         step = INTERVAL_MS.get(period)
         if step is None:
@@ -435,7 +435,7 @@ class FakeExchange(BaseExchange):
     async def get_liquidations(self, market_type: MarketType, symbol: str, start_time: Optional[int] = None, limit: int = 100) -> List[Liquidation]:
         self._known(market_type, symbol)
         if market_type != MarketType.LINEAR:
-            raise NotImplementedError(f"Liquidations not supported on fake {market_type}")
+            raise NotImplementedError(f"liquidations is not served on fake {market_type.value}")
 
         start = start_time if start_time is not None else BASE_TS
         out   = []
@@ -458,7 +458,7 @@ class FakeExchange(BaseExchange):
     async def get_long_short_ratio(self, market_type: MarketType, symbol: str, period: str = "5m", start_time: Optional[int] = None, limit: int = 30) -> List[LongShortRatio]:
         self._known(market_type, symbol)
         if market_type != MarketType.LINEAR:
-            raise NotImplementedError(f"L/S Ratio not supported on fake {market_type}")
+            raise NotImplementedError(f"long_short_ratio is not served on fake {market_type.value}")
 
         step = INTERVAL_MS.get(period)
         if step is None:

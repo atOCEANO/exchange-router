@@ -3,7 +3,6 @@ import logging
 import uuid
 from http import HTTPStatus
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, Request
-from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -13,7 +12,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 from exchange_router.capabilities import market_block, route_block
 from exchange_router.exchanges import EXCHANGE_REGISTRY, get_adapter, shutdown_exchanges, startup_exchanges
-from exchange_router.exchanges.base import UpstreamDataError, UpstreamUnavailableError, join_open_interest_basis, symbol_info_to_lite, validate_interval
+from exchange_router.exchanges.base import UNREADABLE, RequestError, UnknownSymbolError, UpstreamUnavailableError, join_open_interest_basis, symbol_info_to_lite, validate_interval
 from exchange_router.models import MarketType
 from exchange_router.service.stream_manager import StreamManager, close_reason
 from exchange_router.version import SCHEMA_VERSION, VERSION
@@ -56,21 +55,49 @@ async def schema_version_header(request: Request, call_next):
     return response
 
 
-@app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(_request: Request, exc: StarletteHTTPException):
+TITLES = {
+    400: "Invalid Request",
+    404: "Not Found",
+    500: "Internal Server Error",
+    501: "Not Implemented",
+    502: "Bad Upstream Response",
+    503: "Upstream Unavailable",
+}
+
+
+def error_body(status: int, detail: str, error: Optional[str] = None, headers: Optional[dict] = None) -> JSONResponse:
     return JSONResponse(
-        status_code=exc.status_code,
-        content={"error": HTTPStatus(exc.status_code).phrase, "detail": exc.detail},
-        headers=getattr(exc, "headers", None),
+        status_code = status,
+        content     = {"error": error or TITLES[status], "detail": detail},
+        headers     = headers,
     )
+
+
+def validation_sentence(error: dict) -> str:
+    name  = error["loc"][-1]
+    given = error.get("input")
+    if error["type"] == "greater_than_equal":
+        return f"{name}: must be {error['ctx']['ge']} or more, got {given}"
+    if name == "market_type":
+        return f"market_type: '{given}' is not a market type; give spot, linear or inverse"
+    return f"{name}: {error['msg'][0].lower()}{error['msg'][1:]}, got {given!r}"
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    if exc.detail == HTTPStatus(exc.status_code).phrase:
+        return error_body(404, f"no route {request.method} {request.url.path}")
+    return error_body(exc.status_code, exc.detail, headers=getattr(exc, "headers", None))
 
 
 @app.exception_handler(RequestValidationError)
 async def request_validation_exception_handler(_request: Request, exc: RequestValidationError):
-    return JSONResponse(
-        status_code=422,
-        content={"error": "Unprocessable Entity", "detail": jsonable_encoder(exc.errors())},
-    )
+    return error_body(400, validation_sentence(exc.errors()[0]))
+
+
+@app.exception_handler(RequestError)
+async def request_error_exception_handler(_request: Request, exc: RequestError):
+    return error_body(400, str(exc), "Unknown Symbol" if isinstance(exc, UnknownSymbolError) else None)
 
 
 @app.exception_handler(UpstreamUnavailableError)
@@ -78,62 +105,40 @@ async def upstream_unavailable_exception_handler(_request: Request, exc: Upstrea
     headers = {}
     if exc.retry_after is not None:
         headers["Retry-After"] = str(max(int(exc.retry_after), 1))
-    return JSONResponse(
-        status_code=503,
-        content={"error": "Upstream Unavailable", "detail": str(exc)},
-        headers=headers,
-    )
+    return error_body(503, str(exc), headers=headers)
 
 
-@app.exception_handler(UpstreamDataError)
-async def upstream_data_exception_handler(_request: Request, exc: UpstreamDataError):
-    return JSONResponse(
-        status_code=502,
-        content={"error": "Bad Upstream Response", "detail": str(exc)},
-    )
+async def upstream_data_exception_handler(_request: Request, exc: Exception):
+    return error_body(502, str(exc))
 
 
-@app.exception_handler(ValueError)
-async def value_error_exception_handler(_request: Request, exc: ValueError):
-    return JSONResponse(
-        status_code=400,
-        content={"error": "Invalid Request", "detail": str(exc)},
-    )
+for unreadable in UNREADABLE:
+    app.add_exception_handler(unreadable, upstream_data_exception_handler)
 
 
 @app.exception_handler(NotImplementedError)
 async def not_implemented_exception_handler(_request: Request, exc: NotImplementedError):
-    return JSONResponse(
-        status_code=501,
-        content={"error": "Not Implemented", "detail": str(exc)},
-    )
+    return error_body(501, str(exc))
 
 
 @app.exception_handler(ValidationError)
 async def validation_error_exception_handler(_request: Request, exc: ValidationError):
     logging.exception("Upstream response failed validation")
-    return JSONResponse(
-        status_code=502,
-        content={"error": "Bad Upstream Response", "detail": str(exc)},
-    )
+    return error_body(502, str(exc))
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(_request: Request, exc: Exception):
     logging.exception("Unhandled error")
-    return JSONResponse(
-        status_code=500,
-        content={"error": "Internal Server Error", "detail": str(exc)},
-        headers={"Schema-Version": str(SCHEMA_VERSION)},
-    )
+    return error_body(500, str(exc), headers={"Schema-Version": str(SCHEMA_VERSION)})
 
 
 def validate_request(exchange: str, market_type: MarketType = None):
     adapter = get_adapter(exchange)
     if not adapter:
-        raise HTTPException(status_code=404, detail=f"Exchange '{exchange}' not found or not enabled")
+        raise HTTPException(status_code=404, detail=f"exchange '{exchange}' is not enabled; / lists the exchanges")
     if market_type and market_type not in adapter.supported_market_types:
-        raise HTTPException(status_code=400, detail=f"Market type '{market_type.value}' not supported on {exchange}")
+        raise RequestError(f"market_type: '{market_type.value}' is not offered on {exchange}; /{exchange}/market_types lists them")
     return adapter
 
 
@@ -285,7 +290,7 @@ async def get_candles(exchange: str, market_type: MarketType, symbol: str, inter
     start = end if end is not None else start
 
     adapter = validate_request(exchange, market_type)
-    validate_interval(adapter, market_type, "candles", "Interval", interval)
+    validate_interval(adapter, market_type, "candles", interval)
     symbol  = await adapter.listed_symbol(market_type, symbol)
     return await adapter.get_candles(market_type, symbol, interval, start, limit)
 
@@ -296,7 +301,7 @@ async def get_open_interest(exchange: str, market_type: MarketType, symbol: str,
     start  = end if end is not None else start
 
     adapter = validate_request(exchange, market_type)
-    validate_interval(adapter, market_type, "open_interest", "Period", period)
+    validate_interval(adapter, market_type, "open_interest", period)
     symbol  = await adapter.listed_symbol(market_type, symbol)
     oi_rows = await adapter.get_open_interest(market_type, symbol, period, start, limit)
 
@@ -325,7 +330,7 @@ async def get_long_short_ratio(exchange: str, market_type: MarketType, symbol: s
     start  = end if end is not None else start
 
     adapter = validate_request(exchange, market_type)
-    validate_interval(adapter, market_type, "long_short_ratio", "Period", period)
+    validate_interval(adapter, market_type, "long_short_ratio", period)
     symbol  = await adapter.listed_symbol(market_type, symbol)
     return await adapter.get_long_short_ratio(market_type, symbol, period, start, limit)
 
@@ -364,7 +369,7 @@ async def websocket_endpoint(websocket: WebSocket, exchange: str, market_type: M
 
         try:
             symbol = await adapter.listed_symbol(market_type, symbol)
-        except ValueError as e:
+        except RequestError as e:
             await websocket.close(code=1008, reason=close_reason(str(e)))
             return
         except Exception as e:

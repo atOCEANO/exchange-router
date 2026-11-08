@@ -191,18 +191,17 @@ class AsyncCore:
 
 
     async def _preflight(self, exchange: str, market_type: str, route: str, symbol: Optional[str] = None,
-                         interval: Optional[str] = None, interval_label: str = "Interval",
-                         depth: Optional[int] = None, verbose: bool = False) -> None:
+                         interval: Optional[str] = None, depth: Optional[int] = None, verbose: bool = False) -> None:
         caps  = await self._ensure_capabilities(exchange)
         block = self._route_block(exchange, market_type, route)
 
         if caps and block:
             if block.get("rest") is False:
-                raise NotSupported(f"{route} is not exposed on {exchange}/{market_type}")
+                raise NotSupported(f"{route} is not served on {exchange} {market_type}", 501, "Not Implemented")
 
             intervals = block.get("intervals")
             if interval is not None and intervals and interval not in intervals:
-                raise BadRequest(f"{interval_label} '{interval}' is not valid for {exchange} {market_type} {route}. valid: {', '.join(intervals)}")
+                raise BadRequest(f"interval: '{interval}' is not offered on {exchange} {market_type} {route}; /{exchange}/capabilities lists the intervals", 400, "Invalid Request")
 
             depths = block.get("depths")
             if depth is not None and depths and depth not in depths:
@@ -221,10 +220,10 @@ class AsyncCore:
 
 
     async def _series(self, route: str, exchange: str, market_type: str, symbol: str, params: Dict,
-                      interval: Optional[str], interval_label: str, verbose: Optional[bool]) -> pd.DataFrame:
+                      interval: Optional[str], verbose: Optional[bool]) -> pd.DataFrame:
         v = self.verbose if verbose is None else verbose
 
-        await self._preflight(exchange, market_type, route, symbol=symbol, interval=interval, interval_label=interval_label, verbose=v)
+        await self._preflight(exchange, market_type, route, symbol=symbol, interval=interval, verbose=v)
 
         rows = await self._fetch(route, exchange, market_type, symbol, **params)
         ctx  = self._ctx(exchange, market_type, symbol, params.get("limit"), route)
@@ -349,11 +348,11 @@ class AsyncCore:
         if start is not None:
             params["start"] = start
 
-        return await self._series("candles", exchange, market_type, symbol, params, interval, "Interval", verbose)
+        return await self._series("candles", exchange, market_type, symbol, params, interval, verbose)
 
 
     async def get_trades(self, exchange: str, market_type: str, symbol: str, limit: int = 100, verbose: Optional[bool] = None) -> pd.DataFrame:
-        return await self._series("trades", exchange, market_type, symbol, {"limit": limit}, None, "Interval", verbose)
+        return await self._series("trades", exchange, market_type, symbol, {"limit": limit}, None, verbose)
 
 
     async def get_agg_trades(self, exchange: str, market_type: str, symbol: str, limit: int = 500, start: Optional[int] = None, verbose: Optional[bool] = None, end: Optional[int] = None) -> pd.DataFrame:
@@ -362,7 +361,7 @@ class AsyncCore:
         if start is not None:
             params["start"] = start
 
-        return await self._series("agg_trades", exchange, market_type, symbol, params, None, "Interval", verbose)
+        return await self._series("agg_trades", exchange, market_type, symbol, params, None, verbose)
 
 
     async def get_funding_rate(self, exchange: str, market_type: str, symbol: str, limit: int = 100, start: Optional[int] = None, verbose: Optional[bool] = None, end: Optional[int] = None) -> pd.DataFrame:
@@ -371,7 +370,7 @@ class AsyncCore:
         if start is not None:
             params["start"] = start
 
-        return await self._series("funding_rate", exchange, market_type, symbol, params, None, "Interval", verbose)
+        return await self._series("funding_rate", exchange, market_type, symbol, params, None, verbose)
 
 
     async def get_open_interest(self, exchange: str, market_type: str, symbol: str, period: str = "1h", limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, interval: Optional[str] = None, end: Optional[int] = None) -> pd.DataFrame:
@@ -381,7 +380,7 @@ class AsyncCore:
         if start is not None:
             params["start"] = start
 
-        return await self._series("open_interest", exchange, market_type, symbol, params, period, "Period", verbose)
+        return await self._series("open_interest", exchange, market_type, symbol, params, period, verbose)
 
 
     async def get_liquidations(self, exchange: str, market_type: str, symbol: str, limit: int = 100, start: Optional[int] = None, verbose: Optional[bool] = None, end: Optional[int] = None) -> pd.DataFrame:
@@ -390,7 +389,7 @@ class AsyncCore:
         if start is not None:
             params["start"] = start
 
-        return await self._series("liquidations", exchange, market_type, symbol, params, None, "Interval", verbose)
+        return await self._series("liquidations", exchange, market_type, symbol, params, None, verbose)
 
 
     async def get_long_short_ratio(self, exchange: str, market_type: str, symbol: str, period: str = "5m", limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, interval: Optional[str] = None, end: Optional[int] = None) -> pd.DataFrame:
@@ -400,7 +399,7 @@ class AsyncCore:
         if start is not None:
             params["start"] = start
 
-        return await self._series("long_short_ratio", exchange, market_type, symbol, params, period, "Period", verbose)
+        return await self._series("long_short_ratio", exchange, market_type, symbol, params, period, verbose)
 
 
     async def fetch_many(self, route: str, exchange: str, market_type: str, symbols: List[str], verbose: Optional[bool] = None, max_concurrent: int = 8, **kwargs) -> BatchResult:
