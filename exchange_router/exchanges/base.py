@@ -323,6 +323,7 @@ class StreamHub:
         self._connected = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
         self._ws        = None
+        self._last_seen = 0.0
         self._closed    = False
         self._log       = logging.getLogger(name)
 
@@ -408,6 +409,10 @@ class StreamHub:
         try:
             while True:
                 await asyncio.sleep(self._keepalive_interval)
+                if time.monotonic() - self._last_seen > 2 * self._keepalive_interval:
+                    self._log.warning(f"no frame for {2 * self._keepalive_interval:.0f} s; reconnecting")
+                    await ws.close()
+                    return
                 if self._keepalive_payload is None:
                     continue
                 if isinstance(self._keepalive_payload, (str, bytes)):
@@ -442,8 +447,9 @@ class StreamHub:
 
             try:
                 self._log.info("connecting upstream WS")
-                ws       = await self._connect()
-                self._ws = ws
+                ws              = await self._connect()
+                self._ws        = ws
+                self._last_seen = time.monotonic()
 
                 async with self._lock:
                     topics                  = list(self._queues.keys())
@@ -458,6 +464,7 @@ class StreamHub:
 
                 stable = False
                 async for raw in ws:
+                    self._last_seen = time.monotonic()
                     if not stable:
                         reconnect_delay = 1
                         stable          = True
