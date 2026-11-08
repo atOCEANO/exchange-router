@@ -71,6 +71,13 @@ async def fetch(client: httpx.AsyncClient, endpoint: str, params: Optional[Dict]
         return None, None, f"unexpected: {e}"
 
 
+async def trade_stamps(ctx: ProbeContext) -> List[int]:
+    code, rows, _ = await fetch(ctx.client, f"/{ctx.exchange}/{ctx.market_type}/trades/{ctx.symbol}", {"limit": 100})
+    if code != 200 or not isinstance(rows, list):
+        return []
+    return [row["timestamp"] for row in rows if isinstance(row, dict) and "timestamp" in row]
+
+
 _venue_next_slot_at: Dict[str, float] = {}
 _venue_lock = asyncio.Lock()
 

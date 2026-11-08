@@ -10,7 +10,7 @@ from tools.auditor.config import (
 from tools.auditor.aggregator import ErrorType, ProbeResult
 
 from tools.auditor.probes.base import (
-    Probe, ProbeContext, check_ascending_ts, fetch, now_ms, validate_list,
+    Probe, ProbeContext, check_ascending_ts, fetch, now_ms, trade_stamps, validate_list,
 )
 
 
@@ -28,6 +28,10 @@ def cycle_findings(rows: List[dict]) -> List[Dict[str, Any]]:
 def grid_findings(rows: List[dict], interval: str) -> List[int]:
     step = interval_ms(interval)
     return [row["timestamp"] for row in rows if row["timestamp"] % step]
+
+
+def quiet_since(stamps: List[int], since_ms: int) -> bool:
+    return bool(stamps) and max(stamps) < since_ms
 
 
 class PaginatedProbe(Probe):
@@ -170,7 +174,11 @@ class PaginatedProbe(Probe):
         if self.period_ms > 0:
             threshold = freshness_threshold_ms(ctx.exchange, ctx.market_type or "", self.period, self.period_ms)
             if last_ts < ctx.now_ms - threshold:
-                findings.append(f"last record stale: {age_s:.0f}s old (threshold {threshold/1000:.0f}s)")
+                stamps = await trade_stamps(ctx) if self.route == "candles" else []
+                if quiet_since(stamps, last_ts + self.period_ms):
+                    res.evidence["newest_trade"] = max(stamps)
+                else:
+                    findings.append(f"last record stale: {age_s:.0f}s old (threshold {threshold/1000:.0f}s)")
 
         if n < int(ceiling * THEORETICAL_MAX_RATIO):
             findings.append(f"got {n}/{big} (theoretical max {ceiling}, retention_ms={retention_ms})")
@@ -181,7 +189,7 @@ class PaginatedProbe(Probe):
             res.message = " | ".join(findings)
             res.evidence.update({"count": n, "ceiling": ceiling, "age_s": age_s, "retention_ms": retention_ms})
         else:
-            res.message = f"got {n}/{big}, last age={age_s:.0f}s"
+            res.message = f"got {n}/{big}, last age={age_s:.0f}s" + ("; no trade on the venue since the newest bar" if "newest_trade" in res.evidence else "")
             res.evidence.update({"count": n, "age_s": age_s, "ceiling": ceiling})
 
         res.sample = data[:SAMPLE_MAX_ITEMS]
