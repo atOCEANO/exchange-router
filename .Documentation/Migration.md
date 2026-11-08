@@ -27,8 +27,39 @@
 
 ## Migration
 
-Five hops, newest first. `schema_version` has been 3 throughout: no field has been renamed, removed or retyped, so code written against an older release keeps parsing what a newer one sends. 3.2.0 adds a route, and 3.1.0 two fields and five corrected values; the hops before them change the Python surface.
+Six hops, newest first. `schema_version` has been 3 throughout: no field has been renamed, removed or retyped, so code written against an older release keeps parsing what a newer one sends. 3.3.0 corrects values and answers, 3.2.0 adds a route, and 3.1.0 two fields and five corrected values; the hops before them change the Python surface.
 
+<br>
+
+## 3.2.x to 3.3.0
+
+**Nothing is renamed or removed; new names sit beside the old ones.** `end` names the newest bound of every paged route and method, and `interval` the bucket of open interest and long/short; `start` and `period` are still accepted. Open interest frames carry `open_interest_unit` beside `oi_unit`, `with_provenance` adds `market_type`, and a `BatchResult` is a read-only mapping, so `dict(result)` works. Every REST answer carries a `Schema-Version` header and every error body an `error` key. The SDK still sends `start` and `period` on the wire, so it reads a 3.2.x service as before.
+
+**Values that were wrong are corrected.**
+
+| Exchange and route | Field | 3.2.x | 3.3.0 |
+| :--- | :--- | :--- | :--- |
+| Bybit liquidations | `side` | the side of the position closed | the side of the liquidation order, as on Binance and OKX |
+| OKX mark price | `funding.valid_until_ts` | the settlement after the one that charges `per_cycle` | the settlement that charges it |
+| OKX candles and open interest, 6h and longer | `timestamp` | bars opening at 16:00 UTC | bars on the UTC grid |
+| Hyperliquid open interest | `timestamp`, `usd` | the last period boundary, priced at its close | when read, `usd` null |
+| Hyperliquid ticker | `high_24h`, `low_24h` | widened by the book's mid | traded hourly bars only, `0.0` with none |
+| Funding history, every exchange | `rate.cycle_ms` | the symbol's current cycle on every row | the cycle each row settled under |
+| Binance and OKX mark price, when the cycle lookup fails | `funding` | an 8-hour cycle assumed | `null` until the cycle is read |
+| KuCoin and Kraken records, Bybit liquidations | price, size, rate | `0.0` where the exchange left it out | refused: `502` on REST, a skipped frame on a stream |
+| Kraken and KuCoin inverse, Bybit | `contract_size`, precisions | `1.0`, or Bybit's fallback precisions, where the exchange left them out | the instrument stays out of the market list |
+
+**Some answers change.**
+
+* A symbol the exchange does not list raises `BadRequest` naming `/markets` on every route and stream, where it got one of three answers. A market in any state the exchange lists, halted or cancel-only included, is served with its real `quote`; `/markets` still shows only what trades.
+* Bybit's USDC perpetuals are named by base and quote, `BTCUSDC` where 3.2.x said `BTCPERP`, which is still accepted. KuCoin's USDC-margined contracts lose their `M`, `XBTUSDC`, and Kraken spot also resolves `BTCUSD`, `XXBTZUSD` and `BTC/USD` to `XBTUSD`.
+* An empty book side reads price and size `0.0` on every exchange; Kraken, KuCoin and Hyperliquid answered `400`.
+* A read that fails partway fails as a whole, where it returned the pages it had; a `limit` beyond 100 pages is refused with a `400`. An outage an exchange reports inside a `200` raises `UpstreamUnavailable`, where it raised `BadRequest`.
+* On KuCoin spot and Hyperliquid a candle `limit` counts bars, so a quiet market answers its newest bars, however old.
+* A stream waits for the exchange's answer to its subscription: a refusal raises `NotSupported` with the exchange's reason, and no answer within 30 seconds is retried. A connection that goes silent is replaced.
+* An empty frame has a full frame's columns, dtypes, UTC `DatetimeIndex` and `attrs` keys, where it had a `RangeIndex` and object columns. `funding_paid` warns when a frame has lost its `funding_kind`, and a ticker or book ticker quoted outside the dollar family warns as a frame does. `fetch_many` refuses a keyword its route does not take before fetching anything.
+
+<br>
 <br>
 
 ## 3.1.x to 3.2.0
