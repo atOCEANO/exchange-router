@@ -415,6 +415,7 @@ class AsyncCore:
 
     async def subscribe(self, exchange: str, market_type: str, channel: str, symbol: str):
         self._check_open()
+        await self._ensure_handshake()
 
         async for message in self._backend.stream(exchange, market_type, channel, symbol):
             yield message
