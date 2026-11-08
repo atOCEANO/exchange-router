@@ -539,6 +539,12 @@ class MarginTiers(BaseModel):
     )
 
 
+    @model_validator(mode="after")
+    def _rising(self) -> "MarginTiers":
+        self.tiers = sorted(self.tiers, key=lambda tier: (tier.up_to is None, tier.up_to or 0.0))
+        return self
+
+
 class FundingRate(BaseModel):
     symbol: str = Field(
         ...,
