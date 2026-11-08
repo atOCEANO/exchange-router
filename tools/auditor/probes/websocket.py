@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from exchange_router.models import (
     AggTrade, BookTicker, Liquidation, MarkPrice, OrderBook, Ticker, Trade,
 )
+from exchange_router.version import SCHEMA_VERSION
 from tools.auditor.config import API_URL, SAMPLE_MAX_ITEMS, WS_MIN_FRAMES, WS_OPEN_TIMEOUT, WS_TEST_DURATION
 from tools.auditor.aggregator import ErrorType, ProbeResult
 
@@ -69,7 +70,7 @@ class WebSocketProbe(Probe):
 
         try:
             async with websockets.connect(ws_url, open_timeout=WS_OPEN_TIMEOUT) as ws:
-                await ws.send(json.dumps({"channel": self.channel, "symbol": ctx.symbol}))
+                await ws.send(json.dumps({"channel": self.channel, "symbol": ctx.symbol, "schema_version": SCHEMA_VERSION}))
                 deadline = started + WS_TEST_DURATION
 
                 while True:

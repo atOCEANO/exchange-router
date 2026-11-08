@@ -275,7 +275,7 @@ class RemoteBackend(Backend):
 
         try:
             async with websockets.connect(ws_url) as ws:
-                await ws.send(json.dumps({"channel": channel, "symbol": symbol}))
+                await ws.send(json.dumps({"channel": channel, "symbol": symbol, "schema_version": SCHEMA_VERSION}))
 
                 while True:
                     message = json.loads(await ws.recv())

@@ -6,6 +6,7 @@ from exchange_router.errors import BadRequest
 from exchange_router.exchanges.base import UpstreamUnavailableError
 from exchange_router.models import MarketType
 from exchange_router.service.main import websocket_endpoint
+from exchange_router.version import SCHEMA_VERSION
 
 from fake_exchange import FakeExchange
 
@@ -68,7 +69,7 @@ async def test_a_local_stream_for_an_unlisted_symbol_is_the_same_bad_request():
 
 
 async def test_a_service_stream_for_an_unlisted_symbol_closes_with_the_same_answer():
-    socket = Socket({"channel": "ticker", "symbol": "NOSUCHUSDT"})
+    socket = Socket({"channel": "ticker", "symbol": "NOSUCHUSDT", "schema_version": SCHEMA_VERSION})
 
     await websocket_endpoint(socket, "fake", "spot")
 
@@ -92,7 +93,7 @@ async def test_a_service_stream_closes_1011_when_the_venue_fails_the_symbol_chec
         raise UpstreamUnavailableError("fake is unavailable (50013): Systems are busy")
 
     monkeypatch.setattr(registry.EXCHANGE_REGISTRY["fake"], "listed_symbol", down)
-    socket = Socket({"channel": "ticker", "symbol": "BTCUSDT"})
+    socket = Socket({"channel": "ticker", "symbol": "BTCUSDT", "schema_version": SCHEMA_VERSION})
 
     await websocket_endpoint(socket, "fake", "spot")
 
@@ -101,8 +102,8 @@ async def test_a_service_stream_closes_1011_when_the_venue_fails_the_symbol_chec
 
 
 async def test_a_close_reason_fits_a_close_frame_whatever_its_alphabet():
-    cyrillic  = Socket({"channel": "ticker", "symbol": "Б" * 40})
-    malformed = Socket({"channel": "ticker", "symbol": 7})
+    cyrillic  = Socket({"channel": "ticker", "symbol": "Б" * 40, "schema_version": SCHEMA_VERSION})
+    malformed = Socket({"channel": "ticker", "symbol": 7, "schema_version": SCHEMA_VERSION})
 
     await websocket_endpoint(cyrillic, "fake", "spot")
     await websocket_endpoint(malformed, "fake", "spot")

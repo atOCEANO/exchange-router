@@ -9,6 +9,7 @@ from exchange_router.errors import BadRequest, UpstreamUnavailable
 from exchange_router.exchanges.base import UpstreamUnavailableError
 from exchange_router.service.main import websocket_endpoint
 from exchange_router.service.stream_manager import StreamManager
+from exchange_router.version import SCHEMA_VERSION
 
 
 class Socket:
@@ -71,7 +72,7 @@ class Venue:
 
 
 async def answered(subscription, exchange="fake", market_type="linear"):
-    socket = Socket(subscription)
+    socket = Socket(dict(subscription, schema_version=SCHEMA_VERSION))
     await websocket_endpoint(socket, exchange, market_type)
     return socket.sent, socket.closed[0]
 

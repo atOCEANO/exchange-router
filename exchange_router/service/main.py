@@ -360,8 +360,12 @@ async def websocket_endpoint(websocket: WebSocket, exchange: str, market_type: s
             return
 
         subscription = data if isinstance(data, dict) else {}
-        channel      = subscription.get("channel")
-        symbol       = subscription.get("symbol")
+        if subscription.get("schema_version") != SCHEMA_VERSION:
+            await refuse(websocket, 400, f"schema_version: this service speaks schema {SCHEMA_VERSION}; send schema_version {SCHEMA_VERSION} with the subscription")
+            return
+
+        channel = subscription.get("channel")
+        symbol  = subscription.get("symbol")
         for name, given in (("channel", channel), ("symbol", symbol)):
             if not isinstance(given, str) or not given:
                 await refuse(websocket, 400, f"{name}: missing; the subscription names channel and symbol")
