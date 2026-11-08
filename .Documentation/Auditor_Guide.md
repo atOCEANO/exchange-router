@@ -52,32 +52,32 @@ The auditor stamps the served `schema_version` field on every `results.json` and
 
 ## Layout
 
-The CLI in `__main__.py` invokes `runner.run(...)`, which executes a fixed top-of-run sequence (`/status`, `/version`, `/exchanges`), then pre-flights `/capabilities` for every target exchange in parallel. Pre-flight emits the capabilities pass/fail result per exchange and counts the probes each will dispatch (via `applies(ctx)` against a placeholder symbol), so the live progress display knows its denominator before any probe runs. The runner then fans out to one task per exchange. Inside each exchange task it runs the exchange-level probes, then iterates per market type, picks a real symbol via `/markets`, and runs the market-level probes filtered by `applies(ctx)`. Results feed into an `Aggregator`; `LiveReporter` updates the console as they arrive (one progress bar per exchange plus a global total) and `write_json` persists the final summary.
+The CLI in `__main__.py` invokes `runner.run(...)`, which executes a fixed top-of-run sequence (`/status`, `/version`, `/exchanges`), then pre-flights `/capabilities` for every target exchange in parallel. Pre-flight emits the capabilities pass/fail result per exchange and counts the probes each will dispatch (via `applies(ctx)` against a placeholder symbol), so the live progress display knows its denominator before any probe runs. The runner then fans out to one task per exchange. Inside each exchange task it reads the exchange overview, which warns when a market list could not be read, runs the exchange-level probes, then iterates per market type, picks a real symbol via `/markets`, and runs the market-level probes filtered by `applies(ctx)`. Results feed into an `Aggregator`; `LiveReporter` updates the console as they arrive (one progress bar per exchange plus a global total) and `write_json` persists the final summary.
 
 | File | Class / Role | Lines (approx) |
 | :--- | :--- | :--- |
 | `__main__.py` | CLI entry: `python -m tools.auditor [exchange ...]` | 100 |
-| `config.py` | env knobs, interval map, symbol picker, theoretical-max | 130 |
-| `runner.py` | top-of-run sequence, `/capabilities` pre-flight + per-exchange probe-count, semaphore gating, `asyncio.gather` | 380 |
+| `config.py` | env knobs, interval map, symbol picker, theoretical-max, the clock table and the venue tables (deadlines, prices, instrument records) | 285 |
+| `runner.py` | top-of-run sequence, `/capabilities` pre-flight + per-exchange probe-count, the exchange overview, semaphore gating, `asyncio.gather` | 395 |
 | `aggregator.py` | `ProbeResult`, `ErrorType`, `Aggregator` | 150 |
 | `output/json.py` | machine-readable run output writer | 25 |
 | `output/ordering.py` | display-ordering constants for the HTML report (market / route / period / sub-probe / caps-key) | 20 |
 | `output/live.py` | rich live console with one progress bar per exchange plus a global total, end-of-run failure table | 265 |
 | `output/html.py` | HTML report renderer (analytics <-> sample toggle) | 465 |
 | `output/_urlfmt.py` | per-result request URL synthesis, param extraction, evidence compaction, shared by the HTML and live renderers | 80 |
-| `probes/__init__.py` | re-exports + `market_probes()` / `exchange_probes()` registry | 75 |
-| `probes/base.py` | `Probe` ABC, `ProbeContext`, `fetch`, validators, REST throttling | 190 |
-| `probes/snapshot.py` | `SnapshotProbe` + ticker / book / mark check helpers | 125 |
+| `probes/__init__.py` | re-exports + `market_probes()` / `exchange_probes()` registry | 80 |
+| `probes/base.py` | `Probe` ABC, `ProbeContext`, `fetch`, validators, REST throttling, the table of kinds, the time judgement, the venue reads paced by host | 305 |
+| `probes/snapshot.py` | `SnapshotProbe` + ticker / book / mark check helpers, the deadline and the venue price | 210 |
 | `probes/orderbook.py` | `OrderBookProbe` (multi-depth, ordering, freshness) | 130 |
-| `probes/trades.py` | `TradesProbe` (multi-limit, uniqueness, ordering) | 140 |
-| `probes/margin_tiers.py` | `MarginTiersProbe` (shape, rising bounds, an open tier only last, rates) | 110 |
-| `probes/paginated.py` | `PaginatedProbe` (recent + 5 sub-probes covering limit checks and anchored windows) | 275 |
-| `probes/websocket.py` | `WebSocketProbe` + `WS_CHANNEL_MODEL` registry | 180 |
-| `probes/info.py` | `InfoProbe` (reads `/markets/{symbol}`, name `markets:detail`) | 145 |
-| `probes/markets.py` | `MarketsProbe` (reads the lite `/markets` dict shape) | 90 |
+| `probes/trades.py` | `TradesProbe` (multi-limit, uniqueness, ordering) | 150 |
+| `probes/margin_tiers.py` | `MarginTiersProbe` (shape, rising bounds, an open tier only last, rates) | 120 |
+| `probes/paginated.py` | `PaginatedProbe` (recent + 5 sub-probes covering limit checks and anchored windows, and the checks of what the rows mean) | 390 |
+| `probes/websocket.py` | `WebSocketProbe` + `WS_CHANNEL_MODEL` registry, `StreamRefusalProbe` (an unknown symbol on a stream) | 325 |
+| `probes/info.py` | `InfoProbe` (reads `/markets/{symbol}`, name `markets:detail`, and compares it with the venue's record) | 165 |
+| `probes/markets.py` | `MarketsProbe` (reads the lite `/markets` dict shape), `HaltedMarketProbe` (one halted market on every route) | 180 |
 | `probes/capabilities.py` | `CapabilitiesConsistencyProbe` (drift detection) | 160 |
-| `probes/errors.py` | `ErrorPathProbe` (404/400 negative paths) | 60 |
-| `probes/cross_route.py` | `CrossRouteConsistencyProbe` (ticker vs book vs mark) | 90 |
+| `probes/errors.py` | `ErrorPathProbe` (negative paths and their error bodies) | 65 |
+| `probes/cross_route.py` | `CrossRouteConsistencyProbe` (ticker vs book vs mark) | 110 |
 | `probes/symbol.py` | `SymbolResolutionProbe` (canonical spot symbol resolves) | 70 |
 
 <br>
@@ -103,17 +103,21 @@ Probes run against every advertised route. Each probe carries the capability fie
 
 ### Snapshot routes
 
-`ticker`, `book_ticker`, `mark_price`. Pydantic shape, freshness (`now - timestamp < SNAPSHOT_FRESHNESS_MS`), and route-specific invariants: ticker `low_24h <= price <= high_24h`, book `bid <= ask` with positive sizes, mark price positive. The per-route check helpers read the **nested value objects** (`volume_24h.native`, `bid_qty.native`, `ask_qty.native`) and dereference `funding.per_cycle` when checking mark price.
+`ticker`, `book_ticker`, `mark_price`. Pydantic shape and route-specific invariants: every price positive or null, the ticker's `low_24h <= price <= high_24h` where `price_source` is `last_trade` (a mid or a mark can sit outside the traded range on a quiet market), book `bid <= ask` with positive sizes, mark price positive. The per-route check helpers read the **nested value objects** (`volume_24h.native`, `bid_qty.native`, `ask_qty.native`) and dereference `funding.per_cycle` when checking mark price.
 
-Nothing happening is not a failure: a ticker priced `0.0` (no last trade) and a book side at price and size `0.0` (no orders) are WARNs. The freshness check skips the snapshots the router stamps with its own clock (`config.py::ROUTER_STAMPED`), and the range check skips the exchanges whose price is a mid rather than a trade (`MID_PRICED`).
+Nothing happening is not a failure: a ticker with no last trade (`price` null) and a book side no one quotes report SKIP, since there is nothing to check.
 
-On `mark_price` a `deadline` check reads the exchange's own next settlement straight from the exchange (`config.py::DEADLINES`) and requires `funding.valid_until_ts` to match it within a second. A deadline exactly one cycle off is read again once, since a settlement can fall between the two reads. Exchanges with no such table, and rows without a deadline, skip.
+Time is judged by what the row says. A `router` stamp says nothing of the exchange and is not judged for age, but it is expected only where the exchange sends no time (`config.py::ROUTER_STAMPED`), and a router stamp anywhere else WARNs. An exchange stamp older than `SNAPSHOT_FRESHNESS_MS` WARNs on a trading market and passes on a halted one, whose frozen stamp is its answer; the probe reads the market's `status` to tell them apart.
+
+On `mark_price` a `deadline` check reads `funding.valid_until`. A `settlement` must match the exchange's own next settlement, read straight from the exchange (`config.py::DEADLINES`), within a second; one exactly one cycle off is read again once, since a settlement can fall between the two reads. An `estimate` must lie within one cycle of now. Exchanges with no such table skip.
+
+On `ticker` a `venue_price` check reads the exchange's own reading of the source `price_source` names (`config.py::PRICES`) just before and just after it reads the router's ticker, and fails a price that lies outside that bracket by more than `PRICE_SLACK` (0.1%), so a moving market does not fail it while a wrong field does.
 
 <br>
 
 ### Orderbook
 
-Probed at every declared depth in `caps.depths` that falls within `[1, 100]`, or at `[1, 20, min(max_depth, 100)]` when no discrete list is declared, so Binance's declared 500 and 1000 are never probed and Kraken's `max_depth` of 500 is probed as 100. A venue whose declared depths all exceed 100 falls back to its smallest declared depth. Each level: bids strictly descending, asks strictly ascending, top-of-book not crossed, no zero or negative price or qty, `len <= depth`. Failure evidence carries the offending pair (`{"side": "bids", "idx": 5, "prev": 30001.5, "this": 30001.7}`).
+Probed at every declared depth in `caps.depths` that falls within `[1, 100]`, or at `[1, 20, min(max_depth, 100)]` when no discrete list is declared, so Binance's declared 500 and 1000 are never probed and Kraken's `max_depth` of 500 is probed as 100. A venue whose declared depths all exceed 100 falls back to its smallest declared depth. Each level: bids strictly descending, asks strictly ascending, top-of-book not crossed, no zero or negative price or qty, `len <= depth`. Its time is judged as a snapshot's is. Failure evidence carries the offending pair (`{"side": "bids", "idx": 5, "prev": 30001.5, "this": 30001.7}`).
 
 <br>
 
@@ -133,24 +137,28 @@ Probed on every market whose `margin_tiers` block declares `rest: True`, for the
 
 `agg_trades`, `candles`, `funding_rate`, `open_interest`, `liquidations`, `long_short_ratio`. Each paginated route runs an unconditional set (shape, exact-count, at-most-N) plus an anchored set (past anchor at a near offset, past anchor at a deeper offset, future anchor expected to return the newest available records); anchored probes are skipped when the route declares `paginated: False`. The sub-probes today are:
 
-- `recent`: no `start`, big limit, validates ascending order and freshness. The count check runs against a ceiling rather than the raw ask: `config.py::theoretical_max` is the smallest of the requested limit, the periods elapsed since `CRYPTO_EPOCH_MS` (2010-01-01), and `retention_ms // period_ms`, and the PASS floor is `THEORETICAL_MAX_RATIO` (0.9) of it, so a long period never fails for returning fewer records than a big limit asked for. The freshness threshold defaults to `3 * period_ms + 30s`; per-`(exchange, market_type, period)` overrides live in `config.py::FRESHNESS_OVERRIDE_MS` for upstreams documented to publish slowly (for example, an inverse 1m feed that skips empty buckets, requiring a 600s override). A stale newest candle is checked against the route's REST trades: where the venue has not traded since that bar's bucket closed, the market is quiet and the probe passes with the newest trade in its evidence, since KuCoin and Hyperliquid send no bar for a bucket without a trade.
+- `recent`: no `end`, big limit, validates ascending order and freshness. The count check runs against a ceiling rather than the raw ask: `config.py::theoretical_max` is the smallest of the requested limit, the periods elapsed since `CRYPTO_EPOCH_MS` (2010-01-01), and `retention_ms // period_ms`, and the PASS floor is `THEORETICAL_MAX_RATIO` (0.9) of it, so a long period never fails for returning fewer records than a big limit asked for. On a paginated route a page shorter than its limit is checked against the rows before its first: none means the exchange's history starts there and the page passes, and any means the router served a short page where the exchange holds more, a FAIL. Where that read fails, the ceiling rule stands. The freshness threshold defaults to `3 * period_ms + 30s`; per-`(exchange, market_type, period)` overrides live in `config.py::FRESHNESS_OVERRIDE_MS` for upstreams documented to publish slowly (for example, an inverse 1m feed that skips empty buckets, requiring a 600s override). A stale newest candle is checked against the route's REST trades: where the venue has not traded since that bar's bucket closed, the market is quiet and the probe passes with the newest trade in its evidence, since KuCoin and Hyperliquid send no bar for a bucket without a trade.
 - `limit=1`: must return exactly 1; an empty response warns rather than fails, and the count check does not run.
 - `limit=5`: must return at most 5; > 5 is a hard FAIL.
 - `before=1h_ago`: last record at or before the anchor. Skipped if `paginated: False`.
 - `before=24h_ago`: same check at a deeper anchor. Skipped if `paginated: False`, and additionally skipped when `period_ms > 12h` (24h does not give enough room to cover one period).
-- `start=future`: `start = now + 1h`, must return the newest available records (empty is a FAIL); a record dated more than one period into the future is a LOGIC FAIL.
+- `end=future`: `end = now + 1h`, must return the newest available records (empty is a FAIL); a record dated more than one period into the future is a LOGIC FAIL.
 
-Three checks read what the `recent` rows mean, not only their shape:
+An empty window where emptiness is an answer, a past anchor beyond retention or a quiet liquidation feed, reports SKIP.
+
+These checks read what the `recent` rows mean, not only their shape:
 
 - `cycles` (`funding_rate`): a row whose gap to the previous row repeats beside it must carry that gap as its `cycle_ms`, so a history that crosses a cycle change shows each side's own cycle. Fewer than three rows skip.
+- `open_bar` (`candles`): no bar but the newest may be open.
 - `utc_grid` (`candles` at `config.py::GRID_INTERVALS`, 6h and longer): every bar must open on a multiple of its interval since the epoch, which catches a bar cut on a local day.
-- `live_stamp` (`config.py::LIVE_READINGS`, Hyperliquid's open interest): a live reading must be stamped within five seconds of the moment it was read.
+- `clock` (`open_interest`): a history row carries the exchange's clock and a live reading the router's.
+- `live_stamp` (a route whose capability block declares `intervals` null, as Hyperliquid's open interest does): the reading must carry `interval` null and be stamped within five seconds of the moment it was read.
 
 <br>
 
 ### WebSocket
 
-Holds the connection for `WS_TEST_DURATION` (default 180s) and validates **every** frame against `WS_CHANNEL_MODEL`. Minimum frame thresholds are per-channel (`config.py::WS_MIN_FRAMES`):
+Subscribes with `schema_version`, holds the connection for `WS_TEST_DURATION` (default 180s) and validates **every** data frame against `WS_CHANNEL_MODEL`. The first frame must be `subscribed`, naming the channel, the symbol and the schema asked for; a data frame before it fails. `subscribed` and `lost` frames are checked apart from data and never counted as frames. Minimum frame thresholds are per-channel (`config.py::WS_MIN_FRAMES`):
 
 | Channel | Min frames | Rationale |
 | :--- | :--- | :--- |
@@ -161,7 +169,7 @@ Holds the connection for `WS_TEST_DURATION` (default 180s) and validates **every
 
 Below threshold: WARN. Zero frames with threshold > 0: FAIL with error type `EMPTY`. Zero frames with threshold = 0: PASS with the message noting the window was idle but the connection succeeded. Any malformed frame: FAIL with the offending payload preserved in evidence.
 
-A `trades` or `agg_trades` stream with zero frames is checked against the route's own REST trades before it fails. When the newest trades reach back past the window's start and none falls inside it, the venue did not trade and the probe reports SKIP; a trade inside the window, or a list too short to say, keeps the FAIL.
+A stream the exchange dropped (`lost`) that then sends fewer frames than its threshold WARNs as the exchange away rather than failing. A `trades` or `agg_trades` stream with zero frames is checked against the route's own REST trades before it fails. When the newest trades reach back past the window's start and none falls inside it, the venue did not trade and the probe reports SKIP; a trade inside the window, or a list too short to say, keeps the FAIL.
 
 <br>
 
@@ -185,15 +193,19 @@ SPOT-only. Hits a known canonical symbol per exchange (a `BTC`-quoted pair where
 
 ### Negative paths
 
-Runs first. Unknown exchange (expects 404), bad market type (expects 400/422), bad symbol (expects 400/404).
+Runs first. Unknown exchange (`404` `Not Found`), bad market type (`400` `Invalid Request`) and unknown symbol (`400` `Unknown Symbol`), each body checked for its title and a detail sentence. `StreamRefusalProbe` subscribes a spot stream to an unknown symbol and expects the `Unknown Symbol` body, then a close with code 1003.
 
 <br>
 
 ### /markets and /markets/{symbol}
 
-`MarketsProbe` reads the lite-list shape (`{exchange, market_type, count, markets: [...]}`), validates per-entry that `symbol` is uppercase with no slash and no duplicates, and that each entry carries the required `base_asset`, `quote_asset`, `qty_unit`, `funding` keys.
+An empty market list, as on a market type where the exchange lists nothing, reports SKIP. `MarketsProbe` reads the lite-list shape (`{exchange, market_type, count, markets: [...]}`), validates per-entry that `symbol` is uppercase with no slash and no duplicates, and that each entry carries the required `status`, `base`, `quote`, `qty` and `funding` keys.
 
-`InfoProbe` (probe name `markets:detail`) reads the full `SymbolInfo` from `/markets/{symbol}` and asserts `min_qty <= max_qty`, non-negative precision and a positive `tick_size` and `qty_step` where they are set, on a sample. It warns when a `quantity_precision` disagrees with a `qty_step` that is a power of ten no bigger than one, or a `price_precision` is coarser than its `tick_size`, the check that catches a precision read from the wrong field. The runner's `_pick_symbol_for_market` helper extracts the symbol list from the `markets` array.
+`HaltedMarketProbe` (probe name `markets:halted`) asks the list for `?status=halted`. With one listed, it reads that market's symbol info, which must say `halted` with the time the router read it, and every REST route its market type serves, each of which must answer 200. With none listed, it reports SKIP.
+
+`InfoProbe` (probe name `markets:detail`) reads the full `SymbolInfo` from `/markets/{symbol}` and asserts `qty.min <= qty.max`, non-negative decimals and a positive `price.tick` and `qty.step` where they are set. It warns when `decimals` disagrees with its step, the check that catches a count read from the wrong field. A `venue_record` check then reads the exchange's own instrument record (`config.py::INSTRUMENTS`) and compares the tick, the step, the limits, the decimals and the contract size field by field, with OKX's and KuCoin's lots turned into the coin; a field that differs FAILs, and a record the auditor cannot read reports SKIP.
+
+A value of a kind the auditor does not know WARNs rather than fails, on every route and in stream frames (`probes/base.py::KINDS`). The runner's `_pick_symbol_for_market` helper extracts the symbol list from the `markets` array.
 
 <br>
 <br>
@@ -309,9 +321,9 @@ The same applies to Google Colab and other hosted notebooks: they run on cloud I
    - Capture `started = time.time()` before the network call.
    - On non-200, return `[self.http_failure(ctx, self.name, started, status, data, err)]`.
    - On 200, validate shape with `validate_one` or `validate_list`, then route-specific invariants.
-   - When inspecting nested value objects (`qty`, `volume`, `open_interest`, `funding`, `rate`), read the typed fields (`row["qty"]["native"]`, `row["funding"]["kind"]`); the schema-3 wire format never exposes them flat.
+   - When inspecting nested value objects (`qty`, `volume`, `open_interest`, `funding`), read the typed fields (`row["qty"]["native"]`, `row["funding"]["kind"]`); the wire format never exposes them flat.
    - Build the success result with `self.result(ctx, self.name, started, status="pass", error_type=ErrorType.OK, message=..., evidence=...)`.
-5. Register it in `probes/__init__.py`: append to `market_probes()` for per-market probes, or to `exchange_probes()` for top-of-exchange ones (rare, currently `ErrorPathProbe`).
+5. Register it in `probes/__init__.py`: append to `market_probes()` for per-market probes, or to `exchange_probes()` for top-of-exchange ones (rare, currently `ErrorPathProbe` and `StreamRefusalProbe`).
 6. If you added a new route the adapters expose, also update `CapabilitiesConsistencyProbe`'s route list so drift is caught for it.
 
 A new probe is ~50-80 lines. If yours is bigger, look at `PaginatedProbe` for how to split into sub-probe methods.
@@ -353,8 +365,8 @@ When in doubt: re-run with `--parallel 1 <exchange>` to isolate, and compare the
 
 The auditor is a route-and-shape verifier, not a full integration test. It does **not** test:
 
-- Multiple symbols per market (one BTC/ETH-stable pair is picked per market).
+- Multiple symbols per market (one BTC/ETH-stable pair is picked per market, and one halted market where the list has one).
 - WebSocket reconnect or heartbeat-silence behaviour. (Validates frame shape and minimum count over a sustained window; forced-disconnect tests are out of scope as flaky.)
 - Concurrent or rate-limited access beyond the configured semaphores.
 - Authenticated endpoints (the router currently exposes only public routes).
-- Malformed input handling beyond the negative-path triplet.
+- Malformed input handling beyond the negative paths.
