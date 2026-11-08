@@ -35,6 +35,6 @@ async def test_a_snapshot_carrying_a_new_kind_is_flagged_not_failed(monkeypatch)
 
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app)) as client:
         ctx      = base.ProbeContext(client=client, exchange="fake", market_type="linear", symbol="BTCUSDT", caps={}, caps_slice={"ticker": {"rest": True}}, now_ms=base.now_ms())
-        [result] = await SnapshotProbe("ticker", Ticker).run(ctx)
+        result   = (await SnapshotProbe("ticker", Ticker).run(ctx))[0]
 
     assert (result.status, result.message) == ("warn", "price_source 'auction' is not a value the auditor knows")

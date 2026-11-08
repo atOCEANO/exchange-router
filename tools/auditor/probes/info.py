@@ -1,11 +1,13 @@
 import decimal
+import math
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from exchange_router.models import SymbolInfo
 from tools.auditor.aggregator import ErrorType, ProbeResult
+from tools.auditor.config import INSTRUMENTS
 
-from tools.auditor.probes.base import Probe, ProbeContext, fetch, unknown_kind, validate_one
+from tools.auditor.probes.base import Probe, ProbeContext, dig, fetch, fill, unknown_kind, validate_one, venue_record
 
 
 def _decimals(value: float) -> int:
@@ -30,6 +32,25 @@ def _grid_mismatch(data: Dict[str, Any]) -> Optional[Tuple[str, ErrorType, str, 
             {"qty": qty},
         )
     return None
+
+
+def venue_grid(record: Any, fields: Dict[str, List[Tuple]], native: Optional[str]) -> Dict[str, Optional[float]]:
+    out = {}
+    for field, paths in fields.items():
+        values     = [dig(record, fill(path, native)) for path in paths]
+        readable   = all(isinstance(value, (int, float, str)) and value != "" for value in values)
+        out[field] = abs(math.prod(float(value) for value in values)) if readable else None
+    return out
+
+
+def instrument_findings(info: Dict[str, Any], venue: Dict[str, Optional[float]]) -> List[Dict[str, Any]]:
+    price, qty = info["price"], info["qty"]
+    router     = {"tick": price.get("tick"), "step": qty["step"], "min": qty["min"], "max": qty["max"], "decimals": qty["decimals"], "contract_size": qty["contract_size"]}
+    return [
+        {"field": field, "router": router[field], "venue": value}
+        for field, value in venue.items()
+        if (router[field] is None) != (value is None) or (value is not None and not math.isclose(router[field], value, rel_tol=1e-9))
+    ]
 
 
 class InfoProbe(Probe):
@@ -116,23 +137,31 @@ class InfoProbe(Probe):
                 evidence={"qty": qty, "market_type": ctx.market_type},
             )]
 
-        found = unknown_kind(data) or _grid_mismatch(data)
-        if found:
-            s, et, msg, ev = found
-            return [self.result(
-                ctx, self.name, started,
-                status=s,
-                error_type=et,
-                message=msg,
-                evidence=ev,
-            )]
-
+        s, et, msg, ev = unknown_kind(data) or _grid_mismatch(data) or ("pass", ErrorType.OK, f"symbol {data.get('symbol')} info parsed OK", {"symbol": data.get("symbol")})
         r = self.result(
             ctx, self.name, started,
-            status="pass",
-            error_type=ErrorType.OK,
-            message=f"symbol {data.get('symbol')} info parsed OK",
-            evidence={"symbol": data.get("symbol")},
+            status=s,
+            error_type=et,
+            message=msg,
+            evidence=ev,
         )
         r.sample = [data]
-        return [r]
+        return [r, await self._venue_record(ctx, data)]
+
+
+    async def _venue_record(self, ctx: ProbeContext, data: Dict[str, Any]) -> ProbeResult:
+        name    = "markets:venue_record"
+        started = time.time()
+        entry   = INSTRUMENTS.get((ctx.exchange, ctx.market_type))
+        if entry is None:
+            return self.result(ctx, name, started, status="skip", error_type=ErrorType.SKIPPED, message=f"no venue record wired for {ctx.exchange} {ctx.market_type}")
+
+        native = data.get("native_symbol")
+        venue  = venue_grid(await venue_record(ctx.client, entry, native), entry[2], native)
+        if all(value is None for value in venue.values()):
+            return self.result(ctx, name, started, status="skip", error_type=ErrorType.SKIPPED, message=f"{ctx.exchange}'s own record of {native} could not be read")
+
+        findings = instrument_findings(data, venue)
+        if findings:
+            return self.result(ctx, name, started, status="fail", error_type=ErrorType.LOGIC, message=f"{', '.join(f['field'] for f in findings)} differ from {ctx.exchange}'s own record", evidence={"findings": findings, "native_symbol": native})
+        return self.result(ctx, name, started, status="pass", error_type=ErrorType.OK, message=f"{', '.join(venue)} match {ctx.exchange}'s own record", evidence={"venue": venue, "native_symbol": native})

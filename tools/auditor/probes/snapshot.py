@@ -3,11 +3,12 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 from pydantic import BaseModel
 
-from tools.auditor.config import DEADLINES
+from tools.auditor.config import DEADLINES, PRICE_SLACK, PRICES
 from tools.auditor.aggregator import ErrorType, ProbeResult
 
 from tools.auditor.probes.base import (
-    Probe, ProbeContext, dig, fetch, judge_time, unknown_kind, validate_one, venue_fetch,
+    Probe, ProbeContext, dig, fetch, fill, judge_time, native_symbol, now_ms, unknown_kind, validate_one,
+    venue_fetch, venue_record,
 )
 
 
@@ -66,6 +67,19 @@ def deadline_verdict(router_ts: int, venue_ts: Optional[int], cycle_ms: int) -> 
     if abs(abs(router_ts - venue_ts) - cycle_ms) <= 1000:
         return "settled"
     return "fail"
+
+
+def price_verdict(price: float, before: float, after: float) -> Optional[str]:
+    low, high = min(before, after), max(before, after)
+    if low * (1 - PRICE_SLACK) <= price <= high * (1 + PRICE_SLACK):
+        return None
+    return f"price {price} lies outside {low} to {high}, the venue's own reading either side of it"
+
+
+def estimate_verdict(ts: int, cycle_ms: Optional[int], now: int) -> Optional[str]:
+    if cycle_ms and abs(ts - now) <= cycle_ms:
+        return None
+    return f"the estimate lies {(ts - now)/1000:.0f}s from now, beyond one cycle of {(cycle_ms or 0)/1000:.0f}s"
 
 
 SNAPSHOT_CHECKS: Dict[str, Callable[[dict, ProbeContext], Tuple[str, ErrorType, str, Dict[str, Any]]]] = {
@@ -133,7 +147,31 @@ class SnapshotProbe(Probe):
 
         if self.route == "mark_price":
             return [r, await self._deadline(ctx, data)]
+        if self.route == "ticker":
+            return [r, await self._venue_price(ctx, data)]
         return [r]
+
+
+    async def _venue_price(self, ctx: ProbeContext, data: dict) -> ProbeResult:
+        name    = f"{self.name}:venue_price"
+        started = time.time()
+        entry   = PRICES.get((ctx.exchange, ctx.market_type, data.get("price_source")))
+        if entry is None or data.get("price") is None:
+            return self.result(ctx, name, started, status="skip", error_type=ErrorType.SKIPPED, message=f"no venue reading of {data.get('price_source')} to compare")
+
+        native      = await native_symbol(ctx)
+        before      = dig(await venue_record(ctx.client, entry, native), fill(entry[2], native))
+        _, again, _ = await fetch(ctx.client, f"/{ctx.exchange}/{ctx.market_type}/ticker/{ctx.symbol}")
+        after       = dig(await venue_record(ctx.client, entry, native), fill(entry[2], native))
+        price       = again.get("price") if isinstance(again, dict) else None
+        evidence    = {"venue_before": before, "price": price, "venue_after": after, "price_source": data["price_source"], "native_symbol": native}
+
+        if None in (before, price, after):
+            return self.result(ctx, name, started, status="skip", error_type=ErrorType.SKIPPED, message="the venue or the router sent no price to compare", evidence=evidence)
+        problem = price_verdict(float(price), float(before), float(after))
+        if problem:
+            return self.result(ctx, name, started, status="fail", error_type=ErrorType.LOGIC, message=problem, evidence=evidence)
+        return self.result(ctx, name, started, status="pass", error_type=ErrorType.OK, message=f"price lies within the venue's own {data['price_source']} read either side of it", evidence=evidence)
 
 
     async def _deadline(self, ctx: ProbeContext, data: dict) -> ProbeResult:
@@ -141,7 +179,14 @@ class SnapshotProbe(Probe):
         started = time.time()
         table   = DEADLINES.get((ctx.exchange, ctx.market_type))
         funding = data.get("funding") or {}
-        if table is None or not (funding.get("valid_until") or {}).get("ts"):
+        until   = funding.get("valid_until") or {}
+        if until.get("kind") == "estimate":
+            problem  = estimate_verdict(until["ts"], funding.get("cycle_ms"), now_ms())
+            evidence = {"valid_until": until, "cycle_ms": funding.get("cycle_ms")}
+            if problem:
+                return self.result(ctx, name, started, status="fail", error_type=ErrorType.LOGIC, message=problem, evidence=evidence)
+            return self.result(ctx, name, started, status="pass", error_type=ErrorType.OK, message="the estimate lies within one cycle of now", evidence=evidence)
+        if table is None or not until.get("ts"):
             return self.result(ctx, name, started, status="skip", error_type=ErrorType.SKIPPED, message="no venue deadline to compare")
 
         _, info, _ = await fetch(ctx.client, f"/{ctx.exchange}/{ctx.market_type}/markets/{ctx.symbol}")

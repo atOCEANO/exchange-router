@@ -112,6 +112,8 @@ async def venue_fetch(client: httpx.AsyncClient, url: str, params: Optional[Dict
     if next_slot > now:
         await asyncio.sleep(next_slot - now)
     try:
+        if url.startswith("POST "):
+            return (await client.post(url[5:], json=params)).json()
         return (await client.get(url, params=params)).json()
     except Exception:
         return None
@@ -120,10 +122,34 @@ async def venue_fetch(client: httpx.AsyncClient, url: str, params: Optional[Dict
 def dig(data: Any, path: Tuple) -> Any:
     for key in path:
         try:
-            data = data[key]
-        except (KeyError, IndexError, TypeError):
+            if key == "*":
+                data = next(iter(data.values()))
+            elif isinstance(key, dict):
+                data = next(item for item in data if all(item.get(k) == v for k, v in key.items()))
+            else:
+                data = data[key]
+        except (KeyError, IndexError, TypeError, AttributeError, StopIteration):
             return None
     return data
+
+
+def fill(value: Any, native: Optional[str]) -> Any:
+    if isinstance(value, str):
+        return value.format(native=native)
+    if isinstance(value, dict):
+        return {k: fill(v, native) for k, v in value.items()}
+    if isinstance(value, tuple):
+        return tuple(fill(v, native) for v in value)
+    return value
+
+
+async def venue_record(client: httpx.AsyncClient, entry: Tuple, native: Optional[str]) -> Any:
+    return await venue_fetch(client, fill(entry[0], native), fill(entry[1], native))
+
+
+async def native_symbol(ctx: ProbeContext) -> Optional[str]:
+    _, info, _ = await fetch(ctx.client, f"/{ctx.exchange}/{ctx.market_type}/markets/{ctx.symbol}")
+    return info.get("native_symbol") if isinstance(info, dict) else None
 
 
 UNITS = ("base", "contract")

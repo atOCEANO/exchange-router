@@ -1,6 +1,6 @@
 import os
 import re
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 
 API_URL = os.getenv("API_URL", "http://localhost:8040")
@@ -74,6 +74,128 @@ DEADLINES: Dict[Tuple[str, str], Tuple[str, Dict[str, str], Tuple]] = {
     ("bybit", "inverse"):   ("https://api.bybit.com/v5/market/tickers", {"category": "inverse", "symbol": "{native}"}, ("result", "list", 0, "nextFundingTime")),
     ("okx", "linear"):      ("https://www.okx.com/api/v5/public/funding-rate", {"instId": "{native}"}, ("data", 0, "fundingTime")),
     ("okx", "inverse"):     ("https://www.okx.com/api/v5/public/funding-rate", {"instId": "{native}"}, ("data", 0, "fundingTime")),
+}
+
+PRICE_SLACK = 0.001
+
+PRICES: Dict[Tuple[str, str, str], Tuple[str, Dict[str, str], Tuple]] = {
+    ("binance", "spot", "last_trade"):    ("https://api.binance.com/api/v3/ticker/price", {"symbol": "{native}"}, ("price",)),
+    ("binance", "linear", "last_trade"):  ("https://fapi.binance.com/fapi/v1/ticker/price", {"symbol": "{native}"}, ("price",)),
+    ("binance", "inverse", "last_trade"): ("https://dapi.binance.com/dapi/v1/ticker/price", {"symbol": "{native}"}, (0, "price")),
+    ("bybit", "spot", "last_trade"):      ("https://api.bybit.com/v5/market/tickers", {"category": "spot", "symbol": "{native}"}, ("result", "list", 0, "lastPrice")),
+    ("bybit", "linear", "last_trade"):    ("https://api.bybit.com/v5/market/tickers", {"category": "linear", "symbol": "{native}"}, ("result", "list", 0, "lastPrice")),
+    ("bybit", "inverse", "last_trade"):   ("https://api.bybit.com/v5/market/tickers", {"category": "inverse", "symbol": "{native}"}, ("result", "list", 0, "lastPrice")),
+    ("okx", "spot", "last_trade"):        ("https://www.okx.com/api/v5/market/ticker", {"instId": "{native}"}, ("data", 0, "last")),
+    ("okx", "linear", "last_trade"):      ("https://www.okx.com/api/v5/market/ticker", {"instId": "{native}"}, ("data", 0, "last")),
+    ("okx", "inverse", "last_trade"):     ("https://www.okx.com/api/v5/market/ticker", {"instId": "{native}"}, ("data", 0, "last")),
+    ("kucoin", "spot", "last_trade"):     ("https://api.kucoin.com/api/v1/market/orderbook/level1", {"symbol": "{native}"}, ("data", "price")),
+    ("kucoin", "linear", "last_trade"):   ("https://api-futures.kucoin.com/api/v1/ticker", {"symbol": "{native}"}, ("data", "price")),
+    ("kucoin", "inverse", "last_trade"):  ("https://api-futures.kucoin.com/api/v1/ticker", {"symbol": "{native}"}, ("data", "price")),
+    ("kraken", "spot", "last_trade"):     ("https://api.kraken.com/0/public/Ticker", {"pair": "{native}"}, ("result", "*", "c", 0)),
+    ("kraken", "linear", "last_trade"):   ("https://futures.kraken.com/derivatives/api/v3/tickers/{native}", {}, ("ticker", "last")),
+    ("kraken", "inverse", "last_trade"):  ("https://futures.kraken.com/derivatives/api/v3/tickers/{native}", {}, ("ticker", "last")),
+    ("hyperliquid", "spot", "mid"):       ("POST https://api.hyperliquid.xyz/info", {"type": "allMids"}, ("{native}",)),
+    ("hyperliquid", "linear", "mid"):     ("POST https://api.hyperliquid.xyz/info", {"type": "allMids"}, ("{native}",)),
+}
+
+_BINANCE_SPOT    = ("symbols", 0, "filters")
+_BINANCE_FUTURES = ("symbols", {"symbol": "{native}"}, "filters")
+_BYBIT           = ("result", "list", 0)
+_KRAKEN_FUTURES  = ("instruments", {"symbol": "{native}"})
+
+INSTRUMENTS: Dict[Tuple[str, str], Tuple[str, Dict[str, str], Dict[str, List[Tuple]]]] = {
+    ("binance", "spot"): ("https://api.binance.com/api/v3/exchangeInfo", {"symbol": "{native}"}, {
+        "tick": [_BINANCE_SPOT + ({"filterType": "PRICE_FILTER"}, "tickSize")],
+        "step": [_BINANCE_SPOT + ({"filterType": "LOT_SIZE"}, "stepSize")],
+        "min":  [_BINANCE_SPOT + ({"filterType": "LOT_SIZE"}, "minQty")],
+        "max":  [_BINANCE_SPOT + ({"filterType": "LOT_SIZE"}, "maxQty")],
+    }),
+    ("binance", "linear"): ("https://fapi.binance.com/fapi/v1/exchangeInfo", {}, {
+        "tick": [_BINANCE_FUTURES + ({"filterType": "PRICE_FILTER"}, "tickSize")],
+        "step": [_BINANCE_FUTURES + ({"filterType": "LOT_SIZE"}, "stepSize")],
+        "min":  [_BINANCE_FUTURES + ({"filterType": "LOT_SIZE"}, "minQty")],
+        "max":  [_BINANCE_FUTURES + ({"filterType": "LOT_SIZE"}, "maxQty")],
+    }),
+    ("binance", "inverse"): ("https://dapi.binance.com/dapi/v1/exchangeInfo", {}, {
+        "tick":          [_BINANCE_FUTURES + ({"filterType": "PRICE_FILTER"}, "tickSize")],
+        "step":          [_BINANCE_FUTURES + ({"filterType": "LOT_SIZE"}, "stepSize")],
+        "min":           [_BINANCE_FUTURES + ({"filterType": "LOT_SIZE"}, "minQty")],
+        "max":           [_BINANCE_FUTURES + ({"filterType": "LOT_SIZE"}, "maxQty")],
+        "contract_size": [("symbols", {"symbol": "{native}"}, "contractSize")],
+    }),
+    ("bybit", "spot"): ("https://api.bybit.com/v5/market/instruments-info", {"category": "spot", "symbol": "{native}"}, {
+        "tick": [_BYBIT + ("priceFilter", "tickSize")],
+        "step": [_BYBIT + ("lotSizeFilter", "basePrecision")],
+        "min":  [_BYBIT + ("lotSizeFilter", "minOrderQty")],
+        "max":  [_BYBIT + ("lotSizeFilter", "maxOrderQty")],
+    }),
+    ("bybit", "linear"): ("https://api.bybit.com/v5/market/instruments-info", {"category": "linear", "symbol": "{native}"}, {
+        "tick": [_BYBIT + ("priceFilter", "tickSize")],
+        "step": [_BYBIT + ("lotSizeFilter", "qtyStep")],
+        "min":  [_BYBIT + ("lotSizeFilter", "minOrderQty")],
+        "max":  [_BYBIT + ("lotSizeFilter", "maxOrderQty")],
+    }),
+    ("bybit", "inverse"): ("https://api.bybit.com/v5/market/instruments-info", {"category": "inverse", "symbol": "{native}"}, {
+        "tick": [_BYBIT + ("priceFilter", "tickSize")],
+        "step": [_BYBIT + ("lotSizeFilter", "qtyStep")],
+        "min":  [_BYBIT + ("lotSizeFilter", "minOrderQty")],
+        "max":  [_BYBIT + ("lotSizeFilter", "maxOrderQty")],
+    }),
+    ("okx", "spot"): ("https://www.okx.com/api/v5/public/instruments", {"instType": "SPOT", "instId": "{native}"}, {
+        "tick": [("data", 0, "tickSz")],
+        "step": [("data", 0, "lotSz")],
+        "min":  [("data", 0, "minSz")],
+        "max":  [("data", 0, "maxLmtSz")],
+    }),
+    ("okx", "linear"): ("https://www.okx.com/api/v5/public/instruments", {"instType": "SWAP", "instId": "{native}"}, {
+        "tick": [("data", 0, "tickSz")],
+        "step": [("data", 0, "lotSz"), ("data", 0, "ctVal")],
+        "min":  [("data", 0, "minSz"), ("data", 0, "ctVal")],
+        "max":  [("data", 0, "maxLmtSz"), ("data", 0, "ctVal")],
+    }),
+    ("okx", "inverse"): ("https://www.okx.com/api/v5/public/instruments", {"instType": "SWAP", "instId": "{native}"}, {
+        "tick":          [("data", 0, "tickSz")],
+        "step":          [("data", 0, "lotSz")],
+        "min":           [("data", 0, "minSz")],
+        "max":           [("data", 0, "maxLmtSz")],
+        "contract_size": [("data", 0, "ctVal")],
+    }),
+    ("kucoin", "spot"): ("https://api.kucoin.com/api/v2/symbols/{native}", {}, {
+        "tick": [("data", "priceIncrement")],
+        "step": [("data", "baseIncrement")],
+        "min":  [("data", "baseMinSize")],
+        "max":  [("data", "baseMaxSize")],
+    }),
+    ("kucoin", "linear"): ("https://api-futures.kucoin.com/api/v1/contracts/{native}", {}, {
+        "tick": [("data", "tickSize")],
+        "step": [("data", "lotSize"), ("data", "multiplier")],
+        "min":  [("data", "lotSize"), ("data", "multiplier")],
+        "max":  [("data", "maxOrderQty"), ("data", "multiplier")],
+    }),
+    ("kucoin", "inverse"): ("https://api-futures.kucoin.com/api/v1/contracts/{native}", {}, {
+        "tick":          [("data", "tickSize")],
+        "step":          [("data", "lotSize")],
+        "min":           [("data", "lotSize")],
+        "max":           [("data", "maxOrderQty")],
+        "contract_size": [("data", "multiplier")],
+    }),
+    ("kraken", "spot"): ("https://api.kraken.com/0/public/AssetPairs", {"pair": "{native}"}, {
+        "tick":     [("result", "*", "tick_size")],
+        "decimals": [("result", "*", "lot_decimals")],
+        "min":      [("result", "*", "ordermin")],
+    }),
+    ("kraken", "linear"): ("https://futures.kraken.com/derivatives/api/v3/instruments", {}, {
+        "tick":     [_KRAKEN_FUTURES + ("tickSize",)],
+        "decimals": [_KRAKEN_FUTURES + ("contractValueTradePrecision",)],
+    }),
+    ("kraken", "inverse"): ("https://futures.kraken.com/derivatives/api/v3/instruments", {}, {
+        "tick":          [_KRAKEN_FUTURES + ("tickSize",)],
+        "decimals":      [_KRAKEN_FUTURES + ("contractValueTradePrecision",)],
+        "contract_size": [_KRAKEN_FUTURES + ("contractSize",)],
+    }),
+    ("hyperliquid", "linear"): ("POST https://api.hyperliquid.xyz/info", {"type": "meta"}, {
+        "decimals": [("universe", {"name": "{native}"}, "szDecimals")],
+    }),
 }
 
 CRYPTO_EPOCH_MS = 1_262_304_000_000
