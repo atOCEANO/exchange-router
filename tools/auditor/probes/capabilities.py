@@ -58,7 +58,7 @@ class CapabilitiesConsistencyProbe(Probe):
             params: Dict[str, Any] = {}
             if route in ("candles", "open_interest", "long_short_ratio"):
                 intervals = rc.get("intervals") or ["1h"]
-                params["interval" if route == "candles" else "period"] = intervals[0]
+                params["interval"] = intervals[0]
             started = time.time()
             status, data, err = await fetch(ctx.client, endpoint, params)
             ended = time.time()

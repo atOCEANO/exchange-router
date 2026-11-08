@@ -267,10 +267,10 @@ class PaginatedProbe(Probe):
             route=self.route,
             kind=self.kind,
             symbol=ctx.symbol,
-            probe=f"{self.name}:start_anchor",
+            probe=f"{self.name}:end_anchor",
             status="skip",
             error_type=ErrorType.SKIPPED,
-            message="upstream does not honour start parameter",
+            message="the route does not page back through history",
             evidence={"paginated": False},
             latency_ms=0.0,
             started_at=time.time(),
@@ -280,7 +280,7 @@ class PaginatedProbe(Probe):
 
     async def _probe_anchor_past(self, ctx: ProbeContext, sub_name: str, offset_ms: int) -> ProbeResult:
         anchor = ctx.now_ms - offset_ms
-        data, res = await self._probe(ctx, sub_name, {"start": anchor, "limit": 500}, expect_empty_ok=True)
+        data, res = await self._probe(ctx, sub_name, {"end": anchor, "limit": 500}, expect_empty_ok=True)
         if data is None:
             return res
         res.sample = data[:SAMPLE_MAX_ITEMS]
@@ -291,7 +291,7 @@ class PaginatedProbe(Probe):
         if last_ts > anchor:
             res.status = "fail"
             res.error_type = ErrorType.LOGIC
-            res.message = f"upstream ignored start: last record {(last_ts - anchor)/1000:.0f}s after anchor"
+            res.message = f"the route ignored end: last record {(last_ts - anchor)/1000:.0f}s after anchor"
             res.evidence.update({"anchor_ms": anchor, "last_ts": last_ts, "drift_s": (last_ts - anchor) / 1000})
             return res
 
@@ -324,7 +324,7 @@ class PaginatedProbe(Probe):
 
     async def _probe_anchor_future(self, ctx: ProbeContext) -> ProbeResult:
         anchor = ctx.now_ms + 60 * 60 * 1000
-        data, res = await self._probe(ctx, "start=future", {"start": anchor, "limit": 100}, expect_empty_ok=False)
+        data, res = await self._probe(ctx, "end=future", {"end": anchor, "limit": 100}, expect_empty_ok=False)
         if data is None:
             return res
         res.sample = data[:SAMPLE_MAX_ITEMS]

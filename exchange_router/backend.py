@@ -28,8 +28,8 @@ from .exchanges.base import (
     UnknownSymbolError,
     UpstreamUnavailableError,
     join_open_interest_basis,
+    series_interval,
     symbol_info_to_lite,
-    validate_interval,
 )
 from .models import MarketType
 from .version import SCHEMA_VERSION, VERSION
@@ -65,10 +65,10 @@ SERIES_METHODS = {
     "long_short_ratio": "get_long_short_ratio",
 }
 
-INTERVAL_ROUTES = {
-    "candles":          "interval",
-    "open_interest":    "period",
-    "long_short_ratio": "period",
+INTERVAL_DEFAULTS = {
+    "candles":          "1h",
+    "open_interest":    "1h",
+    "long_short_ratio": "5m",
 }
 
 
@@ -450,10 +450,13 @@ class LocalBackend(Backend):
                 "markets":     [to_jsonable_python(symbol_info_to_lite(i)) for i in info_list],
             }
 
-        if route in INTERVAL_ROUTES:
-            value = params.get(INTERVAL_ROUTES[route])
-            if value is not None:
-                validate_interval(adapter, market_type, route, value)
+        for name in ("limit", "depth"):
+            given = params.get(name)
+            if given is not None and given < 1:
+                raise BadRequest(f"{name}: must be 1 or more, got {given}", 400, "Invalid Request")
+
+        if route in INTERVAL_DEFAULTS:
+            params["interval"] = series_interval(adapter, market_type, route, params.get("interval"), params.get("end"), INTERVAL_DEFAULTS[route])
 
         if route != "symbol_info" and (route in POINT_METHODS or route in SERIES_METHODS or route == "orderbook"):
             symbol = await adapter.listed_symbol(market_type, symbol)
@@ -506,7 +509,7 @@ class LocalBackend(Backend):
 
     async def _series(self, adapter, route: str, market_type: MarketType, symbol: str,
                       params: Dict[str, Any]) -> List[Any]:
-        start = params.get("start")
+        start = params.get("end")
 
         if route == "trades":
             limit = params.get("limit", 100)
@@ -517,7 +520,7 @@ class LocalBackend(Backend):
             return await adapter.get_agg_trades(market_type, symbol, start, limit)
 
         if route == "candles":
-            interval = params.get("interval", "1h")
+            interval = params["interval"]
             limit    = params.get("limit", 100)
             return await adapter.get_candles(market_type, symbol, interval, start, limit)
 
@@ -530,11 +533,11 @@ class LocalBackend(Backend):
             return await adapter.get_liquidations(market_type, symbol, start, limit)
 
         if route == "long_short_ratio":
-            period = params.get("period", "5m")
+            period = params["interval"]
             limit  = params.get("limit", 30)
             return await adapter.get_long_short_ratio(market_type, symbol, period, start, limit)
 
-        period  = params.get("period", "1h")
+        period  = params["interval"]
         limit   = params.get("limit", 30)
         oi_rows = await adapter.get_open_interest(market_type, symbol, period, start, limit)
 

@@ -295,7 +295,7 @@ class Router:
         return self._loop.run(self._core.get_funding_rate(exchange, market_type, symbol, limit, start, verbose, end))
 
 
-    def get_open_interest(self, exchange: str, market_type: str, symbol: str, period: str = "1h", limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, interval: Optional[str] = None, end: Optional[int] = None) -> pd.DataFrame:
+    def get_open_interest(self, exchange: str, market_type: str, symbol: str, period: Optional[str] = None, limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, interval: Optional[str] = None, end: Optional[int] = None) -> pd.DataFrame:
         return self._loop.run(self._core.get_open_interest(exchange, market_type, symbol, period, limit, start, verbose, interval, end))
 
 
@@ -303,7 +303,7 @@ class Router:
         return self._loop.run(self._core.get_liquidations(exchange, market_type, symbol, limit, start, verbose, end))
 
 
-    def get_long_short_ratio(self, exchange: str, market_type: str, symbol: str, period: str = "5m", limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, interval: Optional[str] = None, end: Optional[int] = None) -> pd.DataFrame:
+    def get_long_short_ratio(self, exchange: str, market_type: str, symbol: str, period: Optional[str] = None, limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, interval: Optional[str] = None, end: Optional[int] = None) -> pd.DataFrame:
         return self._loop.run(self._core.get_long_short_ratio(exchange, market_type, symbol, period, limit, start, verbose, interval, end))
 
 
@@ -336,7 +336,7 @@ class Router:
         return self._loop.run(self._core.fetch_many("funding_rate", exchange, market_type, symbols, verbose=verbose, max_concurrent=max_concurrent, limit=limit, start=start, end=end))
 
 
-    def open_interest_many(self, exchange: str, market_type: str, symbols: List[str], period: str = "1h", limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, max_concurrent: int = 8, interval: Optional[str] = None, end: Optional[int] = None) -> BatchResult:
+    def open_interest_many(self, exchange: str, market_type: str, symbols: List[str], period: Optional[str] = None, limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, max_concurrent: int = 8, interval: Optional[str] = None, end: Optional[int] = None) -> BatchResult:
         return self._loop.run(self._core.fetch_many("open_interest", exchange, market_type, symbols, verbose=verbose, max_concurrent=max_concurrent, period=period, limit=limit, start=start, interval=interval, end=end))
 
 
@@ -344,7 +344,7 @@ class Router:
         return self._loop.run(self._core.fetch_many("liquidations", exchange, market_type, symbols, verbose=verbose, max_concurrent=max_concurrent, limit=limit, start=start, end=end))
 
 
-    def long_short_ratio_many(self, exchange: str, market_type: str, symbols: List[str], period: str = "5m", limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, max_concurrent: int = 8, interval: Optional[str] = None, end: Optional[int] = None) -> BatchResult:
+    def long_short_ratio_many(self, exchange: str, market_type: str, symbols: List[str], period: Optional[str] = None, limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, max_concurrent: int = 8, interval: Optional[str] = None, end: Optional[int] = None) -> BatchResult:
         return self._loop.run(self._core.fetch_many("long_short_ratio", exchange, market_type, symbols, verbose=verbose, max_concurrent=max_concurrent, period=period, limit=limit, start=start, interval=interval, end=end))
 
 

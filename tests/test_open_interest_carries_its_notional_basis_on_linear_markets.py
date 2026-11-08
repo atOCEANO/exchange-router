@@ -20,7 +20,7 @@ async def wire():
 async def _rows(wire, market_type, symbol):
     response = await wire.get(
         f"/{EX}/{market_type}/open_interest/{symbol}",
-        params = {"period": PERIOD, "limit": LIMIT},
+        params = {"interval": PERIOD, "limit": LIMIT},
     )
     response.raise_for_status()
     return response.json()
@@ -86,5 +86,5 @@ async def test_the_sdk_frame_reports_the_same_notionals_the_wire_does(router):
 
 
 async def test_a_spot_market_has_no_open_interest_at_all(wire):
-    response = await wire.get(f"/{EX}/spot/open_interest/BTCUSDT", params={"period": PERIOD, "limit": LIMIT})
+    response = await wire.get(f"/{EX}/spot/open_interest/BTCUSDT", params={"interval": PERIOD, "limit": LIMIT})
     assert response.status_code == 501

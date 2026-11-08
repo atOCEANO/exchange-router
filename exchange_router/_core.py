@@ -346,7 +346,7 @@ class AsyncCore:
         start  = end if end is not None else start
         params = {"interval": interval, "limit": limit}
         if start is not None:
-            params["start"] = start
+            params["end"] = start
 
         return await self._series("candles", exchange, market_type, symbol, params, interval, verbose)
 
@@ -359,7 +359,7 @@ class AsyncCore:
         start  = end if end is not None else start
         params = {"limit": limit}
         if start is not None:
-            params["start"] = start
+            params["end"] = start
 
         return await self._series("agg_trades", exchange, market_type, symbol, params, None, verbose)
 
@@ -368,17 +368,19 @@ class AsyncCore:
         start  = end if end is not None else start
         params = {"limit": limit}
         if start is not None:
-            params["start"] = start
+            params["end"] = start
 
         return await self._series("funding_rate", exchange, market_type, symbol, params, None, verbose)
 
 
-    async def get_open_interest(self, exchange: str, market_type: str, symbol: str, period: str = "1h", limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, interval: Optional[str] = None, end: Optional[int] = None) -> pd.DataFrame:
+    async def get_open_interest(self, exchange: str, market_type: str, symbol: str, period: Optional[str] = None, limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, interval: Optional[str] = None, end: Optional[int] = None) -> pd.DataFrame:
         period = interval if interval is not None else period
         start  = end if end is not None else start
-        params = {"period": period, "limit": limit}
+        params = {"limit": limit}
+        if period is not None:
+            params["interval"] = period
         if start is not None:
-            params["start"] = start
+            params["end"] = start
 
         return await self._series("open_interest", exchange, market_type, symbol, params, period, verbose)
 
@@ -387,17 +389,19 @@ class AsyncCore:
         start  = end if end is not None else start
         params = {"limit": limit}
         if start is not None:
-            params["start"] = start
+            params["end"] = start
 
         return await self._series("liquidations", exchange, market_type, symbol, params, None, verbose)
 
 
-    async def get_long_short_ratio(self, exchange: str, market_type: str, symbol: str, period: str = "5m", limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, interval: Optional[str] = None, end: Optional[int] = None) -> pd.DataFrame:
+    async def get_long_short_ratio(self, exchange: str, market_type: str, symbol: str, period: Optional[str] = None, limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, interval: Optional[str] = None, end: Optional[int] = None) -> pd.DataFrame:
         period = interval if interval is not None else period
         start  = end if end is not None else start
-        params = {"period": period, "limit": limit}
+        params = {"limit": limit}
+        if period is not None:
+            params["interval"] = period
         if start is not None:
-            params["start"] = start
+            params["end"] = start
 
         return await self._series("long_short_ratio", exchange, market_type, symbol, params, period, verbose)
 

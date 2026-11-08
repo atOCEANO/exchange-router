@@ -285,6 +285,20 @@ def validate_interval(adapter, market_type: MarketType, route: str, value: str) 
         raise RequestError(f"interval: '{value}' is not offered on {adapter.name} {market_type.value} {route}; /{adapter.name}/capabilities lists the intervals")
 
 
+def series_interval(adapter, market_type: MarketType, route: str, interval: Optional[str], end: Optional[int], default: str) -> Optional[str]:
+    block = route_block(adapter.get_capabilities(), market_type, route)
+
+    if block.get("rest") and block.get("intervals") is None:
+        for name, given in (("interval", interval), ("end", end)):
+            if given is not None:
+                raise RequestError(f"{name}: {adapter.name} {market_type.value} {route} is a live reading, which takes no interval or end")
+        return None
+
+    value = interval if interval is not None else default
+    validate_interval(adapter, market_type, route, value)
+    return value
+
+
 def symbol_info_to_lite(info: SymbolInfo) -> Dict[str, Any]:
     funding = None
     if info.funding is not None:

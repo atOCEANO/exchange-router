@@ -14,8 +14,8 @@ def extract_params(r: ProbeResult, variant_id: Optional[str]) -> Dict[str, Any]:
 
     if variant_id and ":" in variant_id:
         head = variant_id.split(":", 1)[0]
-        if head in PERIOD_ORDER and "period" not in params and "interval" not in params:
-            params["period"] = head
+        if head in PERIOD_ORDER and "interval" not in params:
+            params["interval"] = head
 
     if variant_id and not params:
         if "=" in variant_id:

@@ -2,17 +2,18 @@ import asyncio
 import logging
 import uuid
 from http import HTTPStatus
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.requests import HTTPConnection
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 from contextlib import asynccontextmanager
 from typing import Optional
 from exchange_router.capabilities import market_block, route_block
 from exchange_router.exchanges import EXCHANGE_REGISTRY, get_adapter, shutdown_exchanges, startup_exchanges
-from exchange_router.exchanges.base import UNREADABLE, RequestError, UnknownSymbolError, UpstreamUnavailableError, join_open_interest_basis, symbol_info_to_lite, validate_interval
+from exchange_router.exchanges.base import UNREADABLE, RequestError, UnknownSymbolError, UpstreamUnavailableError, join_open_interest_basis, series_interval, symbol_info_to_lite
 from exchange_router.models import MarketType
 from exchange_router.service.stream_manager import StreamManager, close_reason
 from exchange_router.version import SCHEMA_VERSION, VERSION
@@ -26,6 +27,27 @@ KNOWN_WS_CHANNELS = {"ticker", "book_ticker", "mark_price", "agg_trades", "trade
 
 WS_HANDSHAKE_TIMEOUT_S = 10.0
 
+RENAMED = {"period": "interval", "start": "end"}
+
+
+def refuse_unknown_keys(connection: HTTPConnection) -> None:
+    route = connection.scope.get("route")
+    if connection.scope["type"] != "http" or route is None:
+        return
+
+    taken   = [param.alias for param in route.dependant.query_params]
+    literal = [part for part in route.path.split("/") if part and not part.startswith("{")]
+    name    = literal[-1] if literal else route.path
+
+    for key in connection.query_params:
+        if key in taken:
+            continue
+        if RENAMED.get(key) in taken:
+            raise RequestError(f"{key}: the {name} route takes {RENAMED[key]}, not {key}")
+        if taken:
+            raise RequestError(f"{key}: the {name} route takes {', '.join(taken)}, not {key}")
+        raise RequestError(f"{key}: the {name} route takes no query keys")
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -37,7 +59,7 @@ async def lifespan(_app: FastAPI):
     await shutdown_exchanges()
 
 
-app = FastAPI(title="Exchange Router Service", version=VERSION, lifespan=lifespan)
+app = FastAPI(title="Exchange Router Service", version=VERSION, lifespan=lifespan, dependencies=[Depends(refuse_unknown_keys)])
 
 app.add_middleware(
     CORSMiddleware,
@@ -278,61 +300,47 @@ async def get_trades(exchange: str, market_type: MarketType, symbol: str, limit:
 
 
 @app.get("/{exchange}/{market_type}/agg_trades/{symbol}")
-async def get_agg_trades(exchange: str, market_type: MarketType, symbol: str, start: Optional[int] = None, limit: int = Query(500, ge=1), end: Optional[int] = None):
-    start = end if end is not None else start
-
+async def get_agg_trades(exchange: str, market_type: MarketType, symbol: str, end: Optional[int] = None, limit: int = Query(500, ge=1)):
     adapter, symbol = await validate_market(exchange, market_type, symbol)
-    return await adapter.get_agg_trades(market_type, symbol, start, limit)
+    return await adapter.get_agg_trades(market_type, symbol, end, limit)
 
 
 @app.get("/{exchange}/{market_type}/candles/{symbol}")
-async def get_candles(exchange: str, market_type: MarketType, symbol: str, interval: str = "1h", start: Optional[int] = None, limit: int = Query(100, ge=1), end: Optional[int] = None):
-    start = end if end is not None else start
-
-    adapter = validate_request(exchange, market_type)
-    validate_interval(adapter, market_type, "candles", interval)
-    symbol  = await adapter.listed_symbol(market_type, symbol)
-    return await adapter.get_candles(market_type, symbol, interval, start, limit)
+async def get_candles(exchange: str, market_type: MarketType, symbol: str, interval: Optional[str] = None, end: Optional[int] = None, limit: int = Query(100, ge=1)):
+    adapter  = validate_request(exchange, market_type)
+    interval = series_interval(adapter, market_type, "candles", interval, end, "1h")
+    symbol   = await adapter.listed_symbol(market_type, symbol)
+    return await adapter.get_candles(market_type, symbol, interval, end, limit)
 
 
 @app.get("/{exchange}/{market_type}/open_interest/{symbol}")
-async def get_open_interest(exchange: str, market_type: MarketType, symbol: str, period: str = Query("1h"), start: Optional[int] = None, limit: int = Query(30, ge=1), interval: Optional[str] = None, end: Optional[int] = None):
-    period = interval if interval is not None else period
-    start  = end if end is not None else start
+async def get_open_interest(exchange: str, market_type: MarketType, symbol: str, interval: Optional[str] = None, end: Optional[int] = None, limit: int = Query(30, ge=1)):
+    adapter  = validate_request(exchange, market_type)
+    interval = series_interval(adapter, market_type, "open_interest", interval, end, "1h")
+    symbol   = await adapter.listed_symbol(market_type, symbol)
+    oi_rows  = await adapter.get_open_interest(market_type, symbol, interval, end, limit)
 
-    adapter = validate_request(exchange, market_type)
-    validate_interval(adapter, market_type, "open_interest", period)
-    symbol  = await adapter.listed_symbol(market_type, symbol)
-    oi_rows = await adapter.get_open_interest(market_type, symbol, period, start, limit)
-
-    return await join_open_interest_basis(adapter, market_type, symbol, period, start, limit, oi_rows)
+    return await join_open_interest_basis(adapter, market_type, symbol, interval, end, limit, oi_rows)
 
 
 @app.get("/{exchange}/{market_type}/funding_rate/{symbol}")
-async def get_funding_rate(exchange: str, market_type: MarketType, symbol: str, start: Optional[int] = None, limit: int = Query(100, ge=1), end: Optional[int] = None):
-    start = end if end is not None else start
-
+async def get_funding_rate(exchange: str, market_type: MarketType, symbol: str, end: Optional[int] = None, limit: int = Query(100, ge=1)):
     adapter, symbol = await validate_market(exchange, market_type, symbol)
-    return await adapter.get_funding_rate(market_type, symbol, start, limit)
+    return await adapter.get_funding_rate(market_type, symbol, end, limit)
 
 
 @app.get("/{exchange}/{market_type}/liquidations/{symbol}")
-async def get_liquidations(exchange: str, market_type: MarketType, symbol: str, start: Optional[int] = None, limit: int = Query(100, ge=1), end: Optional[int] = None):
-    start = end if end is not None else start
-
+async def get_liquidations(exchange: str, market_type: MarketType, symbol: str, end: Optional[int] = None, limit: int = Query(100, ge=1)):
     adapter, symbol = await validate_market(exchange, market_type, symbol)
-    return await adapter.get_liquidations(market_type, symbol, start, limit)
+    return await adapter.get_liquidations(market_type, symbol, end, limit)
 
 
 @app.get("/{exchange}/{market_type}/long_short_ratio/{symbol}")
-async def get_long_short_ratio(exchange: str, market_type: MarketType, symbol: str, period: str = Query("5m"), start: Optional[int] = None, limit: int = Query(30, ge=1), interval: Optional[str] = None, end: Optional[int] = None):
-    period = interval if interval is not None else period
-    start  = end if end is not None else start
-
-    adapter = validate_request(exchange, market_type)
-    validate_interval(adapter, market_type, "long_short_ratio", period)
-    symbol  = await adapter.listed_symbol(market_type, symbol)
-    return await adapter.get_long_short_ratio(market_type, symbol, period, start, limit)
+async def get_long_short_ratio(exchange: str, market_type: MarketType, symbol: str, interval: Optional[str] = None, end: Optional[int] = None, limit: int = Query(30, ge=1)):
+    adapter  = validate_request(exchange, market_type)
+    interval = series_interval(adapter, market_type, "long_short_ratio", interval, end, "5m")
+    symbol   = await adapter.listed_symbol(market_type, symbol)
+    return await adapter.get_long_short_ratio(market_type, symbol, interval, end, limit)
 
 
 @app.get("/{exchange}/{market_type}/margin_tiers/{symbol}")

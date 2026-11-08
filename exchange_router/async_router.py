@@ -125,7 +125,7 @@ class AsyncRouter(AsyncCore):
         return await self.fetch_many("funding_rate", exchange, market_type, symbols, verbose=verbose, max_concurrent=max_concurrent, limit=limit, start=start, end=end)
 
 
-    async def open_interest_many(self, exchange: str, market_type: str, symbols: List[str], period: str = "1h", limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, max_concurrent: int = 8, interval: Optional[str] = None, end: Optional[int] = None) -> BatchResult:
+    async def open_interest_many(self, exchange: str, market_type: str, symbols: List[str], period: Optional[str] = None, limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, max_concurrent: int = 8, interval: Optional[str] = None, end: Optional[int] = None) -> BatchResult:
         return await self.fetch_many("open_interest", exchange, market_type, symbols, verbose=verbose, max_concurrent=max_concurrent, period=period, limit=limit, start=start, interval=interval, end=end)
 
 
@@ -133,7 +133,7 @@ class AsyncRouter(AsyncCore):
         return await self.fetch_many("liquidations", exchange, market_type, symbols, verbose=verbose, max_concurrent=max_concurrent, limit=limit, start=start, end=end)
 
 
-    async def long_short_ratio_many(self, exchange: str, market_type: str, symbols: List[str], period: str = "5m", limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, max_concurrent: int = 8, interval: Optional[str] = None, end: Optional[int] = None) -> BatchResult:
+    async def long_short_ratio_many(self, exchange: str, market_type: str, symbols: List[str], period: Optional[str] = None, limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, max_concurrent: int = 8, interval: Optional[str] = None, end: Optional[int] = None) -> BatchResult:
         return await self.fetch_many("long_short_ratio", exchange, market_type, symbols, verbose=verbose, max_concurrent=max_concurrent, period=period, limit=limit, start=start, interval=interval, end=end)
 
 
