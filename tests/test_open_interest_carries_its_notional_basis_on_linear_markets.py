@@ -34,28 +34,28 @@ async def test_the_linear_join_fills_every_row_except_the_first(wire):
     assert [r["timestamp"] for r in rows] == [BASE_TS + i * step for i in range(LIMIT)]
 
     first = rows[0]["open_interest"]
-    assert first["native"]    == 1000.0
-    assert first["unit"]      == "base"
-    assert first["usd"]       is None
-    assert first["usd_basis"] == {"method": "candle_close", "close": None, "close_ts": None}
+    assert first["native"]         == 1000.0
+    assert first["unit"]           == "base"
+    assert first["notional"]       is None
+    assert first["notional_basis"] == {"method": "candle_close", "price": None, "ts": None}
 
     for i in range(1, LIMIT):
         value = rows[i]["open_interest"]
         close = 100.0 + (i - 1)
-        assert value["native"]    == 1000.0 + i
-        assert value["usd"]       == pytest.approx((1000.0 + i) * close)
-        assert value["usd_basis"] == {
-            "method":   "candle_close",
-            "close":    close,
-            "close_ts": BASE_TS + i * step,
+        assert value["native"]         == 1000.0 + i
+        assert value["notional"]       == pytest.approx((1000.0 + i) * close)
+        assert value["notional_basis"] == {
+            "method": "candle_close",
+            "price":  close,
+            "ts":     BASE_TS + i * step,
         }
 
 
 async def test_the_first_row_cannot_join_because_no_candle_precedes_it(wire):
     rows = await _rows(wire, "linear", "BTCUSDT")
 
-    unfilled = [r for r in rows if r["open_interest"]["usd"] is None]
-    filled   = [r for r in rows if r["open_interest"]["usd"] is not None]
+    unfilled = [r for r in rows if r["open_interest"]["notional"] is None]
+    filled   = [r for r in rows if r["open_interest"]["notional"] is not None]
 
     assert len(unfilled) == 1
     assert len(filled)   == LIMIT - 1
@@ -68,19 +68,20 @@ async def test_an_inverse_market_needs_no_join_because_the_contract_carries_the_
     assert len(rows) == LIMIT
     for i, row in enumerate(rows):
         value = row["open_interest"]
-        assert value["native"]        == 1000.0 + i
-        assert value["unit"]          == "contract"
-        assert value["contract_size"] == CONTRACT_SIZE
-        assert value["usd"]           == pytest.approx((1000.0 + i) * CONTRACT_SIZE)
-        assert value["usd_basis"]     == {"method": "contract_size", "close": None, "close_ts": None}
+        assert value["native"]         == 1000.0 + i
+        assert value["unit"]           == "contract"
+        assert value["contract_size"]  == CONTRACT_SIZE
+        assert value["notional"]       == pytest.approx((1000.0 + i) * CONTRACT_SIZE)
+        assert value["notional_basis"] == {"method": "contract_size", "price": None, "ts": None}
 
 
 async def test_the_sdk_frame_reports_the_same_notionals_the_wire_does(router):
-    df   = await router.get_open_interest(EX, "linear", "BTCUSDT", period=PERIOD, limit=LIMIT)
-    usd  = list(df["open_interest_usd"])
+    df       = await router.get_open_interest(EX, "linear", "BTCUSDT", period=PERIOD, limit=LIMIT)
+    notional = list(df["open_interest_notional"])
 
-    assert usd[0] != usd[0]
-    assert usd[1:] == pytest.approx([(1000.0 + i) * (100.0 + i - 1) for i in range(1, LIMIT)])
+    assert notional[0] != notional[0]
+    assert notional[1:] == pytest.approx([(1000.0 + i) * (100.0 + i - 1) for i in range(1, LIMIT)])
+    assert df.attrs["notional_basis"] == "candle_close"
 
 
 async def test_a_spot_market_has_no_open_interest_at_all(wire):

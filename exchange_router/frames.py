@@ -12,22 +12,22 @@ TEXT_COLUMNS = {"side", "id", "agg_id", "first_trade_id", "last_trade_id", "exch
 INT_COLUMNS = {"cycle_ms"}
 
 COLUMNS: Dict[str, List[str]] = {
-    "candles":          ["open", "high", "low", "close", "volume", "volume_usd"],
-    "trades":           ["price", "qty", "qty_usd", "side", "id"],
-    "agg_trades":       ["price", "qty", "qty_usd", "side", "agg_id", "first_trade_id", "last_trade_id"],
+    "candles":          ["open", "high", "low", "close", "volume", "volume_notional"],
+    "trades":           ["price", "qty", "qty_notional", "side", "id"],
+    "agg_trades":       ["price", "qty", "qty_notional", "side", "agg_id", "first_trade_id", "last_trade_id"],
     "funding_rate":     ["rate", "funding_per_hour", "cycle_ms"],
-    "open_interest":    ["open_interest", "open_interest_usd"],
-    "liquidations":     ["price", "qty", "qty_usd", "side"],
+    "open_interest":    ["open_interest", "open_interest_notional"],
+    "liquidations":     ["price", "qty", "qty_notional", "side"],
     "long_short_ratio": ["ratio", "long_account", "short_account"],
     "margin_tiers":     ["up_to", "max_leverage", "maintenance_margin_rate", "initial_margin_rate", "maintenance_deduction"],
 }
 
 ATTRS: Dict[str, List[str]] = {
-    "candles":          ["quote", "interval", "volume_unit", "contract_size", "usd_basis"],
+    "candles":          ["quote", "interval", "volume_unit", "contract_size", "notional_basis"],
     "trades":           ["quote", "qty_unit", "contract_size"],
     "agg_trades":       ["quote", "qty_unit", "contract_size"],
     "funding_rate":     ["quote", "funding_kind"],
-    "open_interest":    ["quote", "interval", "oi_unit", "open_interest_unit", "contract_size", "usd_basis"],
+    "open_interest":    ["quote", "interval", "oi_unit", "open_interest_unit", "contract_size", "notional_basis"],
     "liquidations":     ["quote", "qty_unit", "contract_size"],
     "long_short_ratio": ["interval", "account_scope"],
 }
@@ -96,7 +96,7 @@ def _empty(ctx: Dict[str, Any], route: str) -> Tuple[pd.DataFrame, List[str]]:
 
 def _quote_warning(quote: Optional[str], ctx: Dict[str, Any], route: str) -> Optional[str]:
     if quote and quote not in USD_FAMILY:
-        return f"{route} {ctx['exchange']}/{ctx['market_type']}/{ctx['symbol']}: quote='{quote}'; *_usd fields are quote-denominated ({quote}), not US dollars"
+        return f"{route} {ctx['exchange']}/{ctx['market_type']}/{ctx['symbol']}: quote='{quote}'; *_notional fields are quote-denominated ({quote}), not US dollars"
 
     return None
 
@@ -117,11 +117,11 @@ def _candles(rows: List[Dict], ctx: Dict[str, Any]) -> Tuple[pd.DataFrame, List[
     df = df.rename(columns={"volume_native": "volume"})
 
     attrs = _base_attrs(ctx)
-    attrs["quote"]         = _const(df, "quote")
-    attrs["interval"]      = _const(df, "interval")
-    attrs["volume_unit"]   = _const(df, "volume_unit")
-    attrs["contract_size"] = _const(df, "volume_contract_size")
-    attrs["usd_basis"]     = _const(df, "volume_usd_basis_method")
+    attrs["quote"]          = _const(df, "quote")
+    attrs["interval"]       = _const(df, "interval")
+    attrs["volume_unit"]    = _const(df, "volume_unit")
+    attrs["contract_size"]  = _const(df, "volume_contract_size")
+    attrs["notional_basis"] = _const(df, "volume_notional_basis_method")
 
     warnings: List[str] = []
     short = _short_result_warning(df, ctx, "candles")
@@ -206,13 +206,13 @@ def _open_interest(rows: List[Dict], ctx: Dict[str, Any]) -> Tuple[pd.DataFrame,
     attrs["oi_unit"]            = _const(df, "open_interest_unit")
     attrs["open_interest_unit"] = attrs["oi_unit"]
     attrs["contract_size"]      = _const(df, "open_interest_contract_size")
-    attrs["usd_basis"]          = _const(df, "open_interest_usd_basis_method")
+    attrs["notional_basis"]     = _const(df, "open_interest_notional_basis_method")
 
     warnings: List[str] = []
-    if "open_interest_usd" in df.columns:
-        missing = int(df["open_interest_usd"].isna().sum())
+    if "open_interest_notional" in df.columns:
+        missing = int(df["open_interest_notional"].isna().sum())
         if missing:
-            warnings.append(f"open_interest {ctx['exchange']}/{ctx['market_type']}/{ctx['symbol']}: {missing} of {len(df)} rows have usd=NaN (join missed; native is populated)")
+            warnings.append(f"open_interest {ctx['exchange']}/{ctx['market_type']}/{ctx['symbol']}: {missing} of {len(df)} rows have notional=NaN (join missed; native is populated)")
     short = _short_result_warning(df, ctx, "open_interest")
     if short:
         warnings.append(short)

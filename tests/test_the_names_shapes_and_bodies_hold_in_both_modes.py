@@ -79,7 +79,7 @@ def test_an_empty_frame_is_built_like_a_full_one():
 
     assert isinstance(df.index, pd.DatetimeIndex) and str(df.index.tz) == "UTC" and df.index.name == "datetime"
     assert list(df.dtypes) == ["float64", "float64"]
-    assert {"quote", "interval", "oi_unit", "open_interest_unit", "contract_size", "usd_basis"} <= set(df.attrs)
+    assert {"quote", "interval", "oi_unit", "open_interest_unit", "contract_size", "notional_basis"} <= set(df.attrs)
 
 
 def test_an_empty_funding_frame_has_a_full_ones_dtypes():

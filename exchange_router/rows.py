@@ -18,7 +18,7 @@ class Row(dict):
 def _qty(obj: Any):
     if not isinstance(obj, dict):
         return None, None, None
-    return obj.get("native"), obj.get("usd"), obj.get("unit")
+    return obj.get("native"), obj.get("notional"), obj.get("unit")
 
 
 def _wrap(flat: Dict[str, Any], raw: Dict[str, Any]) -> Row:
@@ -28,7 +28,7 @@ def _wrap(flat: Dict[str, Any], raw: Dict[str, Any]) -> Row:
 
 
 def ticker_row(raw: Dict[str, Any]) -> Row:
-    native, usd, unit = _qty(raw.get("volume_24h"))
+    native, notional, unit = _qty(raw.get("volume_24h"))
 
     flat = {
         "symbol":               raw.get("symbol"),
@@ -39,7 +39,7 @@ def ticker_row(raw: Dict[str, Any]) -> Row:
         "high_24h":             raw.get("high_24h"),
         "low_24h":              raw.get("low_24h"),
         "volume_24h":           native,
-        "volume_24h_usd":       usd,
+        "volume_24h_notional":  notional,
         "volume_24h_unit":      unit,
         "price_change_percent": raw.get("price_change_percent"),
         "timestamp":            raw.get("timestamp"),
@@ -49,21 +49,21 @@ def ticker_row(raw: Dict[str, Any]) -> Row:
 
 
 def book_ticker_row(raw: Dict[str, Any]) -> Row:
-    bid_native, bid_usd, unit = _qty(raw.get("bid_qty"))
-    ask_native, ask_usd, _    = _qty(raw.get("ask_qty"))
+    bid_native, bid_notional, unit = _qty(raw.get("bid_qty"))
+    ask_native, ask_notional, _    = _qty(raw.get("ask_qty"))
 
     flat = {
-        "symbol":      raw.get("symbol"),
-        "market_type": raw.get("market_type"),
-        "quote":       raw.get("quote"),
-        "bid_price":   raw.get("bid_price"),
-        "bid_qty":     bid_native,
-        "bid_qty_usd": bid_usd,
-        "ask_price":   raw.get("ask_price"),
-        "ask_qty":     ask_native,
-        "ask_qty_usd": ask_usd,
-        "qty_unit":    unit,
-        "timestamp":   raw.get("timestamp"),
+        "symbol":           raw.get("symbol"),
+        "market_type":      raw.get("market_type"),
+        "quote":            raw.get("quote"),
+        "bid_price":        raw.get("bid_price"),
+        "bid_qty":          bid_native,
+        "bid_qty_notional": bid_notional,
+        "ask_price":        raw.get("ask_price"),
+        "ask_qty":          ask_native,
+        "ask_qty_notional": ask_notional,
+        "qty_unit":         unit,
+        "timestamp":        raw.get("timestamp"),
     }
 
     return _wrap(flat, raw)

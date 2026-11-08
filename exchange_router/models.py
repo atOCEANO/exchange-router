@@ -9,44 +9,44 @@ class MarketType(str, Enum):
     INVERSE = "inverse"
 
 
-class UsdBasis(BaseModel):
-    method: Literal["close", "contract_size", "candle_close"] = Field(
+class NotionalBasis(BaseModel):
+    method: str = Field(
         ...,
-        description="How the parent record's usd field was computed. 'close' uses the bucket's own close price (approximate, used on linear/spot Candle.volume and Ticker.volume_24h). 'contract_size' multiplies by the fixed contract notional (exact, used on inverse). 'candle_close' joins to a same-period Candle.close at the row's timestamp (used on linear OpenInterest where the row carries no price).",
+        description="How notional was worked out. Known values: row_price, the native amount times the row's own price, a candle's close; contract_size, contracts times their size, exact, using no price; candle_close, the native amount times the close of the candle that ends at the reading's time; mark, the native amount times the mark price read with it. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
     )
-    close: Optional[float] = Field(
-        None,
-        description="Close price used in the conversion. Populated when method == 'candle_close' AND the join succeeded. Null when method != 'candle_close', or when method == 'candle_close' but no matching candle was found (in which case the parent record's usd is also null). In quote currency.",
+    price: Optional[float] = Field(
+        ...,
+        description="The price notional was worked out at, in quote; null where no price was used, as on contract_size, or where none existed.",
     )
-    close_ts: Optional[int] = Field(
-        None,
-        description="Timestamp in unix milliseconds of the candle whose close was used. Same nullability rules as close.",
+    ts: Optional[int] = Field(
+        ...,
+        description="The time of that price, in unix milliseconds: the row's own timestamp on row_price, the candle's end on candle_close, the mark price's own time on mark; null with price.",
     )
 
 
     @model_validator(mode="after")
-    def _close_pair_consistency(self) -> "UsdBasis":
-        if (self.close is None) != (self.close_ts is None):
-            raise ValueError("usd_basis: close and close_ts must both be set or both be null")
+    def _price_pair_consistency(self) -> "NotionalBasis":
+        if (self.price is None) != (self.ts is None):
+            raise ValueError("notional_basis: price and ts must both be set or both be null")
         return self
 
 
 class QtyValue(BaseModel):
     native: float = Field(
         ...,
-        description="Quantity in the unit indicated by `unit`. Raw upstream value.",
+        description="The size in unit, as the venue states it.",
     )
-    unit: Literal["base", "contract"] = Field(
+    unit: str = Field(
         ...,
-        description="What the `native` figure is measured in. 'base' on spot and linear markets (qty is in the base asset, e.g. BTC). 'contract' on inverse markets (qty is in contracts, each worth `contract_size` units of the quote asset).",
+        description="What native counts. Known values: base, the base asset, on spot and linear; contract, on inverse. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
     )
     contract_size: Optional[float] = Field(
-        None,
-        description="Quote-asset value of one contract. Populated only when unit == 'contract'. E.g. 100 means each contract is 100 USD of notional on a USD-quoted inverse market; 1 on Kraken futures where contract_size == 1.",
-    )
-    usd: float = Field(
         ...,
-        description="Quote-currency notional. For unit == 'base': native * price (uses the parent row's price field). For unit == 'contract': native * contract_size (price-independent). 'usd' here means quote-currency; on a non-USD-quoted pair it is the quote value (BTC, EUR, etc.).",
+        description="Quote notional of one contract; null when unit is base.",
+    )
+    notional: float = Field(
+        ...,
+        description="The size's value in quote, never converted: native times the row's price on base, native times contract_size on contracts.",
     )
 
 
@@ -60,23 +60,23 @@ class QtyValue(BaseModel):
 class VolumeValue(BaseModel):
     native: float = Field(
         ...,
-        description="Volume in the unit indicated by `unit`. Raw upstream value.",
+        description="Volume in unit, as the venue states it.",
     )
-    unit: Literal["base", "contract"] = Field(
+    unit: str = Field(
         ...,
-        description="What the `native` figure is measured in. 'base' on spot and linear markets, 'contract' on inverse.",
+        description="What native counts. Known values: base, the base asset, on spot and linear; contract, on inverse. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
     )
     contract_size: Optional[float] = Field(
-        None,
-        description="Quote-asset value of one contract. Populated only when unit == 'contract'.",
-    )
-    usd: float = Field(
         ...,
-        description="Quote-currency turnover. For unit == 'base': native * close (close-as-VWAP-proxy; see usd_basis). For unit == 'contract': native * contract_size (exact).",
+        description="Quote notional of one contract; null when unit is base.",
     )
-    usd_basis: UsdBasis = Field(
+    notional: Optional[float] = Field(
         ...,
-        description="How `usd` was computed. method == 'close' for linear/spot (approximate); 'contract_size' for inverse (exact).",
+        description="Turnover in quote, never converted: native times the price notional_basis names on base, native times contract_size on contracts; null where no price existed.",
+    )
+    notional_basis: NotionalBasis = Field(
+        ...,
+        description="How notional was worked out.",
     )
 
 
@@ -90,23 +90,23 @@ class VolumeValue(BaseModel):
 class OiValue(BaseModel):
     native: float = Field(
         ...,
-        description="Open interest in the unit indicated by `unit`. Raw upstream value.",
+        description="Open interest in unit, as the venue states it.",
     )
-    unit: Literal["base", "contract"] = Field(
+    unit: str = Field(
         ...,
-        description="What the `native` figure is measured in. 'base' on linear, 'contract' on inverse.",
+        description="What native counts. Known values: base, the base asset, on linear; contract, on inverse. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
     )
     contract_size: Optional[float] = Field(
-        None,
-        description="Quote-asset value of one contract. Populated only when unit == 'contract'.",
-    )
-    usd: Optional[float] = Field(
-        None,
-        description="Quote-currency notional outstanding. Null on linear when the candle-close join fails (raw native is always populated; usd_basis.method tells you why). Exact on inverse (native * contract_size).",
-    )
-    usd_basis: UsdBasis = Field(
         ...,
-        description="How `usd` was computed. 'contract_size' on inverse (exact); 'candle_close' on linear (joined to same-period candle's close at the row's timestamp).",
+        description="Quote notional of one contract; null when unit is base.",
+    )
+    notional: Optional[float] = Field(
+        ...,
+        description="Notional outstanding in quote, never converted: native times contract_size on contracts, native times the price notional_basis names on base; null where the router holds no price for the reading's time.",
+    )
+    notional_basis: NotionalBasis = Field(
+        ...,
+        description="How notional was worked out.",
     )
 
 
@@ -322,7 +322,7 @@ class Ticker(BaseModel):
     )
     volume_24h: VolumeValue = Field(
         ...,
-        description="24h volume nested as native + unit + usd + usd_basis. See VolumeValue.",
+        description="Volume over the rolling 24h window, with its notional in quote; on base, notional_basis names the row's price and timestamp.",
     )
     price_change_percent: float = Field(
         ...,
@@ -332,6 +332,13 @@ class Ticker(BaseModel):
         ...,
         description="Server snapshot time in unix milliseconds. Some adapters fall back to router-receive time when the upstream endpoint omits a server timestamp.",
     )
+
+
+    @model_validator(mode="after")
+    def _row_price_basis(self) -> "Ticker":
+        if self.volume_24h.notional_basis.method == "row_price":
+            self.volume_24h.notional_basis = NotionalBasis(method="row_price", price=self.price, ts=self.timestamp)
+        return self
 
 
 class BookTicker(BaseModel):
@@ -353,7 +360,7 @@ class BookTicker(BaseModel):
     )
     bid_qty: QtyValue = Field(
         ...,
-        description="Quantity resting at bid_price, nested as native + unit + usd.",
+        description="Size resting at bid_price, with its notional in quote.",
     )
     ask_price: float = Field(
         ...,
@@ -361,7 +368,7 @@ class BookTicker(BaseModel):
     )
     ask_qty: QtyValue = Field(
         ...,
-        description="Quantity resting at ask_price, nested as native + unit + usd.",
+        description="Size resting at ask_price, with its notional in quote.",
     )
     timestamp: int = Field(
         ...,
@@ -433,7 +440,7 @@ class Trade(BaseModel):
     )
     qty: QtyValue = Field(
         ...,
-        description="Trade size nested as native + unit + usd.",
+        description="Trade size, with its notional in quote.",
     )
     side: Literal["buy", "sell"] = Field(
         ...,
@@ -468,7 +475,7 @@ class AggTrade(BaseModel):
     )
     qty: QtyValue = Field(
         ...,
-        description="Aggregated size nested as native + unit + usd.",
+        description="Aggregated size, with its notional in quote.",
     )
     first_trade_id: str = Field(
         ...,
@@ -527,8 +534,15 @@ class Candle(BaseModel):
     )
     volume: VolumeValue = Field(
         ...,
-        description="Bucket volume nested as native + unit + usd + usd_basis. usd_basis.method is 'close' on linear/spot and 'contract_size' on inverse.",
+        description="Bucket volume, with its notional in quote; on base, notional_basis names the bar's close and timestamp.",
     )
+
+
+    @model_validator(mode="after")
+    def _row_price_basis(self) -> "Candle":
+        if self.volume.notional_basis.method == "row_price":
+            self.volume.notional_basis = NotionalBasis(method="row_price", price=self.close, ts=self.timestamp)
+        return self
 
 
 class OrderBook(BaseModel):
@@ -660,7 +674,7 @@ class OpenInterest(BaseModel):
     )
     open_interest: OiValue = Field(
         ...,
-        description="Open interest nested as native + unit + usd + usd_basis. usd_basis.method is 'candle_close' on linear (joined server-side); 'contract_size' on inverse (exact).",
+        description="Open interest, with its notional in quote: contracts times contract_size on inverse; on linear, the close of the candle that ends at timestamp, joined by the router.",
     )
     timestamp: int = Field(
         ...,
@@ -691,7 +705,7 @@ class Liquidation(BaseModel):
     )
     qty: QtyValue = Field(
         ...,
-        description="Liquidation size nested as native + unit + usd.",
+        description="Liquidation size, with its notional in quote.",
     )
     timestamp: int = Field(
         ...,

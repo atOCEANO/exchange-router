@@ -24,12 +24,12 @@ ALL_IDS = [m[0] for m in MARKETS]
 DERIV_IDS = [m[0] for m in DERIVATIVES]
 
 
-def expected_usd(native, unit, price):
+def expected_notional(native, unit, price):
     return native * CONTRACT_SIZE if unit == "contract" else native * price
 
 
 @pytest.mark.parametrize("market_type,symbol,quote,unit,size", MARKETS, ids=ALL_IDS)
-async def test_ticker_flattens_the_nested_volume_into_native_usd_and_unit(router, market_type, symbol, quote, unit, size):
+async def test_ticker_flattens_the_nested_volume_into_native_notional_and_unit(router, market_type, symbol, quote, unit, size):
     row = await router.get_ticker(EX, market_type, symbol)
 
     assert row.symbol               == symbol
@@ -41,7 +41,7 @@ async def test_ticker_flattens_the_nested_volume_into_native_usd_and_unit(router
     assert row.low_24h              == 94.0
     assert row.volume_24h           == 1234.5
     assert row.volume_24h_unit      == unit
-    assert row.volume_24h_usd       == expected_usd(1234.5, unit, 100.0)
+    assert row.volume_24h_notional  == expected_notional(1234.5, unit, 100.0)
     assert row.price_change_percent == 5.26
     assert row.timestamp            == BASE_TS
     assert row.raw["volume_24h"]["unit"] == unit
@@ -51,14 +51,14 @@ async def test_ticker_flattens_the_nested_volume_into_native_usd_and_unit(router
 async def test_book_ticker_carries_both_sides_and_one_shared_qty_unit(router, market_type, symbol, quote, unit, size):
     row = await router.get_book_ticker(EX, market_type, symbol)
 
-    assert row.bid_price   == 99.5
-    assert row.ask_price   == 100.5
-    assert row.bid_qty     == 2.0
-    assert row.ask_qty     == 3.0
-    assert row.qty_unit    == unit
-    assert row.bid_qty_usd == expected_usd(2.0, unit, 99.5)
-    assert row.ask_qty_usd == expected_usd(3.0, unit, 100.5)
-    assert row.timestamp   == BASE_TS
+    assert row.bid_price        == 99.5
+    assert row.ask_price        == 100.5
+    assert row.bid_qty          == 2.0
+    assert row.ask_qty          == 3.0
+    assert row.qty_unit         == unit
+    assert row.bid_qty_notional == expected_notional(2.0, unit, 99.5)
+    assert row.ask_qty_notional == expected_notional(3.0, unit, 100.5)
+    assert row.timestamp        == BASE_TS
 
 
 @pytest.mark.parametrize("market_type,symbol,quote,unit,size", DERIVATIVES, ids=DERIV_IDS)
@@ -175,11 +175,11 @@ async def test_margin_tiers_are_refused_on_spot_and_on_an_unlisted_symbol(router
 async def test_candles_are_spaced_by_their_own_interval(router, market_type, symbol, quote, unit, size, interval):
     df = await router.get_candles(EX, market_type, symbol, interval=interval, limit=5)
 
-    assert list(df.columns) == ["open", "high", "low", "close", "volume", "volume_usd"]
+    assert list(df.columns) == ["open", "high", "low", "close", "volume", "volume_notional"]
     assert len(df) == 5
     assert list(df["close"]) == [100.0, 101.0, 102.0, 103.0, 104.0]
     assert list(df["volume"]) == [10.0, 11.0, 12.0, 13.0, 14.0]
-    assert df["volume_usd"].iloc[0] == expected_usd(10.0, unit, 100.0)
+    assert df["volume_notional"].iloc[0] == expected_notional(10.0, unit, 100.0)
 
     step = INTERVAL_MS[interval]
     assert (df.index[1] - df.index[0]) == pd.Timedelta(milliseconds=step)
@@ -189,15 +189,15 @@ async def test_candles_are_spaced_by_their_own_interval(router, market_type, sym
 
 
 @pytest.mark.parametrize("market_type,symbol,quote,unit,size", MARKETS, ids=ALL_IDS)
-async def test_trades_carry_a_side_and_a_usd_notional_per_row(router, market_type, symbol, quote, unit, size):
+async def test_trades_carry_a_side_and_a_notional_per_row(router, market_type, symbol, quote, unit, size):
     df = await router.get_trades(EX, market_type, symbol, limit=4)
 
-    assert list(df.columns) == ["price", "qty", "qty_usd", "side", "id"]
+    assert list(df.columns) == ["price", "qty", "qty_notional", "side", "id"]
     assert len(df) == 4
     assert list(df["side"]) == ["buy", "sell", "buy", "sell"]
     assert df["price"].iloc[0] == 100.0
     assert df["qty"].iloc[0]   == 0.5
-    assert df["qty_usd"].iloc[0] == expected_usd(0.5, unit, 100.0)
+    assert df["qty_notional"].iloc[0] == expected_notional(0.5, unit, 100.0)
     assert df.attrs["qty_unit"] == unit
 
 
@@ -205,7 +205,7 @@ async def test_trades_carry_a_side_and_a_usd_notional_per_row(router, market_typ
 async def test_agg_trades_keep_the_first_and_last_trade_ids(router, market_type, symbol, quote, unit, size):
     df = await router.get_agg_trades(EX, market_type, symbol, limit=3)
 
-    assert list(df.columns) == ["price", "qty", "qty_usd", "side", "agg_id", "first_trade_id", "last_trade_id"]
+    assert list(df.columns) == ["price", "qty", "qty_notional", "side", "agg_id", "first_trade_id", "last_trade_id"]
     assert len(df) == 3
     assert list(df["agg_id"]) == ["5000", "5001", "5002"]
     assert list(df["first_trade_id"]) == ["9000", "9002", "9004"]
@@ -230,7 +230,7 @@ async def test_funding_rate_reports_both_conventions_and_a_per_hour_column(route
 async def test_open_interest_is_spaced_by_its_period(router, market_type, symbol, quote, unit, size, period):
     df = await router.get_open_interest(EX, market_type, symbol, period=period, limit=5)
 
-    assert list(df.columns) == ["open_interest", "open_interest_usd"]
+    assert list(df.columns) == ["open_interest", "open_interest_notional"]
     assert len(df) == 5
     assert list(df["open_interest"]) == [1000.0, 1001.0, 1002.0, 1003.0, 1004.0]
     assert (df.index[1] - df.index[0]) == pd.Timedelta(milliseconds=INTERVAL_MS[period])
@@ -239,7 +239,7 @@ async def test_open_interest_is_spaced_by_its_period(router, market_type, symbol
 async def test_liquidations_are_linear_only_and_carry_a_side(router):
     df = await router.get_liquidations(EX, "linear", "BTCUSDT", limit=4)
 
-    assert list(df.columns) == ["price", "qty", "qty_usd", "side"]
+    assert list(df.columns) == ["price", "qty", "qty_notional", "side"]
     assert len(df) == 4
     assert list(df["side"]) == ["sell", "buy", "sell", "buy"]
     assert df["price"].iloc[0] == 100.0

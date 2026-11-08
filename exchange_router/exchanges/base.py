@@ -13,7 +13,7 @@ from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
     MarketType, SymbolInfo, FundingRate, OpenInterest, Liquidation, LongShortRatio,
     MarginTier, MarginTiers,
-    QtyValue, VolumeValue, OiValue, UsdBasis,
+    QtyValue, VolumeValue, OiValue, NotionalBasis,
     FundingCurrent, FundingHistorical, FundingConvention,
     QtyGrid, PriceTick, PriceSignificantFigures, Notional,
 )
@@ -61,15 +61,15 @@ def build_qty_value(native: float, qty_unit: str, contract_size: Optional[float]
     if qty_unit == "contract":
         if contract_size is None:
             raise ValueError("build_qty_value: contract_size is required when qty_unit == 'contract'")
-        usd = native * contract_size
+        notional = native * contract_size
     else:
-        usd = native * price
+        notional = native * price
 
     return QtyValue(
         native        = native,
         unit          = qty_unit,
         contract_size = contract_size if qty_unit == "contract" else None,
-        usd           = usd,
+        notional      = notional,
     )
 
 
@@ -77,18 +77,18 @@ def build_volume_value(native: float, volume_unit: str, contract_size: Optional[
     if volume_unit == "contract":
         if contract_size is None:
             raise ValueError("build_volume_value: contract_size is required when volume_unit == 'contract'")
-        usd   = native * contract_size
-        basis = UsdBasis(method="contract_size")
+        notional = native * contract_size
+        basis    = NotionalBasis(method="contract_size", price=None, ts=None)
     else:
-        usd   = native * close
-        basis = UsdBasis(method="close")
+        notional = native * close
+        basis    = NotionalBasis(method="row_price", price=None, ts=None)
 
     return VolumeValue(
-        native        = native,
-        unit          = volume_unit,
-        contract_size = contract_size if volume_unit == "contract" else None,
-        usd           = usd,
-        usd_basis     = basis,
+        native         = native,
+        unit           = volume_unit,
+        contract_size  = contract_size if volume_unit == "contract" else None,
+        notional       = notional,
+        notional_basis = basis,
     )
 
 
@@ -96,29 +96,29 @@ def build_oi_value(native: float, oi_unit: str, contract_size: Optional[float], 
     if oi_unit == "contract":
         if contract_size is None:
             raise ValueError("build_oi_value: contract_size is required when oi_unit == 'contract'")
-        usd   = native * contract_size
-        basis = UsdBasis(method="contract_size")
+        notional = native * contract_size
+        basis    = NotionalBasis(method="contract_size", price=None, ts=None)
         return OiValue(
-            native        = native,
-            unit          = oi_unit,
-            contract_size = contract_size,
-            usd           = usd,
-            usd_basis     = basis,
+            native         = native,
+            unit           = oi_unit,
+            contract_size  = contract_size,
+            notional       = notional,
+            notional_basis = basis,
         )
 
     if candle_close is not None and candle_close_ts is not None:
-        usd   = native * candle_close
-        basis = UsdBasis(method="candle_close", close=candle_close, close_ts=candle_close_ts)
+        notional = native * candle_close
+        basis    = NotionalBasis(method="candle_close", price=candle_close, ts=candle_close_ts)
     else:
-        usd   = None
-        basis = UsdBasis(method="candle_close", close=None, close_ts=None)
+        notional = None
+        basis    = NotionalBasis(method="candle_close", price=None, ts=None)
 
     return OiValue(
-        native        = native,
-        unit          = oi_unit,
-        contract_size = None,
-        usd           = usd,
-        usd_basis     = basis,
+        native         = native,
+        unit           = oi_unit,
+        contract_size  = None,
+        notional       = notional,
+        notional_basis = basis,
     )
 
 

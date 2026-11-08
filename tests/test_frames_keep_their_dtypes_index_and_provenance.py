@@ -51,7 +51,7 @@ async def test_only_open_interest_warns_and_it_warns_about_the_row_that_cannot_j
 
     assert len(df.attrs["warnings"]) == 1
     message = df.attrs["warnings"][0]
-    assert "1 of 4 rows have usd=NaN" in message
+    assert "1 of 4 rows have notional=NaN" in message
     assert "join missed" in message
     assert "native is populated" in message
 
@@ -65,11 +65,11 @@ async def test_no_series_frame_leaks_a_timestamp_column_beside_its_index(router,
 async def test_numeric_columns_are_floats_and_identifier_columns_stay_text(router):
     trades = await router.get_trades(EX, "linear", "BTCUSDT", limit=4)
 
-    assert trades["price"].dtype   == "float64"
-    assert trades["qty"].dtype     == "float64"
-    assert trades["qty_usd"].dtype == "float64"
-    assert trades["side"].dtype    == object
-    assert trades["id"].dtype      == object
+    assert trades["price"].dtype        == "float64"
+    assert trades["qty"].dtype          == "float64"
+    assert trades["qty_notional"].dtype == "float64"
+    assert trades["side"].dtype         == object
+    assert trades["id"].dtype           == object
     assert list(trades["id"]) == ["9000", "9001", "9002", "9003"]
 
 
@@ -80,7 +80,7 @@ async def test_with_provenance_moves_the_attrs_into_columns_without_losing_them(
     assert list(wide["exchange"]) == [EX] * 4
     assert list(wide["symbol"])   == ["BTCUSDT"] * 4
     assert wide.attrs["exchange"] == EX
-    assert list(df.columns) == ["open", "high", "low", "close", "volume", "volume_usd"]
+    assert list(df.columns) == ["open", "high", "low", "close", "volume", "volume_notional"]
 
 
 async def test_with_provenance_carries_the_unit_a_tier_table_is_counted_in(router):

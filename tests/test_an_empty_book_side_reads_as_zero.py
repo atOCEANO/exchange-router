@@ -118,7 +118,7 @@ def feed(*messages):
 
 
 def sides(row):
-    return [row.bid_price, row.bid_qty.native, row.bid_qty.usd, row.ask_price, row.ask_qty.native, row.ask_qty.usd]
+    return [row.bid_price, row.bid_qty.native, row.bid_qty.notional, row.ask_price, row.ask_qty.native, row.ask_qty.notional]
 
 
 async def test_bybit_reads_empty_strings_as_an_empty_book():
