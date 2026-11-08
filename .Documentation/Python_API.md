@@ -33,7 +33,7 @@ The only decision is which constructor to call. `Router.local` is the library: t
 
 The return surface follows one rule:
 
-> Anything tabular is a pandas **DataFrame** with flat, stable columns. A single quote is a flat **Row** you read with `t.price`. Batches are a **BatchResult**. Every quantity is named the same way everywhere: `x` (native), `x_usd` (quote notional), `x_unit` (what `x` counts).
+> Anything tabular is a pandas **DataFrame** with flat, stable columns. A single quote is a flat **Row** you read with `t.price`. Batches are a **BatchResult**. Every quantity is named the same way everywhere: `x` (native), `x_notional` (its value in the quote), `x_unit` (what `x` counts).
 
 | Kind | Returns |
 | :--- | :--- |
@@ -102,7 +102,7 @@ Whatever scope you name is warmed in the background and nothing else is, so a sl
 r.mode              # "local" | "service"
 r.scope             # the exchange names you declared
 r.degraded          # True once fallback="local" has taken over
-r.schema_version    # 3, the wire contract this SDK speaks
+r.schema_version    # 4, the wire contract this SDK speaks
 r.warm()            # block until the declared scope is ready
 r.warm("kraken")    # warm one, declared or not
 ```
@@ -139,7 +139,7 @@ The router holds persistent connections and, in local mode, live adapters. Relea
 
 Keep one local router alive at a time. Every local router in the process shares the same adapters, and each runs them on a loop of its own, so re-running a notebook cell that builds one, before closing the router it built the last time, leaves two routers over one set of adapters, and calls on the second can fail with a lock or an event bound to a different event loop. Close the first, or build it in a `with` block.
 
-The `end` parameter, where applicable, follows the [router's pagination contract](HTTP_Reference.md#pagination-semantics): pass the oldest timestamp you already have, minus one, to walk further back. Before 3.3.0 it was called `start`, and the bucket of `open_interest` and `long_short_ratio` was called `period`; both older names still work.
+The `end` parameter, where applicable, follows the [router's pagination contract](HTTP_Reference.md#pagination-semantics): pass the oldest timestamp you already have, minus one, to walk further back.
 
 ```python
 oldest = int(df.index[0].timestamp() * 1000)
@@ -194,87 +194,105 @@ Columns and `df.attrs` per route:
 
 | Route | Columns | `df.attrs` constants |
 | :--- | :--- | :--- |
-| candles | `open, high, low, close, volume, volume_usd` | `quote, interval, volume_unit, contract_size, usd_basis` |
-| trades | `price, qty, qty_usd, side, id` | `quote, qty_unit, contract_size` |
-| agg_trades | `price, qty, qty_usd, side, agg_id, first_trade_id, last_trade_id` | `quote, qty_unit, contract_size` |
-| funding_rate | `rate, funding_per_hour, cycle_ms` | `quote, funding_kind` |
-| open_interest | `open_interest, open_interest_usd` | `quote, interval, open_interest_unit, oi_unit, contract_size, usd_basis` |
-| liquidations | `price, qty, qty_usd, side` | `quote, qty_unit, contract_size` |
+| candles | `closed, open, high, low, close, volume, volume_notional` | `quote, interval, volume_unit, contract_size, notional_basis` |
+| trades | `price, qty, qty_notional, side, id` | `quote, qty_unit, contract_size` |
+| agg_trades | `price, qty, qty_notional, side, agg_id, first_trade_id, last_trade_id` | `quote, qty_unit, contract_size` |
+| funding_rate | `funding_per_cycle, funding_cycle_ms, funding_per_hour` | `quote, funding_kind` |
+| open_interest | `open_interest, open_interest_notional` | `quote, interval, open_interest_unit, contract_size, notional_basis, time_source` |
+| liquidations | `price, qty, qty_notional, side` | `quote, qty_unit, contract_size` |
 | long_short_ratio | `ratio, long_account, short_account` | `interval, account_scope` |
 
-`open_interest_unit` and `oi_unit` hold the same value; `open_interest_unit` follows the `x_unit` naming every other column uses, and `oi_unit` is the older name.
+`notional_basis` is the method the rows' notionals were worked out by: `row_price`, `contract_size`, `candle_close` or `mark` (see [Interpretation Fields](HTTP_Reference.md#interpretation-fields)). On open interest, `interval` is `None` and `time_source` is `"router"` for a live reading, the one row an exchange with no history sends. `closed` is `False` only on the newest candle, while its bar is still forming.
 
 Every frame's `attrs` also carries `exchange, market_type, symbol, schema_version, warnings`. `schema_version` is the wire schema the client was built against, pinned as a constant in the client, not the number the running service reported; when the two disagree, this field speaks for the client side.
 
-`funding_per_hour` is `per_cycle` normalized to a one-hour rate, so funding compares directly across venues with different cycle lengths. `cycle_ms` is always a column (it can vary mid-window); a change within the window raises a warning. On `long_short_ratio`, `long_account` and `short_account` are always columns and come back `NaN` on venues that expose only the ratio (`account_scope == "opaque"`).
+`funding_per_hour` is `funding_per_cycle` normalized to a one-hour rate, so funding compares directly across venues with different cycle lengths. `funding_cycle_ms` is always a column (it can vary mid-window); a change within the window raises a warning. On `long_short_ratio`, `long_account` and `short_account` are always columns and come back `NaN` on venues that expose only the ratio (`account_scope == "opaque"`).
 
 ```python
 df = client.get_candles("binance", "spot", "BTCUSDT", interval="1h", limit=3)
 ```
 
 ```text
-                       open      high      low     close    volume    volume_usd
+                           closed     open     high      low    close   volume  volume_notional
 datetime
-2026-06-13 07:00:00  64010.1  64120.0  63980.2  64088.7    812.34   5.20e7
-2026-06-13 08:00:00  64088.7  64200.5  64050.0  64175.3    934.12   5.99e7
-2026-06-13 09:00:00  64175.3  64310.0  64120.0  64290.1   1002.55   6.44e7
+2026-11-08 19:00:00+00:00    True  74097.4  74735.3  73988.5  74438.9   812.34           6.05e7
+2026-11-08 20:00:00+00:00    True  74438.9  75724.4  74407.2  75569.9   934.12           7.06e7
+2026-11-08 21:00:00+00:00   False  75569.9  75610.0  75520.1  75561.3    41.07           3.10e6
 
 df.attrs
 {'exchange': 'binance', 'market_type': 'spot', 'symbol': 'BTCUSDT',
- 'schema_version': 3, 'warnings': [], 'quote': 'USDT', 'interval': '1h',
- 'volume_unit': 'base', 'contract_size': None, 'usd_basis': 'close'}
+ 'schema_version': 4, 'warnings': [], 'quote': 'USDT', 'interval': '1h',
+ 'volume_unit': 'base', 'contract_size': None, 'notional_basis': 'row_price'}
 ```
 
-`df.attrs` holds constants for the query, read them right after the call. pandas drops `attrs` across `merge` / `groupby` / `concat`, but you rarely need them back: the comparable `*_usd` column is first-class, so cross-venue work uses it and never touches `unit`. When you do want provenance to survive a `concat`, see [with_provenance](#provenance-across-a-concat).
+`df.attrs` holds constants for the query, read them right after the call. pandas drops `attrs` across `merge` / `groupby` / `concat`, but you rarely need them back: the comparable `*_notional` column is first-class, so cross-venue work uses it and never touches `unit`. When you do want provenance to survive a `concat`, see [with_provenance](#provenance-across-a-concat).
 
 <br>
 <br>
 
 ## Snapshots: the Row
 
-`get_ticker`, `get_book_ticker`, `get_mark_price`, and `get_symbol_info` return a `Row`: a flat `dict` subclass with attribute access. It is a real dict, so it pickles, JSON-dumps, and drops into `pd.DataFrame([...])`. The nested value objects from the wire are flattened to `x` / `x_usd` / `x_unit`. The original nested wire dict is on `.raw`.
+`get_ticker`, `get_book_ticker`, `get_mark_price`, and `get_symbol_info` return a `Row`: a flat `dict` subclass with attribute access. It is a real dict, so it pickles, JSON-dumps, and drops into `pd.DataFrame([...])`. The nested value objects from the wire are flattened to `x` / `x_notional` / `x_unit`, and each block of symbol info to keys prefixed with its name. The original nested wire dict is on `.raw`.
 
 ```python
 t = client.get_ticker("binance", "linear", "BTCUSDT")
 
-t.price             # 72154.30
-t.volume_24h        # 12345.67        (native)
-t.volume_24h_usd    # 890123456.78
-t.volume_24h_unit   # "base"
-t["price"]          # key access works too; it is a dict
-t.timestamp         # 1781823215000   (unix milliseconds)
-t.raw               # the original nested wire dict, untouched
+t.price                 # 75561.3
+t.price_source          # "last_trade"
+t.volume_24h            # 85159.802       (native)
+t.volume_24h_notional   # 6434785346.86
+t.volume_24h_unit       # "base"
+t["price"]              # key access works too; it is a dict
+t.timestamp             # 1794180340543   (unix milliseconds)
+t.time_source           # "venue"
+t.raw                   # the original nested wire dict, untouched
 
 rows = [client.get_ticker("binance", "linear", s) for s in symbols]
-pd.DataFrame(rows)  # one row per symbol, for free
+pd.DataFrame(rows)      # one row per symbol, for free
 ```
 
 Mark price flattens funding and adds a per-hour figure:
 
 ```python
 mp = client.get_mark_price("kraken", "linear", "XBTUSD")
-mp.mark_price            # 72153.85
-mp.index_price           # 72150.10   (or None)
-mp.funding_kind          # "continuous"
-mp.funding_per_cycle     # 0.0000118
-mp.funding_per_hour      # 0.0000118  (derived, comparable across venues)
+
+mp.mark_price                  # 75515.83
+mp.index_price                 # 75509.48   (or None)
+mp.funding_kind                # "continuous"
+mp.funding_per_cycle           # -0.0000066
+mp.funding_per_hour            # -0.0000066  (derived, comparable across venues)
+mp.funding_valid_until_kind    # "estimate"
+```
+
+Symbol info carries the grid an order has to sit on:
+
+```python
+info = client.get_symbol_info("binance", "linear", "BTCUSDT")
+
+info.status        # "trading"
+info.price_tick    # 0.1
+info.qty_step      # 0.001
+info.qty_min       # 0.001
+info.notional_min  # 50.0
 ```
 
 Row keys per snapshot (missing values are `None`, never absent):
 
 | Snapshot | Keys |
 | :--- | :--- |
-| ticker | `symbol, market_type, quote, price, open_24h, high_24h, low_24h, volume_24h, volume_24h_usd, volume_24h_unit, price_change_percent, timestamp` |
-| book_ticker | `symbol, market_type, quote, bid_price, bid_qty, bid_qty_usd, ask_price, ask_qty, ask_qty_usd, qty_unit, timestamp` |
-| mark_price | `symbol, market_type, quote, mark_price, index_price, funding_kind, funding_per_cycle, funding_cycle_ms, funding_per_hour, funding_valid_until_ts, timestamp` |
-| symbol_info | `symbol, native_symbol, base_asset, quote_asset, price_precision, quantity_precision, min_qty, max_qty, min_notional, qty_unit, contract_size, tick_size, qty_step, funding_kind` |
+| ticker | `symbol, market_type, quote, price, price_source, open_24h, high_24h, low_24h, volume_24h, volume_24h_notional, volume_24h_unit, price_change_percent, timestamp, time_source` |
+| book_ticker | `symbol, market_type, quote, bid_price, bid_qty, bid_qty_notional, ask_price, ask_qty, ask_qty_notional, qty_unit, timestamp, time_source` |
+| mark_price | `symbol, market_type, quote, mark_price, index_price, funding_kind, funding_per_cycle, funding_cycle_ms, funding_per_hour, funding_valid_until_ts, funding_valid_until_kind, timestamp, time_source` |
+| symbol_info | `symbol, market_type, native_symbol, status, base, quote, price_kind, price_tick, price_figures, price_decimals, qty_unit, qty_contract_size, qty_step, qty_decimals, qty_min, qty_max, notional_min, funding_kind, timestamp, time_source` |
+
+`price_tick` is `None` where the exchange keeps significant figures instead of a tick, as Hyperliquid does; `price_figures` says how many.
 
 <br>
 <br>
 
 ## Order book
 
-`get_orderbook` returns one tidy `DataFrame` with columns `side, price, qty` (`side` is `"bid"` or `"ask"`), bids best-first then asks best-first. `quote`, `qty_unit`, and `timestamp` are in `df.attrs`.
+`get_orderbook` returns one tidy `DataFrame` with columns `side, price, qty` (`side` is `"bid"` or `"ask"`), bids best-first then asks best-first. `quote`, `qty_unit`, `qty_contract_size`, `timestamp` and `time_source` are in `df.attrs`.
 
 ```python
 ob = client.get_orderbook("binance", "linear", "BTCUSDT", depth=20)
@@ -317,7 +335,7 @@ frames = [
     with_provenance(client.get_candles("bybit",   "inverse", "BTCUSD",  interval="1h", limit=500)),
 ]
 both = pd.concat(frames)
-both.groupby("exchange")["volume_usd"].sum()   # exchange, market_type, symbol, quote, unit ride per-row
+both.groupby("exchange")["volume_notional"].sum()   # exchange, market_type, symbol, quote, unit ride per-row
 ```
 
 `market_type` rides along so the spot and perpetual frames of one symbol stay apart after the concat.
@@ -344,10 +362,10 @@ Warnings fire only when a result deviates from the clean case you would expect, 
 ```python
 df = client.get_open_interest("binance", "linear", "BTCUSDT", interval="5m", limit=30)
 df.attrs["warnings"]
-# ['open_interest binance/linear/BTCUSDT: 2 of 30 rows have usd=NaN (join missed; native is populated)']
+# ['open_interest binance/linear/BTCUSDT: 2 of 30 rows have notional=NaN (join missed; native is populated)']
 ```
 
-What warns: open-interest rows with `NaN` `usd`, fewer rows than requested on a paginated route (the exchange holds nothing older), a mark price with no index or no funding, an opaque long/short scope (the account columns are `NaN`), trades with null ids, a funding cycle that changed mid-window, a quote currency outside the dollar family on a frame, a ticker or a book ticker, a margin tiers table with no tiers, an empty response, and `funding_paid` handed a frame that lost its `funding_kind`.
+What warns: open-interest rows with a `NaN` notional, fewer rows than requested on a paginated route (the exchange holds nothing older), a mark price with no index or no funding, an opaque long/short scope (the account columns are `NaN`), trades with null ids, a funding cycle that changed mid-window, a quote currency outside the dollar family on a frame, a ticker or a book ticker, a margin tiers table with no tiers, an empty response, a kind this version does not know on any row or frame (the value is kept as sent), a stream that lost its exchange and got it back (the warning names the gap, since messages in it may be missing), and `funding_paid` handed a frame that lost its `funding_kind`.
 
 <br>
 <br>
@@ -357,7 +375,7 @@ What warns: open-interest rows with `NaN` `usd`, fewer rows than requested on a 
 The `*_many` methods fetch many symbols concurrently (the sync client still runs them in parallel under the hood) and return a `BatchResult`, a read-only mapping for the common case where everything worked, with diagnostics there when you need them. Each value is a DataFrame.
 
 ```python
-symbols = [m["symbol"] for m in client.get_markets("binance", "linear")["markets"]]
+symbols = [m["symbol"] for m in client.get_markets("binance", "linear")]
 
 result = client.open_interest_many("binance", "linear", symbols, interval="1h", limit=100)
 
@@ -376,8 +394,8 @@ print(result.report())    # the summary, then every symbol that was not clean
 ```text
 100 requested: 97 ok, 2 degraded, 1 failed
   degraded
-    APTUSDT   open_interest binance/linear/APTUSDT: 3 of 100 rows have usd=NaN (join missed; native is populated)
-    SEIUSDT   open_interest binance/linear/SEIUSDT: 11 of 100 rows have usd=NaN (join missed; native is populated)
+    APTUSDT   open_interest binance/linear/APTUSDT: 3 of 100 rows have notional=NaN (join missed; native is populated)
+    SEIUSDT   open_interest binance/linear/SEIUSDT: 11 of 100 rows have notional=NaN (join missed; native is populated)
   failed
     FOOUSDT   BadRequest: ...
 ```
@@ -425,12 +443,12 @@ These are plain functions, not coroutines, so they are never awaited. `funding_p
 
 ## Errors
 
-The router raises a small typed tree, so failures are programmable without parsing message strings. Every error carries `.status` (the HTTP status, where applicable) and `.detail`. **The same failure raises the same type in both modes**: local mode maps adapter faults straight into this tree instead of round-tripping them through a status code. The suite asserts that for every read path. It cannot assert it for the stream paths, because the in-process transport the suite runs against carries HTTP and not websockets, so those are argued from the code, and the argument has one known gap, described under [Real-time streams](#real-time-streams).
+The router raises a small typed tree, so failures are programmable without parsing message strings. Every error carries `.status` (the HTTP status, where applicable), `.error` (the title of the error body, one of the seven in the [HTTP Reference](HTTP_Reference.md#http-status-codes)) and `.detail`. **The same failure raises the same type in both modes**: local mode maps adapter faults straight into this tree instead of round-tripping them through a status code. The suite asserts that for every read path. It cannot run the stream paths end to end, because the in-process transport the suite runs against carries HTTP and not websockets; there the service's refusals and the SDK's reading of them are tested apart.
 
 | Exception | When | Modes |
 | :--- | :--- | :--- |
-| `BadRequest` | `400`, including an interval the route does not declare and a symbol the exchange does not list | both |
-| `NotFound` | `404`, an unknown exchange | both |
+| `BadRequest` | `400`, including an interval the route does not declare and a symbol the exchange does not list, whose `.error` is `"Unknown Symbol"` | both |
+| `NotFound` | `404`, an unknown exchange or a path no route serves | both |
 | `RateLimited` | `429`, which the router never sends; it can only come from a proxy between you and the service | `service` only |
 | `UpstreamUnavailable` | `503`, carries `.retry_after` | both |
 | `NotSupported` | the route is not exposed on this exchange and market, caught before the request, a server `501`, or a service older than the route (`margin_tiers` before 3.2.0) | both |
@@ -441,8 +459,8 @@ The router raises a small typed tree, so failures are programmable without parsi
 `SchemaMismatch` is raised on the first call, not at construction, because the check needs a round trip and a constructor cannot await one. It is fatal and deliberately has no compatibility range: `schema_version` only moves on a breaking wire change, so a mismatch means one side genuinely cannot read the other.
 
 ```text
-SchemaMismatch: this SDK speaks schema 3, http://localhost:8040 speaks schema 4
-(sdk 3.0.0, service 3.2.0); upgrade the SDK or pin the service to a schema 3 release
+SchemaMismatch: this SDK speaks schema 4, http://localhost:8040 speaks schema 3
+(sdk 4.0.0, service 3.3.0); upgrade the service or pin the SDK to a schema 3 release
 ```
 
 ```python
@@ -467,7 +485,7 @@ Symbol validity is left to the server, which normalizes case and separators. A s
 
 ## Asynchronous router
 
-For real concurrency, use `AsyncRouter`. It exposes the same methods and the same handle, with `await`. The async handle carries the route methods and `await m.info()`, but not the cached `m.quote` and `m.funding_kind` properties: those are defined on the sync handle only, so on an async handle they raise `AttributeError`. Read `quote_asset` and `funding_kind` off the awaited `info()` Row instead.
+For real concurrency, use `AsyncRouter`. It exposes the same methods and the same handle, with `await`. The async handle carries the route methods and `await m.info()`, but not the cached `m.quote` and `m.funding_kind` properties: those are defined on the sync handle only, so on an async handle they raise `AttributeError`. Read `quote` and `funding_kind` off the awaited `info()` Row instead.
 
 ```python
 import asyncio
@@ -492,7 +510,9 @@ The batch methods on the sync router already run their fetches concurrently, so 
 
 ## Real-time streams
 
-`stream` checks the schema as every read does, then yields messages as dicts and reconnects automatically, in both modes, when the upstream drops or gives no answer to the subscription (over a service, the router closes the socket with code `1011`) or the transport fails. It does not retry a deliberate rejection, so a misconfigured call fails fast instead of reconnecting forever: an unsupported channel, or a subscription the exchange refuses, raises `NotSupported` with the exchange's reason; a symbol the exchange does not list raises `BadRequest`; and an unknown exchange raises `NotFound`, in both modes. A market type the adapter does not carry is the one place the modes still differ, `BadRequest` locally and `NotFound` over a service, because the service refuses it before the upgrade and a refused upgrade does not say which of the two causes it was. `except RouterError` catches both.
+`stream` checks the schema as every read does, then yields data messages as dicts and reconnects automatically, in both modes, when the exchange gives no answer to the subscription or ends the stream, which a service answers with a `503` body before it closes, or when the transport fails. It does not retry a deliberate rejection, so a misconfigured call fails fast instead of reconnecting forever. The modes raise the same error for the same refusal: a channel the exchange does not stream raises `NotSupported`; a subscription the exchange refuses raises `BadRequest` with the exchange's reason; a symbol the exchange does not list raises `BadRequest` whose `.error` is `"Unknown Symbol"`; a market type the exchange does not offer raises `BadRequest`; and an unknown exchange raises `NotFound`.
+
+The `subscribed` and `lost` frames the router sends are not yielded. When the exchange connection drops and comes back, or the SDK reconnects on its own, the next message is preceded by one `RouterDataWarning` naming the gap, since messages inside it may be missing.
 
 ```python
 for msg in client.stream("binance", "spot", "ticker", "BTCUSDT"):
@@ -506,7 +526,7 @@ Stream messages are the raw wire dicts (the same shapes as the REST response bod
 
 ## Symbols
 
-The router exposes routing-facing symbols: the exchange-native symbol with any contract-type prefix or suffix stripped, so Kraken `PF_XBTUSD` is addressed as `XBTUSD` and Binance COIN-M `BTCUSD_PERP` as `BTCUSD`. One symbol can name an instrument on several market types, as `BTCUSDT` does on Binance spot and linear, and `market_type` tells them apart. Base-currency codes are never translated: Kraken stays `XBT`, not `BTC`. The SDK passes symbols through unchanged. The canonical list for any venue and market type is `client.get_markets(...)`, and each row carries `base_asset` and `quote_asset`; build a per-venue map when you compare venues whose base codes differ.
+The router exposes routing-facing symbols: the exchange-native symbol with any contract-type prefix or suffix stripped, so Kraken `PF_XBTUSD` is addressed as `XBTUSD` and Binance COIN-M `BTCUSD_PERP` as `BTCUSD`. One symbol can name an instrument on several market types, as `BTCUSDT` does on Binance spot and linear, and `market_type` tells them apart. Base-currency codes are never translated: Kraken stays `XBT`, not `BTC`. The SDK passes symbols through unchanged. The canonical list for any venue and market type is `client.get_markets(...)`, and each entry carries `base` and `quote`; build a per-venue map when you compare venues whose base codes differ.
 
 <br>
 <br>
@@ -517,7 +537,7 @@ Signatures are for the sync `Router`. `AsyncRouter` is identical with `await`, a
 
 **Lifecycle.** `warm(exchange=None)`, `close()`, the read-only `mode`, `scope`, `degraded` and `schema_version` attributes, and `verbose`, which you can set at any time to change the router's default for every later call. The installed release is `exchange_router.__version__`, which is a different number from `schema_version`: the release moves with every fix, the schema only with a breaking wire change.
 
-**Discovery.** `get_status()`, `get_version()`, `get_exchanges()`, `get_exchange_overview(exchange)`, `get_exchange_status(exchange)`, `get_market_types(exchange)`, `get_capabilities(exchange)`, `get_markets(exchange, market_type)`. `get_version()` returns a version string; the others return `dict` or `list`. `get_exchange_overview` carries per-market-type symbol counts alongside the capability block. `get_capabilities` raises if the block cannot be fetched, rather than reporting an exchange with no capabilities.
+**Discovery.** `get_status()`, `get_version()`, `get_exchanges()`, `get_exchange_overview(exchange)`, `get_market_types(exchange)`, `get_capabilities(exchange)`, `get_markets(exchange, market_type, status="trading")`. `get_version()` returns a version string; the others return `dict` or `list`. `get_markets` returns the list of market entries in one state: `"trading"`, `"halted"`, `"pre_trading"`, `"delisted"` or `"all"`. `get_exchange_overview` carries per-market-type symbol counts alongside the capability block, `None` where the market list could not be read. `get_capabilities` raises if the block cannot be fetched, rather than reporting an exchange with no capabilities.
 
 **Snapshots (return `Row`).** `get_ticker(exchange, market_type, symbol)`, `get_book_ticker(...)`, `get_mark_price(...)`, `get_symbol_info(exchange, market_type, symbol)`.
 
@@ -532,12 +552,12 @@ get_candles(exchange, market_type, symbol, interval="1h", limit=100, end=None)
 get_trades(exchange, market_type, symbol, limit=100)
 get_agg_trades(exchange, market_type, symbol, limit=500, end=None)
 get_funding_rate(exchange, market_type, symbol, limit=100, end=None)
-get_open_interest(exchange, market_type, symbol, interval="1h", limit=30, end=None)
+get_open_interest(exchange, market_type, symbol, interval=None, limit=30, end=None)
 get_liquidations(exchange, market_type, symbol, limit=100, end=None)
-get_long_short_ratio(exchange, market_type, symbol, interval="5m", limit=30, end=None)
+get_long_short_ratio(exchange, market_type, symbol, interval=None, limit=30, end=None)
 ```
 
-Pass `end` and `interval` by keyword. The older names, `start` everywhere and `period` on open interest and long/short, keep their places in the signatures, so a call that passes them by position still works.
+`interval=None` lets the route choose, `1h` on open interest and `5m` on long/short, and it is the only value a live reading takes.
 
 **Handles.** `market(exchange, market_type, symbol)`, `markets(exchange, market_type)`.
 
@@ -547,7 +567,7 @@ Pass `end` and `interval` by keyword. The older names, `start` everywhere and `p
 
 **Provenance helper.** `with_provenance(df)` returns a copy with `exchange`, `market_type`, `symbol`, `quote`, and `unit` promoted to columns.
 
-`verbose` overrides the router default for that call on every series method, on `get_ticker`, `get_book_ticker`, `get_mark_price`, `get_orderbook` and `get_margin_tiers`, and on every `*_many` method; `get_symbol_info` does not take it. On `get_ticker` and `get_book_ticker` it governs the warning for a quote outside the dollar family.
+`verbose` overrides the router default for that call on every series method, on `get_symbol_info`, `get_ticker`, `get_book_ticker`, `get_mark_price`, `get_orderbook` and `get_margin_tiers`, and on every `*_many` method. On `get_ticker` and `get_book_ticker` it governs the warning for a quote outside the dollar family.
 
 <br>
 <br>
