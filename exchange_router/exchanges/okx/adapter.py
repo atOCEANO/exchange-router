@@ -724,6 +724,7 @@ class OkxAdapter(BaseExchange):
                 price         = ask_price,
             ),
             timestamp   = self.normalize_timestamp(t["ts"]),
+            time_source = "venue",
         )
 
 
@@ -1433,6 +1434,7 @@ class OkxAdapter(BaseExchange):
                             price         = ask_price,
                         ),
                         timestamp   = self.normalize_timestamp(b["ts"]),
+                        time_source = "venue",
                     )
             except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                 logger.warning(f"OKX book_ticker {api_symbol} malformed frame skipped: {e!r}")

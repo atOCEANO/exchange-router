@@ -49,8 +49,8 @@ def ticker_row(raw: Dict[str, Any]) -> Row:
 
 
 def book_ticker_row(raw: Dict[str, Any]) -> Row:
-    bid_native, bid_notional, unit = _qty(raw.get("bid_qty"))
-    ask_native, ask_notional, _    = _qty(raw.get("ask_qty"))
+    bid_native, bid_notional, bid_unit = _qty(raw.get("bid_qty"))
+    ask_native, ask_notional, ask_unit = _qty(raw.get("ask_qty"))
 
     flat = {
         "symbol":           raw.get("symbol"),
@@ -62,8 +62,9 @@ def book_ticker_row(raw: Dict[str, Any]) -> Row:
         "ask_price":        raw.get("ask_price"),
         "ask_qty":          ask_native,
         "ask_qty_notional": ask_notional,
-        "qty_unit":         unit,
+        "qty_unit":         bid_unit or ask_unit,
         "timestamp":        raw.get("timestamp"),
+        "time_source":      raw.get("time_source"),
     }
 
     return _wrap(flat, raw)

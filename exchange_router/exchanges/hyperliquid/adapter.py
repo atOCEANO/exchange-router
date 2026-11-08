@@ -583,6 +583,7 @@ class HyperliquidAdapter(BaseExchange):
                 price         = ask_price,
             ),
             timestamp   = self.normalize_timestamp(data["time"]),
+            time_source = "venue",
         )
 
 
@@ -1039,6 +1040,7 @@ class HyperliquidAdapter(BaseExchange):
                         price         = ask_price,
                     ),
                     timestamp   = self.normalize_timestamp(d.get("time") or int(time.time() * 1000)),
+                    time_source = "venue" if d.get("time") else "router",
                 )
             except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                 logger.warning(f"Hyperliquid book_ticker {coin} malformed frame skipped: {e!r}")

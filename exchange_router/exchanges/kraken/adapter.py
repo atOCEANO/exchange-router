@@ -861,7 +861,6 @@ class KrakenAdapter(BaseExchange):
             pair_key = list(data.keys())[0]
             bid      = (data[pair_key].get("bids") or [[0, 0, None]])[0]
             ask      = (data[pair_key].get("asks") or [[0, 0, None]])[0]
-            stamped  = bid[2] if bid[2] is not None else ask[2]
 
             bid_price = float(bid[0])
             ask_price = float(ask[0])
@@ -883,7 +882,8 @@ class KrakenAdapter(BaseExchange):
                     contract_size = None,
                     price         = ask_price,
                 ),
-                timestamp   = self.normalize_timestamp(stamped) if stamped is not None else int(time.time() * 1000),
+                timestamp   = int(time.time() * 1000),
+                time_source = "router",
             )
 
         data      = await self._futures_tickers()
@@ -912,6 +912,7 @@ class KrakenAdapter(BaseExchange):
                         price         = ask_price,
                     ),
                     timestamp   = server_ts,
+                    time_source = "venue" if data.get("serverTime") else "router",
                 )
         raise ValueError(f"Symbol {api_symbol} not found")
 
@@ -1534,6 +1535,7 @@ class KrakenAdapter(BaseExchange):
                                     price         = ask_price,
                                 ),
                                 timestamp   = stamped if stamped > 0 else int(time.time() * 1000),
+                                time_source = "venue" if stamped > 0 else "router",
                             )
                 except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                     logger.warning(f"Kraken book_ticker {api_symbol} malformed frame skipped: {e!r}")
@@ -1563,6 +1565,7 @@ class KrakenAdapter(BaseExchange):
                                 price         = ask_price,
                             ),
                             timestamp   = self.normalize_timestamp(data.get("time", time.time())),
+                            time_source = "venue" if "time" in data else "router",
                         )
                 except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                     logger.warning(f"Kraken book_ticker {api_symbol} malformed frame skipped: {e!r}")

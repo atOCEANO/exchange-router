@@ -574,6 +574,7 @@ class BybitAdapter(BaseExchange):
                 price         = ask_price,
             ),
             timestamp   = self.normalize_timestamp(data.get("_envelope_ts") or int(time.time() * 1000)),
+            time_source = "venue" if data.get("_envelope_ts") else "router",
         )
 
 
@@ -1136,6 +1137,7 @@ class BybitAdapter(BaseExchange):
                         price         = ask_price,
                     ),
                     timestamp   = self.normalize_timestamp(msg.get("ts")),
+                    time_source = "venue",
                 )
             except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                 logger.warning(f"Bybit book_ticker {api_symbol} parse error mid-delta: {e!r}; ending stream so clients resync")

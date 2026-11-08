@@ -5,6 +5,7 @@ from exchange_router.exchanges.hyperliquid.adapter import HyperliquidAdapter
 from exchange_router.exchanges.kraken.adapter import KrakenAdapter
 from exchange_router.exchanges.okx.adapter import OkxAdapter
 from exchange_router.models import MarketType
+from exchange_router.rows import book_ticker_row
 
 
 BYBIT_SOLBRL_TICKER = {
@@ -117,8 +118,15 @@ def feed(*messages):
     return connect
 
 
+def side(price, qty):
+    return [price, qty.native, qty.notional] if qty is not None else [price, qty]
+
+
 def sides(row):
-    return [row.bid_price, row.bid_qty.native, row.bid_qty.notional, row.ask_price, row.ask_qty.native, row.ask_qty.notional]
+    return side(row.bid_price, row.bid_qty) + side(row.ask_price, row.ask_qty)
+
+
+EMPTY = [None, None, None, None]
 
 
 async def test_bybit_reads_empty_strings_as_an_empty_book():
@@ -136,9 +144,10 @@ async def test_bybit_reads_empty_strings_as_an_empty_book():
     finally:
         await adapter.shutdown()
 
-    assert sides(polled)                       == [0.0] * 6
-    assert [sides(row) for row in streamed]    == [[0.0] * 6]
-    assert [row.timestamp for row in streamed] == [1794096672808]
+    assert sides(polled)                         == EMPTY
+    assert [sides(row) for row in streamed]      == [EMPTY]
+    assert [row.timestamp for row in streamed]   == [1794096672808]
+    assert [row.time_source for row in streamed] == ["venue"]
 
 
 async def test_kraken_answers_a_cancel_only_book_and_stamps_it_when_read():
@@ -160,10 +169,11 @@ async def test_kraken_answers_a_cancel_only_book_and_stamps_it_when_read():
         await adapter.shutdown()
     after = int(time.time() * 1000)
 
-    assert sides(polled) == [0.0] * 6
+    assert sides(polled) == EMPTY
     assert before <= polled.timestamp <= after
-    assert [sides(row) for row in streamed] == [[0.0] * 6]
-    assert all(before <= row.timestamp <= after for row in streamed)
+    assert polled.time_source == "router"
+    assert [sides(row) for row in streamed] == [EMPTY]
+    assert all(before <= row.timestamp <= after and row.time_source == "router" for row in streamed)
 
 
 async def test_kraken_streams_a_futures_book_whose_last_bid_is_taken():
@@ -202,12 +212,13 @@ async def test_hyperliquid_answers_an_empty_book_at_the_venues_time():
     finally:
         await adapter.shutdown()
 
-    assert sides(polled)    == [0.0] * 6
-    assert polled.quote     == "USDC"
-    assert polled.timestamp == 1794097123445
+    assert sides(polled)      == EMPTY
+    assert polled.quote       == "USDC"
+    assert polled.timestamp   == 1794097123445
+    assert polled.time_source == "venue"
 
 
-async def test_okx_streams_a_side_with_no_orders_as_zero():
+async def test_okx_streams_a_side_with_no_orders_as_null():
     async def answer(method, endpoint, params=None):
         if endpoint == "/api/v5/public/instruments":
             return [OKX_AUDF_INSTRUMENT] if params["instType"] == "SPOT" else []
@@ -223,5 +234,22 @@ async def test_okx_streams_a_side_with_no_orders_as_zero():
         finally:
             await adapter.shutdown()
 
-    assert [sides(row) for row in rows]    == [[0.0] * 6, [0.0, 0.0, 0.0, 6.7, 0.9992, 6.7 * 0.9992]]
+    assert [sides(row) for row in rows]    == [EMPTY, [None, None, 6.7, 0.9992, 6.7 * 0.9992]]
     assert [row.timestamp for row in rows] == [1794096675300, 1794096675308]
+
+
+def test_a_book_ticker_row_reads_none_for_a_null_side_and_the_unit_from_the_other():
+    row = book_ticker_row({
+        "symbol":      "TEST002USDT",
+        "market_type": "spot",
+        "quote":       "USDT",
+        "bid_price":   None,
+        "bid_qty":     None,
+        "ask_price":   6.7,
+        "ask_qty":     {"native": 0.9992, "unit": "base", "contract_size": None, "notional": 6.69464},
+        "timestamp":   1794096675308,
+        "time_source": "venue",
+    })
+
+    assert (row.bid_price, row.bid_qty, row.bid_qty_notional) == (None, None, None)
+    assert (row.ask_qty, row.qty_unit, row.time_source)       == (0.9992, "base", "venue")

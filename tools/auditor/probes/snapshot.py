@@ -45,7 +45,7 @@ def _book_ticker_checks(d: dict, ctx: ProbeContext) -> Tuple[str, ErrorType, str
     ask_qty_obj = d.get("ask_qty") or {}
     bid_qty = bid_qty_obj.get("native", 0) if isinstance(bid_qty_obj, dict) else 0
     ask_qty = ask_qty_obj.get("native", 0) if isinstance(ask_qty_obj, dict) else 0
-    empty = [side for side, price, qty in (("bid", bid, bid_qty), ("ask", ask, ask_qty)) if price == 0 and qty == 0]
+    empty = [side for side, price in (("bid", bid), ("ask", ask)) if price is None]
     if empty:
         return "warn", ErrorType.LOGIC, f"{' and '.join(empty)} side empty", {"bid": bid, "ask": ask}
     if bid < 0 or ask < 0:

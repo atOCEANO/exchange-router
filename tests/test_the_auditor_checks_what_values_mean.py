@@ -53,7 +53,7 @@ def test_the_range_is_checked_only_where_the_price_is_a_last_trade():
 
 
 def test_an_empty_side_warns_and_a_router_stamp_is_not_judged_for_age():
-    empty = {"bid_price": 0.0, "bid_qty": {"native": 0.0}, "ask_price": 0.0, "ask_qty": {"native": 0.0}, "timestamp": 0}
+    empty = {"bid_price": None, "bid_qty": None, "ask_price": None, "ask_qty": None, "timestamp": 0}
     quoted = {"bid_price": 99.5, "bid_qty": {"native": 2.0}, "ask_price": 100.5, "ask_qty": {"native": 3.0}, "timestamp": 0}
 
     assert _book_ticker_checks(empty, ctx("okx", "spot"))[:3:2] == ("warn", "bid and ask side empty")

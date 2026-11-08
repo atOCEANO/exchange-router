@@ -365,26 +365,39 @@ class BookTicker(BaseModel):
         ...,
         description="Quote currency for price fields.",
     )
-    bid_price: float = Field(
+    bid_price: Optional[float] = Field(
         ...,
-        description="Best bid price in quote.",
+        description="Best bid price in quote; null, with bid_qty, when no one bids.",
     )
-    bid_qty: QtyValue = Field(
+    bid_qty: Optional[QtyValue] = Field(
         ...,
-        description="Size resting at bid_price, with its notional in quote.",
+        description="Size resting at bid_price, with its notional in quote; null with bid_price.",
     )
-    ask_price: float = Field(
+    ask_price: Optional[float] = Field(
         ...,
-        description="Best ask price in quote.",
+        description="Best ask price in quote; null, with ask_qty, when no one asks.",
     )
-    ask_qty: QtyValue = Field(
+    ask_qty: Optional[QtyValue] = Field(
         ...,
-        description="Size resting at ask_price, with its notional in quote.",
+        description="Size resting at ask_price, with its notional in quote; null with ask_price.",
     )
     timestamp: int = Field(
         ...,
-        description="Server snapshot time in unix milliseconds.",
+        description="Snapshot time in unix milliseconds, by the clock time_source names.",
     )
+    time_source: str = Field(
+        ...,
+        description="Whose clock stamped the row. Known values: venue, the venue's own time for the snapshot; router, the router's clock when it read a venue that sends none. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
+    )
+
+
+    @model_validator(mode="after")
+    def _an_unquoted_side_is_null(self) -> "BookTicker":
+        if not self.bid_price or self.bid_qty is None:
+            self.bid_price, self.bid_qty = None, None
+        if not self.ask_price or self.ask_qty is None:
+            self.ask_price, self.ask_qty = None, None
+        return self
 
 
 class MarkPrice(BaseModel):

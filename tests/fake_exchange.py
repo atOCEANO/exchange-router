@@ -264,6 +264,7 @@ class FakeExchange(BaseExchange):
             ask_price   = 100.5,
             ask_qty     = build_qty_value(3.0, unit, size, 100.5),
             timestamp   = BASE_TS,
+            time_source = "venue",
         )
 
 

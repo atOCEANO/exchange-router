@@ -589,6 +589,7 @@ class BinanceAdapter(BaseExchange):
                 price         = ask_price,
             ),
             timestamp   = self.normalize_timestamp(data.get("time") or int(time.time() * 1000)),
+            time_source = "venue" if data.get("time") else "router",
         )
 
 
@@ -1133,6 +1134,7 @@ class BinanceAdapter(BaseExchange):
                         price         = ask_price,
                     ),
                     timestamp   = self.normalize_timestamp(data.get("T") or data.get("E") or int(time.time() * 1000)),
+                    time_source = "venue" if data.get("T") or data.get("E") else "router",
                 )
             except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                 logger.warning(f"Binance book_ticker {s_norm} malformed frame skipped: {e!r}")

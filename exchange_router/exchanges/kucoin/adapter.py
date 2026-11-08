@@ -684,6 +684,7 @@ class KucoinAdapter(BaseExchange):
                     price         = ask_price,
                 ),
                 timestamp   = int(data.get("time") or int(time.time() * 1000)),
+                time_source = "venue" if data.get("time") else "router",
             )
 
         t = await self._make_request("GET", self.fut_rest_url, "/api/v1/ticker", {"symbol": api_symbol})
@@ -725,6 +726,7 @@ class KucoinAdapter(BaseExchange):
                 price         = ask_price,
             ),
             timestamp   = self._ns_to_ms(t.get("ts") or int(time.time() * 1000)),
+            time_source = "venue" if t.get("ts") else "router",
         )
 
 
@@ -1417,6 +1419,7 @@ class KucoinAdapter(BaseExchange):
                             price         = ask_price,
                         ),
                         timestamp   = self._ns_to_ms(d.get("timestamp") or d.get("time") or int(time.time() * 1000)),
+                        time_source = "venue" if d.get("timestamp") or d.get("time") else "router",
                     )
                 except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                     logger.warning(f"KuCoin book_ticker {api_symbol} malformed frame skipped: {e!r}")
@@ -1459,6 +1462,7 @@ class KucoinAdapter(BaseExchange):
                         price         = ask_price,
                     ),
                     timestamp   = self._ns_to_ms(d.get("ts") or int(time.time() * 1000)),
+                    time_source = "venue" if d.get("ts") else "router",
                 )
             except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                 logger.warning(f"KuCoin book_ticker {api_symbol} malformed frame skipped: {e!r}")
