@@ -243,10 +243,6 @@ class Router:
         return self._loop.run(self._core.get_exchange_overview(exchange))
 
 
-    def get_exchange_status(self, exchange: str) -> Dict:
-        return self._loop.run(self._core.get_exchange_status(exchange))
-
-
     def get_capabilities(self, exchange: str) -> Dict:
         return self._loop.run(self._core.get_capabilities(exchange))
 

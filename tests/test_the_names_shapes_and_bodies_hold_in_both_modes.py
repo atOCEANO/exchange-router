@@ -137,7 +137,7 @@ def test_a_batch_result_is_a_mapping():
 
 def test_margin_tiers_lead_every_capability_block():
     for adapter in (BinanceAdapter(), BybitAdapter(), OkxAdapter(), KucoinAdapter(), KrakenAdapter(), HyperliquidAdapter()):
-        for market_type, block in adapter.get_capabilities()["markets"].items():
+        for market_type, block in adapter.get_capabilities()["market_types"].items():
             assert list(block)[0] == "margin_tiers", f"{adapter.name} {market_type}"
 
 

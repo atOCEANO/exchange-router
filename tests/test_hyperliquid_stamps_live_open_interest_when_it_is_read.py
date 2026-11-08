@@ -71,7 +71,7 @@ async def test_the_live_reading_is_priced_at_the_mark_read_with_it_and_reads_no_
 async def test_the_capability_lists_no_intervals_for_a_live_reading():
     adapter = HyperliquidAdapter()
     try:
-        block = adapter.get_capabilities()["markets"][MarketType.LINEAR]["open_interest"]
+        block = adapter.get_capabilities()["market_types"][MarketType.LINEAR]["open_interest"]
     finally:
         await adapter.shutdown()
 

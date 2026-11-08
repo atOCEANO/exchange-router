@@ -263,8 +263,8 @@ async def test_the_service_metadata_routes_answer(router):
     assert await router.get_market_types(EX) == ["spot", "linear", "inverse"]
 
     caps = await router.get_capabilities(EX)
-    assert set(caps["markets"]) == {"spot", "linear", "inverse"}
-    assert caps["markets"]["linear"]["candles"]["intervals"] == list(INTERVAL_MS)
+    assert set(caps["market_types"]) == {"spot", "linear", "inverse"}
+    assert caps["market_types"]["linear"]["candles"]["intervals"] == list(INTERVAL_MS)
 
 
 async def test_batch_reads_return_one_frame_per_symbol(router):

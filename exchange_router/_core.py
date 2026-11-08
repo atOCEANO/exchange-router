@@ -250,15 +250,11 @@ class AsyncCore:
 
     async def get_market_types(self, exchange: str) -> List[str]:
         data = await self._fetch("market_types", exchange)
-        return [str(mt) for mt in data.get("market_types", [])]
+        return [str(mt) for mt in data["market_types"]]
 
 
     async def get_exchange_overview(self, exchange: str) -> Dict:
         return await self._fetch("overview", exchange)
-
-
-    async def get_exchange_status(self, exchange: str) -> Dict:
-        return await self._fetch("exchange_status", exchange)
 
 
     async def get_capabilities(self, exchange: str) -> Dict:

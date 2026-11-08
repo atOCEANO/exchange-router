@@ -160,9 +160,6 @@ def _endpoint(route: str, exchange: Optional[str], market_type: Optional[str], s
     if route == "overview":
         return f"{exchange}"
 
-    if route == "exchange_status":
-        return f"{exchange}/status"
-
     if route in EXCHANGE_ROUTES:
         return f"{exchange}/{route}"
 
@@ -426,9 +423,6 @@ class LocalBackend(Backend):
                 load_exchanges()
             return {"count": len(EXCHANGE_REGISTRY), "exchanges": list(EXCHANGE_REGISTRY.keys())}
 
-        if route == "exchange_status":
-            return to_jsonable_python(await self._adapter(exchange).get_status())
-
         if route == "overview":
             return await self._overview(exchange)
 
@@ -479,12 +473,12 @@ class LocalBackend(Backend):
         )
 
 
-    async def _symbol_count(self, adapter, market_type: MarketType) -> int:
+    async def _symbol_count(self, adapter, market_type: MarketType) -> Optional[int]:
         try:
             return len(await adapter.get_exchange_info(market_type))
         except Exception:
             logger.exception(f"symbol_count fetch failed for {adapter.name}/{market_type.value}")
-            return 0
+            return None
 
 
     async def _overview(self, exchange: str) -> Dict[str, Any]:
@@ -495,10 +489,9 @@ class LocalBackend(Backend):
 
         return {
             "exchange":     exchange,
-            "status":       "ok",
             "market_types": [
                 {
-                    "name":         mt.value,
+                    "market_type":  mt.value,
                     "symbol_count": count,
                     "capabilities": to_jsonable_python(market_block(capabilities, mt)),
                 }

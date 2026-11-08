@@ -16,13 +16,13 @@ from exchange_router.service import app
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 STRING_KEYED = {
-    "markets": {
+    "market_types": {
         "linear": {"candles": {"rest": True, "intervals": ["1h", "4h"]}},
     }
 }
 
 ENUM_KEYED = {
-    "markets": {
+    "market_types": {
         MarketType.LINEAR: {"candles": {"rest": True, "intervals": ["1h", "4h"]}},
     }
 }
@@ -40,7 +40,7 @@ def test_an_enum_keyed_map_reads_with_the_enum_value_too():
     assert route_block(STRING_KEYED, MarketType.LINEAR, "candles")["intervals"] == ["1h", "4h"]
 
 
-@pytest.mark.parametrize("capabilities", [None, {}, {"markets": None}, {"markets": {}}])
+@pytest.mark.parametrize("capabilities", [None, {}, {"market_types": None}, {"market_types": {}}])
 def test_a_missing_map_is_an_empty_block_rather_than_a_raise(capabilities):
     assert route_block(capabilities, "linear", "candles") == {}
 
@@ -53,13 +53,13 @@ def test_an_unknown_market_type_or_route_is_an_empty_block():
 def test_the_sdk_route_block_delegates_rather_than_reimplementing():
     source = inspect.getsource(_core.AsyncCore._route_block)
     assert "route_block(" in source
-    assert "markets" not in source
+    assert "market_types" not in source
 
 
 def test_the_interval_check_reads_through_the_same_lookup():
     source = inspect.getsource(base.validate_interval)
     assert "route_block(" in source
-    assert "markets" not in source
+    assert "market_types" not in source
 
 
 def test_the_service_no_longer_carries_its_own_copy_of_any_of_it():
@@ -80,19 +80,18 @@ async def wire():
 async def test_the_exchange_overview_still_renders_a_capability_block_per_market_type(wire):
     body = (await wire.get("/fake")).json()
 
-    assert body["exchange"] == "fake"
-    assert body["status"]   == "ok"
-    assert [m["name"] for m in body["market_types"]] == ["spot", "linear", "inverse"]
+    assert list(body) == ["exchange", "market_types"]
+    assert [m["market_type"] for m in body["market_types"]] == ["spot", "linear", "inverse"]
 
-    by_name = {m["name"]: m for m in body["market_types"]}
-    assert by_name["spot"]["symbol_count"] == 2
-    assert by_name["linear"]["capabilities"]["candles"]["intervals"] == ["1m", "5m", "15m", "1h", "4h", "1d"]
-    assert by_name["inverse"]["capabilities"]["liquidations"] == {"rest": False, "ws": False}
-    assert "mark_price" not in by_name["spot"]["capabilities"]
+    by_type = {m["market_type"]: m for m in body["market_types"]}
+    assert by_type["spot"]["symbol_count"] == 2
+    assert by_type["linear"]["capabilities"]["candles"]["intervals"] == ["1m", "5m", "15m", "1h", "4h", "1d"]
+    assert by_type["inverse"]["capabilities"]["liquidations"] == {"rest": False, "ws": False}
+    assert "mark_price" not in by_type["spot"]["capabilities"]
 
 
-def test_only_one_module_reads_the_markets_block_out_of_a_capabilities_map():
-    pattern = re.compile(r'\.get\(\s*"markets"')
+def test_only_one_module_reads_the_market_types_block_out_of_a_capabilities_map():
+    pattern = re.compile(r'\.get\(\s*"market_types"')
     found   = set()
 
     for path in (ROOT / "exchange_router").rglob("*.py"):

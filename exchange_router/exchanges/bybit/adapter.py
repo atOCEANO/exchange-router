@@ -87,7 +87,7 @@ class BybitAdapter(BaseExchange):
     def _build_capabilities(self) -> Dict[str, Any]:
         return {
             "name": self.name,
-            "markets": {
+            "market_types": {
                 MarketType.SPOT: {
                     "margin_tiers": {
                         "rest": False,
@@ -587,7 +587,7 @@ class BybitAdapter(BaseExchange):
         cat = self._get_category(market_type)
         api_symbol = self.get_api_symbol(symbol, market_type)
 
-        ob_caps = self.get_capabilities()["markets"][market_type]["orderbook"]
+        ob_caps = self.get_capabilities()["market_types"][market_type]["orderbook"]
         discrete_depth_bucket = next((d for d in ob_caps["depths"] if d >= depth), ob_caps["max_depth"])
 
         data = await self._make_request("GET", "/v5/market/orderbook", {"category": cat, "symbol": api_symbol, "limit": discrete_depth_bucket})
@@ -613,7 +613,7 @@ class BybitAdapter(BaseExchange):
         cat = self._get_category(market_type)
         api_symbol = self.get_api_symbol(symbol, market_type)
 
-        max_limit = self.get_capabilities()["markets"][market_type]["trades"]["max_limit"]
+        max_limit = self.get_capabilities()["market_types"][market_type]["trades"]["max_limit"]
         req_limit = min(limit, max_limit)
 
         data = await self._make_request("GET", "/v5/market/recent-trade", {"category": cat, "symbol": api_symbol, "limit": req_limit})

@@ -93,7 +93,7 @@ class KrakenAdapter(BaseExchange):
     def _build_capabilities(self) -> Dict[str, Any]:
         return {
             "name": self.name,
-            "markets": {
+            "market_types": {
                 MarketType.SPOT: {
                     "margin_tiers": {
                         "rest": False,
@@ -930,7 +930,7 @@ class KrakenAdapter(BaseExchange):
         info       = await self._info_for(market_type, model_sym)
         quote      = info.quote if info else ""
 
-        max_depth = self.get_capabilities()["markets"][market_type]["orderbook"]["max_depth"]
+        max_depth = self.get_capabilities()["market_types"][market_type]["orderbook"]["max_depth"]
         req_depth = min(depth, max_depth)
 
         if market_type == MarketType.SPOT:
@@ -974,7 +974,7 @@ class KrakenAdapter(BaseExchange):
 
 
     async def get_trades(self, market_type: MarketType, symbol: str, limit: int = 100) -> List[Trade]:
-        limit         = min(limit, self.get_capabilities()["markets"][market_type]["trades"]["max_limit"])
+        limit         = min(limit, self.get_capabilities()["market_types"][market_type]["trades"]["max_limit"])
         api_symbol    = self.get_api_symbol(symbol, market_type)
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         info          = await self._info_for(market_type, model_sym)

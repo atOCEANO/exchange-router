@@ -20,7 +20,7 @@ class ErrorPathProbe(Probe):
         out: List[ProbeResult] = []
 
         cases: List[Tuple[str, str, Dict[str, Any], Tuple[int, ...], str]] = [
-            ("error:unknown_exchange", "/zzznotanexchange/status",                 {}, (404,),     "404"),
+            ("error:unknown_exchange", "/zzznotanexchange/capabilities",           {}, (404,),     "404"),
             ("error:bad_market_type",  f"/{ctx.exchange}/notamarket/markets",      {}, (400, 422), "400/422"),
             ("error:bad_symbol",       f"/{ctx.exchange}/spot/ticker/ZZZNOTREAL",  {}, (400, 404), "400/404"),
         ]

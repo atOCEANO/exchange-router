@@ -88,7 +88,7 @@ class HyperliquidAdapter(BaseExchange):
     def _build_capabilities(self) -> Dict[str, Any]:
         return {
             "name": self.name,
-            "markets": {
+            "market_types": {
                 MarketType.SPOT: {
                     "margin_tiers": {
                         "rest": False,
@@ -657,7 +657,7 @@ class HyperliquidAdapter(BaseExchange):
     async def get_trades(self, market_type: MarketType, symbol: str, limit: int = 100) -> List[Trade]:
         model_sym, coin, quote = await self._lookup(market_type, symbol)
 
-        max_limit = self.get_capabilities()["markets"][market_type]["trades"]["max_limit"]
+        max_limit = self.get_capabilities()["market_types"][market_type]["trades"]["max_limit"]
         req_limit = min(limit, max_limit)
 
         data = await self._make_request("recentTrades", {"type": "recentTrades", "coin": coin})

@@ -127,7 +127,7 @@ async def test_warming_in_service_mode_runs_the_handshake_instead_of_touching_ad
                 return {"version": "2.5.7", "schema_version": 3}
             if route == "exchanges":
                 return {"exchanges": ["counter"]}
-            return {"markets": {}}
+            return {"market_types": {}}
 
     stub   = Stub()
     router = AsyncRouter.service("http://router.test", ["counter"], verbose=False, backend=stub)
@@ -160,7 +160,7 @@ class Roster(Backend):
             if self.capability_faults:
                 self.capability_faults -= 1
                 raise UpstreamUnavailable("the service is busy", 503)
-            return {"markets": {"spot": {"ticker": {"rest": True}}}}
+            return {"market_types": {"spot": {"ticker": {"rest": True}}}}
 
         return {}
 
@@ -195,6 +195,6 @@ async def test_a_capability_fetch_that_failed_is_not_remembered_as_an_empty_bloc
     with pytest.raises(UpstreamUnavailable):
         await router.get_capabilities("alpha")
 
-    assert await router.get_capabilities("alpha") == {"markets": {"spot": {"ticker": {"rest": True}}}}
+    assert await router.get_capabilities("alpha") == {"market_types": {"spot": {"ticker": {"rest": True}}}}
 
     await router.close()

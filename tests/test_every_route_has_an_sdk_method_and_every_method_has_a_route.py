@@ -13,7 +13,6 @@ ROUTE_TO_METHOD = {
     "/version":                                   "get_version",
     "/exchanges":                                 "get_exchanges",
     "/{exchange}":                                "get_exchange_overview",
-    "/{exchange}/status":                         "get_exchange_status",
     "/{exchange}/capabilities":                   "get_capabilities",
     "/{exchange}/market_types":                   "get_market_types",
     "/{exchange}/{market_type}/markets":          "get_markets",
@@ -103,14 +102,11 @@ def test_the_two_constructors_are_classmethods_and_not_ordinary_methods():
     assert name not in sdk_methods()
 
 
-async def test_the_two_routes_that_used_to_be_gaps_now_answer_through_both_backends(router):
+async def test_the_overview_answers_through_both_backends_in_one_shape(router):
     overview = await router.get_exchange_overview("fake")
-    assert overview["exchange"] == "fake"
-    assert [m["name"] for m in overview["market_types"]] == ["spot", "linear", "inverse"]
+    assert list(overview) == ["exchange", "market_types"]
+    assert [m["market_type"] for m in overview["market_types"]] == ["spot", "linear", "inverse"]
     assert overview["market_types"][0]["symbol_count"] == 2
-
-    status = await router.get_exchange_status("fake")
-    assert status == {"status": "online", "exchange": "fake"}
 
 
 def test_the_sync_router_offers_exactly_the_methods_the_async_one_does():

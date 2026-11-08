@@ -103,7 +103,7 @@ class BinanceAdapter(BaseExchange):
     def _build_capabilities(self) -> Dict[str, Any]:
         return {
             "name": self.name,
-            "markets": {
+            "market_types": {
                 MarketType.SPOT: {
                     "margin_tiers": {
                         "rest": False,
@@ -623,7 +623,7 @@ class BinanceAdapter(BaseExchange):
         if market_type == MarketType.INVERSE:
             path = "/dapi/v1/depth"
 
-        ob_caps = self.get_capabilities()["markets"][market_type]["orderbook"]
+        ob_caps = self.get_capabilities()["market_types"][market_type]["orderbook"]
         discrete_depth_bucket = next((d for d in ob_caps["depths"] if d >= depth), ob_caps["max_depth"])
 
         data = await self._make_request("GET", f"{base_url}{path}", params={"symbol": api_symbol, "limit": discrete_depth_bucket})
@@ -648,7 +648,7 @@ class BinanceAdapter(BaseExchange):
 
 
     async def get_trades(self, market_type: MarketType, symbol: str, limit: int = 100) -> List[Trade]:
-        limit = min(limit, self.get_capabilities()["markets"][market_type]["trades"]["max_limit"])
+        limit = min(limit, self.get_capabilities()["market_types"][market_type]["trades"]["max_limit"])
         base_url = self._get_rest_url(market_type)
         api_symbol = self.get_api_symbol(symbol, market_type)
 

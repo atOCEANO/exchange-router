@@ -32,7 +32,7 @@ class OlderService(Backend):
         if route == "exchanges":
             return {"count": 1, "exchanges": ["bybit"]}
         if route == "capabilities":
-            return {"markets": {"linear": {"ticker": {"rest": True, "ws": True}}}}
+            return {"market_types": {"linear": {"ticker": {"rest": True, "ws": True}}}}
         raise AssertionError(f"an older service was asked for {route}")
 
 
@@ -40,7 +40,7 @@ class OlderService(Backend):
 async def test_the_capability_says_rest_exactly_where_the_adapter_serves_tiers(adapter_class):
     adapter = adapter_class()
     try:
-        markets = adapter.get_capabilities()["markets"]
+        markets = adapter.get_capabilities()["market_types"]
         served  = {market.value for market, block in markets.items() if block["margin_tiers"]["rest"]}
 
         assert served == SERVED.get(adapter.name, set())

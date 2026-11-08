@@ -19,7 +19,7 @@ class LiveReading(FakeExchange):
 
     def get_capabilities(self):
         caps = copy.deepcopy(super().get_capabilities())
-        caps["markets"][MarketType.LINEAR]["open_interest"].update(intervals=None, paginated=False, max_limit=1)
+        caps["market_types"][MarketType.LINEAR]["open_interest"].update(intervals=None, paginated=False, max_limit=1)
         return caps
 
 

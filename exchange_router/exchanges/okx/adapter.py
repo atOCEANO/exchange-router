@@ -183,7 +183,7 @@ class OkxAdapter(BaseExchange):
     def _build_capabilities(self) -> Dict[str, Any]:
         return {
             "name": self.name,
-            "markets": {
+            "market_types": {
                 MarketType.SPOT: {
                     "margin_tiers": {
                         "rest": False,
@@ -735,7 +735,7 @@ class OkxAdapter(BaseExchange):
 
     async def get_orderbook(self, market_type: MarketType, symbol: str, depth: int = 20) -> OrderBook:
         api_symbol = await self._resolve_symbol(symbol, market_type)
-        max_depth = self.get_capabilities()["markets"][market_type]["orderbook"]["max_depth"]
+        max_depth = self.get_capabilities()["market_types"][market_type]["orderbook"]["max_depth"]
         sz = max(1, min(depth, max_depth))
 
         data = await self._make_request("GET", "/api/v5/market/books", {"instId": api_symbol, "sz": sz})
@@ -779,7 +779,7 @@ class OkxAdapter(BaseExchange):
 
     async def get_trades(self, market_type: MarketType, symbol: str, limit: int = 100) -> List[Trade]:
         api_symbol = await self._resolve_symbol(symbol, market_type)
-        max_limit  = self.get_capabilities()["markets"][market_type]["trades"]["max_limit"]
+        max_limit  = self.get_capabilities()["market_types"][market_type]["trades"]["max_limit"]
         req_limit  = min(limit, max_limit)
 
         data = await self._make_request("GET", "/api/v5/market/trades", {"instId": api_symbol, "limit": req_limit})

@@ -89,7 +89,7 @@ class KucoinAdapter(BaseExchange):
     def _build_capabilities(self) -> Dict[str, Any]:
         return {
             "name": self.name,
-            "markets": {
+            "market_types": {
                 MarketType.SPOT: {
                     "margin_tiers": {
                         "rest": False,
@@ -741,7 +741,7 @@ class KucoinAdapter(BaseExchange):
         api_symbol = await self._resolve_symbol(symbol, market_type)
         model_sym = self.get_model_symbol(api_symbol, market_type)
 
-        ob_caps = self.get_capabilities()["markets"][market_type]["orderbook"]
+        ob_caps = self.get_capabilities()["market_types"][market_type]["orderbook"]
         discrete_depth_bucket = next((d for d in ob_caps["depths"] if d >= depth), ob_caps["max_depth"])
 
         if market_type == MarketType.SPOT:
@@ -789,7 +789,7 @@ class KucoinAdapter(BaseExchange):
 
 
     async def get_trades(self, market_type: MarketType, symbol: str, limit: int = 100) -> List[Trade]:
-        limit         = min(limit, self.get_capabilities()["markets"][market_type]["trades"]["max_limit"])
+        limit         = min(limit, self.get_capabilities()["market_types"][market_type]["trades"]["max_limit"])
         api_symbol    = await self._resolve_symbol(symbol, market_type)
         model_sym     = self.get_model_symbol(api_symbol, market_type)
         info          = await self._info_for(market_type, model_sym)

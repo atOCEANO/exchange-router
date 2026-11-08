@@ -132,7 +132,7 @@ _INVERSE_CAPS = {
 }
 
 CAPABILITIES = {
-    "markets": {
+    "market_types": {
         MarketType.SPOT:    _SPOT_CAPS,
         MarketType.LINEAR:  _LINEAR_CAPS,
         MarketType.INVERSE: _INVERSE_CAPS,

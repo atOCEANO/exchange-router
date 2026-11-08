@@ -39,7 +39,7 @@ class Alive(Backend):
         if route == "exchanges":
             return {"count": 1, "exchanges": ["fake"]}
 
-        return {"markets": {}}
+        return {"market_types": {}}
 
 
     async def stream(self, exchange, market_type, channel, symbol):

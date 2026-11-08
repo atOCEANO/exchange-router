@@ -40,7 +40,7 @@ class LoopRecordingBackend(Backend):
             return {"version": "3.0.1", "schema_version": 3}
         if route == "exchanges":
             return {"exchanges": ["recorder"]}
-        return {"markets": {}}
+        return {"market_types": {}}
 
 
 @pytest.fixture

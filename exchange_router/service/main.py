@@ -174,7 +174,6 @@ async def service_root():
     return {
         "service":        "exchange-router-service",
         "version":        VERSION,
-        "status":         "ok",
         "schema_version": SCHEMA_VERSION,
         "exchanges": [
             {
@@ -212,14 +211,14 @@ async def exchange_overview(exchange: str):
             return len(info_list)
         except Exception:
             logging.exception(f"symbol_count fetch failed for {exchange}/{mt.value}")
-            return 0
+            return None
 
     market_types = adapter.supported_market_types
     counts       = await asyncio.gather(*[_symbol_count(mt) for mt in market_types])
 
     market_types_payload = [
         {
-            "name":         mt.value,
+            "market_type":  mt.value,
             "symbol_count": count,
             "capabilities": market_block(capabilities, mt),
         }
@@ -228,15 +227,8 @@ async def exchange_overview(exchange: str):
 
     return {
         "exchange":     exchange,
-        "status":       "ok",
         "market_types": market_types_payload,
     }
-
-
-@app.get("/{exchange}/status")
-async def exchange_status(exchange: str):
-    adapter = validate_request(exchange)
-    return await adapter.get_status()
 
 
 @app.get("/{exchange}/capabilities")

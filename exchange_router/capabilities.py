@@ -2,7 +2,7 @@ from typing import Any, Dict, Optional
 
 
 def market_block(capabilities: Optional[Dict[str, Any]], market_type: Any) -> Dict[str, Any]:
-    markets = (capabilities or {}).get("markets") or {}
+    markets = (capabilities or {}).get("market_types") or {}
 
     return markets.get(market_type) or markets.get(getattr(market_type, "value", market_type)) or {}
 

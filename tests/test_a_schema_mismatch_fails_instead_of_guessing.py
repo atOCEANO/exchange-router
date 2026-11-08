@@ -27,7 +27,7 @@ class StubService(Backend):
             return {"count": len(self.exchanges), "exchanges": self.exchanges}
 
         if route == "capabilities":
-            return {"markets": {}}
+            return {"market_types": {}}
 
         return {}
 
@@ -117,7 +117,6 @@ DISCOVERY = [
     ("get_exchanges",         ()),
     ("get_market_types",      ("fake",)),
     ("get_exchange_overview", ("fake",)),
-    ("get_exchange_status",   ("fake",)),
     ("get_markets",           ("fake", "spot")),
     ("get_symbol_info",       ("fake", "spot", "BTCUSDT")),
 ]

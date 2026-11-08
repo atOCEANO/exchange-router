@@ -106,7 +106,7 @@ def _route_caps_key(route: str, variant_id: Optional[str]) -> str:
 def _route_caps(caps_by_exchange: Dict[str, Dict[str, Any]], market_type: str, caps_key: str, exchanges: List[str]) -> Dict[str, Dict[str, Any]]:
     out: Dict[str, Dict[str, Any]] = {}
     for ex in exchanges:
-        block = ((caps_by_exchange.get(ex) or {}).get("markets") or {}).get(market_type, {}).get(caps_key)
+        block = ((caps_by_exchange.get(ex) or {}).get("market_types") or {}).get(market_type, {}).get(caps_key)
         if isinstance(block, dict):
             out[ex] = block
     return out
@@ -326,7 +326,7 @@ def _render_route_section(
                 )
                 continue
             params     = extract_params(r, v)
-            caps_block = ((caps_by_exchange.get(ex) or {}).get("markets") or {}).get(market_type, {}).get(caps_key)
+            caps_block = ((caps_by_exchange.get(ex) or {}).get("market_types") or {}).get(market_type, {}).get(caps_key)
             parts.append(
                 f'<div class="panel" data-variant="{_h(vid)}" data-exchange="{_h(ex)}">'
                 f'{_render_panel(r, params, api_url, caps_block)}'

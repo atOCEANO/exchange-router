@@ -772,10 +772,6 @@ class BaseExchange(ABC):
         pass
 
 
-    async def get_status(self) -> Dict[str, Any]:
-        return {"status": "online", "exchange": self.name}
-
-
     async def preload(self) -> None:
         if type(self)._warm is BaseExchange._warm:
             return

@@ -110,7 +110,7 @@ def _count_expected_probes(exchange: str, caps: Dict[str, Any]) -> int:
     )
     count = sum(1 for p in exchange_probes() if p.applies(ex_ctx))
 
-    markets_caps = caps.get("markets", {}) or {}
+    markets_caps = caps.get("market_types", {}) or {}
     for market_type, slice_caps in markets_caps.items():
         count += _count_market_probes(exchange, market_type, caps, slice_caps)
     return count
@@ -177,26 +177,39 @@ async def _pick_symbol_for_market(client: httpx.AsyncClient, exchange: str, mark
     return sym
 
 
+async def _overview(client: httpx.AsyncClient, exchange: str, on_result: OnResult) -> None:
+    started = time.time()
+    status, overview, err = await fetch(client, f"/{exchange}")
+    ended = time.time()
+    entries = overview.get("market_types", []) if status == 200 and isinstance(overview, dict) else []
+    unread  = [entry.get("market_type") for entry in entries if entry.get("symbol_count") is None]
+
+    if status != 200:
+        verdict, error_type, message = "fail", ErrorType.NETWORK if err else ErrorType.HTTP, err or f"HTTP {status}"
+    elif unread:
+        verdict, error_type, message = "warn", ErrorType.NETWORK, f"the market list of {', '.join(unread)} could not be read"
+    else:
+        verdict, error_type, message = "pass", ErrorType.OK, "OK"
+
+    on_result(_result(
+        exchange=exchange,
+        route="overview",
+        probe="overview",
+        status=verdict,
+        error_type=error_type,
+        message=message,
+        evidence={"status": status, "unread": unread},
+        started=started,
+        ended=ended,
+    ))
+
+
 async def _run_for_exchange(client: httpx.AsyncClient, exchange: str, caps: Optional[Dict[str, Any]], on_result: OnResult, on_probe_done: OnProbeDone, on_skip_market: OnSkipMarket, exch_sem: asyncio.Semaphore) -> None:
     async with exch_sem:
         rest_sem = asyncio.Semaphore(MAX_CONCURRENT_REST_PER_EXCHANGE)
         ws_sem   = asyncio.Semaphore(MAX_CONCURRENT_WS_PER_EXCHANGE)
 
-        started = time.time()
-        status, _, status_err = await fetch(client, f"/{exchange}/status")
-        ended = time.time()
-        ok = status == 200
-        on_result(_result(
-            exchange=exchange,
-            route="status",
-            probe="status",
-            status="pass" if ok else "fail",
-            error_type=ErrorType.OK if ok else (ErrorType.NETWORK if status_err else ErrorType.HTTP),
-            message="OK" if ok else (status_err or f"HTTP {status}"),
-            evidence={"status": status},
-            started=started,
-            ended=ended,
-        ))
+        await _overview(client, exchange, on_result)
 
         if caps is None:
             return
@@ -214,7 +227,7 @@ async def _run_for_exchange(client: httpx.AsyncClient, exchange: str, caps: Opti
         if ex_probes:
             await asyncio.gather(*[_run_probe(p, ex_ctx, on_result, on_probe_done, rest_sem, exchange) for p in ex_probes])
 
-        markets_caps: Dict[str, Dict[str, Any]] = caps.get("markets", {}) or {}
+        markets_caps: Dict[str, Dict[str, Any]] = caps.get("market_types", {}) or {}
         for market_type, slice_caps in markets_caps.items():
             symbol = await _pick_symbol_for_market(client, exchange, market_type, on_result)
             if symbol is None:
@@ -355,7 +368,7 @@ async def run(
                     status="pass",
                     error_type=ErrorType.OK,
                     message="OK",
-                    evidence={"markets": list(cap_data.get("markets", {}).keys())},
+                    evidence={"market_types": list(cap_data.get("market_types", {}).keys())},
                     started=started_at,
                     ended=ended_at,
                 )
