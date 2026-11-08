@@ -105,6 +105,10 @@ Probes run against every advertised route. Each probe carries the capability fie
 
 `ticker`, `book_ticker`, `mark_price`. Pydantic shape, freshness (`now - timestamp < SNAPSHOT_FRESHNESS_MS`), and route-specific invariants: ticker `low_24h <= price <= high_24h`, book `bid <= ask` with positive sizes, mark price positive. The per-route check helpers read the **nested value objects** (`volume_24h.native`, `bid_qty.native`, `ask_qty.native`) and dereference `funding.per_cycle` when checking mark price.
 
+Nothing happening is not a failure: a ticker priced `0.0` (no last trade) and a book side at price and size `0.0` (no orders) are WARNs. The freshness check skips the snapshots the router stamps with its own clock (`config.py::ROUTER_STAMPED`), and the range check skips the exchanges whose price is a mid rather than a trade (`MID_PRICED`).
+
+On `mark_price` a `deadline` check reads the exchange's own next settlement straight from the exchange (`config.py::DEADLINES`) and requires `funding.valid_until_ts` to match it within a second. A deadline exactly one cycle off is read again once, since a settlement can fall between the two reads. Exchanges with no such table, and rows without a deadline, skip.
+
 <br>
 
 ### Orderbook
@@ -129,12 +133,18 @@ Probed on every market whose `margin_tiers` block declares `rest: True`, for the
 
 `agg_trades`, `candles`, `funding_rate`, `open_interest`, `liquidations`, `long_short_ratio`. Each paginated route runs an unconditional set (shape, exact-count, at-most-N) plus an anchored set (past anchor at a near offset, past anchor at a deeper offset, future anchor expected to return the newest available records); anchored probes are skipped when the route declares `paginated: False`. The sub-probes today are:
 
-- `recent`: no `start`, big limit, validates ascending order and freshness. The count check runs against a ceiling rather than the raw ask: `config.py::theoretical_max` is the smallest of the requested limit, the periods elapsed since `CRYPTO_EPOCH_MS` (2010-01-01), and `retention_ms // period_ms`, and the PASS floor is `THEORETICAL_MAX_RATIO` (0.9) of it, so a long period never fails for returning fewer records than a big limit asked for. The freshness threshold defaults to `3 * period_ms + 30s`; per-`(exchange, market_type, period)` overrides live in `config.py::FRESHNESS_OVERRIDE_MS` for upstreams documented to publish slowly (for example, an inverse 1m feed that skips empty buckets, requiring a 600s override).
+- `recent`: no `start`, big limit, validates ascending order and freshness. The count check runs against a ceiling rather than the raw ask: `config.py::theoretical_max` is the smallest of the requested limit, the periods elapsed since `CRYPTO_EPOCH_MS` (2010-01-01), and `retention_ms // period_ms`, and the PASS floor is `THEORETICAL_MAX_RATIO` (0.9) of it, so a long period never fails for returning fewer records than a big limit asked for. The freshness threshold defaults to `3 * period_ms + 30s`; per-`(exchange, market_type, period)` overrides live in `config.py::FRESHNESS_OVERRIDE_MS` for upstreams documented to publish slowly (for example, an inverse 1m feed that skips empty buckets, requiring a 600s override). A stale newest candle is checked against the route's REST trades: where the venue has not traded since that bar's bucket closed, the market is quiet and the probe passes with the newest trade in its evidence, since KuCoin and Hyperliquid send no bar for a bucket without a trade.
 - `limit=1`: must return exactly 1; an empty response warns rather than fails, and the count check does not run.
 - `limit=5`: must return at most 5; > 5 is a hard FAIL.
 - `before=1h_ago`: last record at or before the anchor. Skipped if `paginated: False`.
 - `before=24h_ago`: same check at a deeper anchor. Skipped if `paginated: False`, and additionally skipped when `period_ms > 12h` (24h does not give enough room to cover one period).
 - `start=future`: `start = now + 1h`, must return the newest available records (empty is a FAIL); a record dated more than one period into the future is a LOGIC FAIL.
+
+Three checks read what the `recent` rows mean, not only their shape:
+
+- `cycles` (`funding_rate`): a row whose gap to the previous row repeats beside it must carry that gap as its `cycle_ms`, so a history that crosses a cycle change shows each side's own cycle. Fewer than three rows skip.
+- `utc_grid` (`candles` at `config.py::GRID_INTERVALS`, 6h and longer): every bar must open on a multiple of its interval since the epoch, which catches a bar cut on a local day.
+- `live_stamp` (`config.py::LIVE_READINGS`, Hyperliquid's open interest): a live reading must be stamped within five seconds of the moment it was read.
 
 <br>
 
@@ -150,6 +160,8 @@ Holds the connection for `WS_TEST_DURATION` (default 180s) and validates **every
 | `liquidations` | 0 | Rare event; absence is not a failure |
 
 Below threshold: WARN. Zero frames with threshold > 0: FAIL with error type `EMPTY`. Zero frames with threshold = 0: PASS with the message noting the window was idle but the connection succeeded. Any malformed frame: FAIL with the offending payload preserved in evidence.
+
+A `trades` or `agg_trades` stream with zero frames is checked against the route's own REST trades before it fails. When the newest trades reach back past the window's start and none falls inside it, the venue did not trade and the probe reports SKIP; a trade inside the window, or a list too short to say, keeps the FAIL.
 
 <br>
 
@@ -203,7 +215,7 @@ REST and WS probes for the same exchange run in parallel against a shared servic
 
 The auditor runs hundreds of REST probes per exchange in a few minutes. Real clients of this microservice almost never produce that kind of load. `MIN_REST_INTERVAL_MS` keeps the auditor from tripping upstream rate-limit responses that would otherwise look like adapter failures in the report. This is test hygiene, not a rate limiter the microservice relies on for production safety.
 
-The check sits inside the auditor's `fetch` helper and derives the exchange name from the endpoint path (`/<exchange>/<market_type>/...`). Default 250ms is conservative against accidental concurrent bursts when `MAX_CONCURRENT_REST_PER_EXCHANGE > 1`. Set `MIN_REST_INTERVAL_MS=1000` (or higher) for an extra-safe run at high concurrency, or `0` to disable entirely. Endpoints without an exchange prefix (`/`, `/status`, `/version`, `/exchanges`) are not throttled. WS probes are not affected.
+The check sits inside the auditor's `fetch` helper and derives the exchange name from the endpoint path (`/<exchange>/<market_type>/...`). Default 250ms is conservative against accidental concurrent bursts when `MAX_CONCURRENT_REST_PER_EXCHANGE > 1`. Set `MIN_REST_INTERVAL_MS=1000` (or higher) for an extra-safe run at high concurrency, or `0` to disable entirely. Endpoints without an exchange prefix (`/`, `/status`, `/version`, `/exchanges`) are not throttled. WS probes are not affected. An exchange whose own budget is tighter than the default gets a wider spacing in `config.py::REST_INTERVAL_MS`, and the wider of the two applies: Hyperliquid's is 3000ms, since 250ms would ask it for about four times the 1,200 weight a minute it allows.
 
 Production rate-limit safety lives in the adapters, not in this knob (see [Rate limit headers and proactive backoff](Adapter_Guide.md#rate-limit-headers-and-proactive-backoff) in the Adapter Guide). The two layers are independent: when both apply, the slower spacing wins.
 
@@ -324,9 +336,11 @@ A FAIL in the report does not always mean an adapter regression. Rule out these 
 
 - **Upstream publish lag on analytics-style endpoints.** Some analytics endpoints (open interest, long/short ratio, similar aggregated stats) publish their buckets with a delay that fluctuates with upstream load. The `recent` sub-probe's freshness threshold defaults to `3 * period + 30s` (about 45 minutes for 15m); a slow window can push real lag above that. Re-run after 20 to 30 minutes. If the failure clears, it was transient upstream. If the same `(exchange, market_type, period)` keeps failing, add an entry to `config.py::FRESHNESS_OVERRIDE_MS`.
 
-- **Quiet-market WebSocket activity.** `trades`, `agg_trades`, and `liquidations` depend on real events. On low-volume contracts a 180-second window can legitimately produce few or zero frames. Liquidations have threshold 0 for this reason. Trades and agg_trades (threshold 1) WARN on quiet pairs; raising `WS_TEST_DURATION` reduces the chance, at the cost of wall time.
+- **Quiet-market WebSocket activity.** `trades`, `agg_trades`, and `liquidations` depend on real events. On low-volume contracts a 180-second window can legitimately produce few or zero frames; KuCoin's inverse `XBTUSDM` trades about once every four minutes. Liquidations have threshold 0 for this reason, and an empty trade window the venue's own trades show was quiet is a SKIP.
 
 - **Identical staleness across unrelated routes.** When two routes that share a bucket cadence (for example `candles:15m` and `open_interest:15m`) report byte-identical age, the cause is upstream cadence, not adapter logic. The auditor captures `now_ms` once at run start. Both probes measure against that snapshot, so an upstream that has not yet published its newest bucket leaks the same lag everywhere.
+
+- **Rate limits.** Hyperliquid allows 1,200 weight a minute per IP; most reads weigh 20, and a large candle read up to about 100. The router answers the retries a throttled read exhausts with `503`, which is why the auditor spaces Hyperliquid's probes three seconds apart (`config.py::REST_INTERVAL_MS`).
 
 - **Real upstream 5xx exhaustion.** When `_make_request` exhausts retries and surfaces a 500, the upstream had a real outage during the run. The auditor does not paper over it; the failure is honest but not actionable on the adapter side.
 
