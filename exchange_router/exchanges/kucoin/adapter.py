@@ -645,29 +645,23 @@ class KucoinAdapter(BaseExchange):
             data = await self._make_request("GET", self.spot_rest_url, "/api/v1/market/orderbook/level1", {"symbol": api_symbol})
             if not data:
                 raise ValueError(f"Book ticker not found for {api_symbol}")
-            bid_raw    = data.get("bestBid")
-            ask_raw    = data.get("bestAsk")
-            bid_sz_raw = data.get("bestBidSize")
-            ask_sz_raw = data.get("bestAskSize")
-            if bid_raw is None or ask_raw is None or bid_sz_raw is None or ask_sz_raw is None:
-                raise ValueError(f"No quotes available for {api_symbol} on KuCoin spot")
 
-            bid_price = float(bid_raw)
-            ask_price = float(ask_raw)
+            bid_price = float(data.get("bestBid") or 0)
+            ask_price = float(data.get("bestAsk") or 0)
             return BookTicker(
                 symbol      = model_sym,
                 market_type = market_type,
                 quote       = quote,
                 bid_price   = bid_price,
                 bid_qty     = build_qty_value(
-                    native        = float(bid_sz_raw),
+                    native        = float(data.get("bestBidSize") or 0),
                     qty_unit      = "base",
                     contract_size = None,
                     price         = bid_price,
                 ),
                 ask_price   = ask_price,
                 ask_qty     = build_qty_value(
-                    native        = float(ask_sz_raw),
+                    native        = float(data.get("bestAskSize") or 0),
                     qty_unit      = "base",
                     contract_size = None,
                     price         = ask_price,
@@ -678,17 +672,11 @@ class KucoinAdapter(BaseExchange):
         t = await self._make_request("GET", self.fut_rest_url, "/api/v1/ticker", {"symbol": api_symbol})
         if not t:
             raise ValueError(f"Book ticker not found for {api_symbol}")
-        bid_raw    = t.get("bestBidPrice")
-        ask_raw    = t.get("bestAskPrice")
-        bid_sz_raw = t.get("bestBidSize")
-        ask_sz_raw = t.get("bestAskSize")
-        if bid_raw is None or ask_raw is None or bid_sz_raw is None or ask_sz_raw is None:
-            raise ValueError(f"No quotes available for {api_symbol} on KuCoin {market_type.value}")
 
-        bid_price  = float(bid_raw)
-        ask_price  = float(ask_raw)
-        bid_sz     = float(bid_sz_raw)
-        ask_sz     = float(ask_sz_raw)
+        bid_price  = float(t.get("bestBidPrice") or 0)
+        ask_price  = float(t.get("bestAskPrice") or 0)
+        bid_sz     = float(t.get("bestBidSize") or 0)
+        ask_sz     = float(t.get("bestAskSize") or 0)
 
         if is_inverse:
             bid_native = bid_sz
@@ -1390,10 +1378,8 @@ class KucoinAdapter(BaseExchange):
             async for msg in self._ws_connect(market_type, topic):
                 try:
                     d = msg.get("data") or {}
-                    bids = d.get("bids") or []
-                    asks = d.get("asks") or []
-                    if not bids or not asks:
-                        continue
+                    bids = d.get("bids") or [0, 0]
+                    asks = d.get("asks") or [0, 0]
                     bid_price = float(bids[0])
                     ask_price = float(asks[0])
                     yield BookTicker(

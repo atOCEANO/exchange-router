@@ -530,8 +530,8 @@ class BybitAdapter(BaseExchange):
         contract_size = info.contract_size if info else None
         is_inverse    = market_type == MarketType.INVERSE
         unit          = "contract" if is_inverse else "base"
-        bid_price     = float(t.get("bid1Price", 0))
-        ask_price     = float(t.get("ask1Price", 0))
+        bid_price     = float(t.get("bid1Price") or 0)
+        ask_price     = float(t.get("ask1Price") or 0)
 
         return BookTicker(
             symbol      = model_sym,
@@ -539,14 +539,14 @@ class BybitAdapter(BaseExchange):
             quote       = quote,
             bid_price   = bid_price,
             bid_qty     = build_qty_value(
-                native        = float(t.get("bid1Size", 0)),
+                native        = float(t.get("bid1Size") or 0),
                 qty_unit      = unit,
                 contract_size = contract_size,
                 price         = bid_price,
             ),
             ask_price   = ask_price,
             ask_qty     = build_qty_value(
-                native        = float(t.get("ask1Size", 0)),
+                native        = float(t.get("ask1Size") or 0),
                 qty_unit      = unit,
                 contract_size = contract_size,
                 price         = ask_price,
@@ -1085,24 +1085,22 @@ class BybitAdapter(BaseExchange):
                     else:
                         asks[p] = q
 
-                if not bids or not asks:
-                    continue
-                bid_price = max(bids)
-                ask_price = min(asks)
+                bid_price = max(bids) if bids else 0.0
+                ask_price = min(asks) if asks else 0.0
                 yield BookTicker(
                     symbol      = self.get_model_symbol(d.get("s", api_symbol), market_type),
                     market_type = market_type,
                     quote       = quote,
                     bid_price   = bid_price,
                     bid_qty     = build_qty_value(
-                        native        = bids[bid_price],
+                        native        = bids.get(bid_price, 0.0),
                         qty_unit      = unit,
                         contract_size = contract_size,
                         price         = bid_price,
                     ),
                     ask_price   = ask_price,
                     ask_qty     = build_qty_value(
-                        native        = asks[ask_price],
+                        native        = asks.get(ask_price, 0.0),
                         qty_unit      = unit,
                         contract_size = contract_size,
                         price         = ask_price,

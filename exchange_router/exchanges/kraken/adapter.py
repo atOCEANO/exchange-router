@@ -842,32 +842,31 @@ class KrakenAdapter(BaseExchange):
         if market_type == MarketType.SPOT:
             data = await self._make_request("GET", f"{self.spot_rest_url}/Depth", {"pair": api_symbol, "count": 1})
             pair_key = list(data.keys())[0]
-            bids = data[pair_key].get("bids", [])
-            asks = data[pair_key].get("asks", [])
-            if not bids or not asks:
-                raise ValueError(f"No quotes available for {api_symbol} on Kraken spot")
+            bid      = (data[pair_key].get("bids") or [[0, 0, None]])[0]
+            ask      = (data[pair_key].get("asks") or [[0, 0, None]])[0]
+            stamped  = bid[2] if bid[2] is not None else ask[2]
 
-            bid_price = float(bids[0][0])
-            ask_price = float(asks[0][0])
+            bid_price = float(bid[0])
+            ask_price = float(ask[0])
             return BookTicker(
                 symbol      = model_sym,
                 market_type = market_type,
                 quote       = quote,
                 bid_price   = bid_price,
                 bid_qty     = build_qty_value(
-                    native        = float(bids[0][1]),
+                    native        = float(bid[1]),
                     qty_unit      = "base",
                     contract_size = None,
                     price         = bid_price,
                 ),
                 ask_price   = ask_price,
                 ask_qty     = build_qty_value(
-                    native        = float(asks[0][1]),
+                    native        = float(ask[1]),
                     qty_unit      = "base",
                     contract_size = None,
                     price         = ask_price,
                 ),
-                timestamp   = self.normalize_timestamp(bids[0][2]),
+                timestamp   = self.normalize_timestamp(stamped) if stamped is not None else int(time.time() * 1000),
             )
 
         data      = await self._futures_tickers()
@@ -1495,6 +1494,7 @@ class KrakenAdapter(BaseExchange):
                         for item in data.get("data", []):
                             bid_price = float(item.get("bid", 0))
                             ask_price = float(item.get("ask", 0))
+                            stamped   = self.normalize_timestamp(item.get("timestamp", time.time()))
                             yield BookTicker(
                                 symbol      = model_sym,
                                 market_type = market_type,
@@ -1513,7 +1513,7 @@ class KrakenAdapter(BaseExchange):
                                     contract_size = None,
                                     price         = ask_price,
                                 ),
-                                timestamp   = self.normalize_timestamp(item.get("timestamp", time.time())),
+                                timestamp   = stamped if stamped > 0 else int(time.time() * 1000),
                             )
                 except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
                     logger.warning(f"Kraken book_ticker {api_symbol} malformed frame skipped: {e!r}")
@@ -1629,8 +1629,6 @@ class KrakenAdapter(BaseExchange):
                         if q == 0: book.pop(p, None)
                         else:      book[p] = q
                     else:
-                        continue
-                    if not bids or not asks:
                         continue
 
                     sorted_bids = sorted(bids.items(), key=lambda kv: -kv[0])[:depth]

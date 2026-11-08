@@ -1392,14 +1392,12 @@ class OkxAdapter(BaseExchange):
         async for msg in self._ws_connect([{"channel": "bbo-tbt", "instId": api_symbol}]):
             try:
                 for b in msg.get("data", []):
-                    bids = b.get("bids", [])
-                    asks = b.get("asks", [])
-                    if not bids or not asks:
-                        continue
-                    bid_price = float(bids[0][0])
-                    ask_price = float(asks[0][0])
-                    bid_raw   = float(bids[0][1])
-                    ask_raw   = float(asks[0][1])
+                    bid       = (b.get("bids") or [[0, 0]])[0]
+                    ask       = (b.get("asks") or [[0, 0]])[0]
+                    bid_price = float(bid[0])
+                    ask_price = float(ask[0])
+                    bid_raw   = float(bid[1])
+                    ask_raw   = float(ask[1])
 
                     if market_type == MarketType.LINEAR:
                         bid_native = bid_raw * multiplier

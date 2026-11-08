@@ -546,14 +546,11 @@ class HyperliquidAdapter(BaseExchange):
         model_sym, coin, quote = await self._lookup(market_type, symbol)
 
         data   = await self._make_request("l2Book", {"type": "l2Book", "coin": coin})
-        levels = data.get("levels") or []
-        if len(levels) < 2 or not levels[0] or not levels[1]:
-            raise ValueError(f"Empty order book for {symbol} on Hyperliquid {market_type.value}")
-        bids = levels[0]
-        asks = levels[1]
+        levels = data.get("levels") or [[], []]
+        empty  = {"px": 0, "sz": 0}
 
-        bid       = bids[0]
-        ask       = asks[0]
+        bid       = levels[0][0] if levels[0] else empty
+        ask       = levels[1][0] if levels[1] else empty
         bid_price = float(bid["px"])
         ask_price = float(ask["px"])
 
@@ -1011,12 +1008,10 @@ class HyperliquidAdapter(BaseExchange):
 
         async for msg in self._ws_connect(topic, sub_arg):
             try:
-                d   = msg.get("data") or {}
-                bbo = d.get("bbo") or []
-                if len(bbo) < 2 or bbo[0] is None or bbo[1] is None:
-                    continue
-                bid       = bbo[0]
-                ask       = bbo[1]
+                d         = msg.get("data") or {}
+                bbo       = d.get("bbo") or [None, None]
+                bid       = bbo[0] or {"px": 0, "sz": 0}
+                ask       = bbo[1] or {"px": 0, "sz": 0}
                 bid_price = float(bid["px"])
                 ask_price = float(ask["px"])
                 yield BookTicker(
