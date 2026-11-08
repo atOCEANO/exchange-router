@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -323,7 +324,8 @@ class AsyncCore:
         return df
 
 
-    async def get_candles(self, exchange: str, market_type: str, symbol: str, interval: str = "1h", limit: int = 100, start: Optional[int] = None, verbose: Optional[bool] = None) -> pd.DataFrame:
+    async def get_candles(self, exchange: str, market_type: str, symbol: str, interval: str = "1h", limit: int = 100, start: Optional[int] = None, verbose: Optional[bool] = None, end: Optional[int] = None) -> pd.DataFrame:
+        start  = end if end is not None else start
         params = {"interval": interval, "limit": limit}
         if start is not None:
             params["start"] = start
@@ -335,7 +337,8 @@ class AsyncCore:
         return await self._series("trades", exchange, market_type, symbol, {"limit": limit}, None, "Interval", verbose)
 
 
-    async def get_agg_trades(self, exchange: str, market_type: str, symbol: str, limit: int = 500, start: Optional[int] = None, verbose: Optional[bool] = None) -> pd.DataFrame:
+    async def get_agg_trades(self, exchange: str, market_type: str, symbol: str, limit: int = 500, start: Optional[int] = None, verbose: Optional[bool] = None, end: Optional[int] = None) -> pd.DataFrame:
+        start  = end if end is not None else start
         params = {"limit": limit}
         if start is not None:
             params["start"] = start
@@ -343,7 +346,8 @@ class AsyncCore:
         return await self._series("agg_trades", exchange, market_type, symbol, params, None, "Interval", verbose)
 
 
-    async def get_funding_rate(self, exchange: str, market_type: str, symbol: str, limit: int = 100, start: Optional[int] = None, verbose: Optional[bool] = None) -> pd.DataFrame:
+    async def get_funding_rate(self, exchange: str, market_type: str, symbol: str, limit: int = 100, start: Optional[int] = None, verbose: Optional[bool] = None, end: Optional[int] = None) -> pd.DataFrame:
+        start  = end if end is not None else start
         params = {"limit": limit}
         if start is not None:
             params["start"] = start
@@ -351,7 +355,9 @@ class AsyncCore:
         return await self._series("funding_rate", exchange, market_type, symbol, params, None, "Interval", verbose)
 
 
-    async def get_open_interest(self, exchange: str, market_type: str, symbol: str, period: str = "1h", limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None) -> pd.DataFrame:
+    async def get_open_interest(self, exchange: str, market_type: str, symbol: str, period: str = "1h", limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, interval: Optional[str] = None, end: Optional[int] = None) -> pd.DataFrame:
+        period = interval if interval is not None else period
+        start  = end if end is not None else start
         params = {"period": period, "limit": limit}
         if start is not None:
             params["start"] = start
@@ -359,7 +365,8 @@ class AsyncCore:
         return await self._series("open_interest", exchange, market_type, symbol, params, period, "Period", verbose)
 
 
-    async def get_liquidations(self, exchange: str, market_type: str, symbol: str, limit: int = 100, start: Optional[int] = None, verbose: Optional[bool] = None) -> pd.DataFrame:
+    async def get_liquidations(self, exchange: str, market_type: str, symbol: str, limit: int = 100, start: Optional[int] = None, verbose: Optional[bool] = None, end: Optional[int] = None) -> pd.DataFrame:
+        start  = end if end is not None else start
         params = {"limit": limit}
         if start is not None:
             params["start"] = start
@@ -367,7 +374,9 @@ class AsyncCore:
         return await self._series("liquidations", exchange, market_type, symbol, params, None, "Interval", verbose)
 
 
-    async def get_long_short_ratio(self, exchange: str, market_type: str, symbol: str, period: str = "5m", limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None) -> pd.DataFrame:
+    async def get_long_short_ratio(self, exchange: str, market_type: str, symbol: str, period: str = "5m", limit: int = 30, start: Optional[int] = None, verbose: Optional[bool] = None, interval: Optional[str] = None, end: Optional[int] = None) -> pd.DataFrame:
+        period = interval if interval is not None else period
+        start  = end if end is not None else start
         params = {"period": period, "limit": limit}
         if start is not None:
             params["start"] = start
@@ -382,6 +391,10 @@ class AsyncCore:
         v         = self.verbose if verbose is None else verbose
         semaphore = asyncio.Semaphore(max_concurrent)
         method    = getattr(self, f"get_{route}")
+        accepted  = sorted(set(inspect.signature(method).parameters) - {"exchange", "market_type", "symbol", "verbose"})
+        unknown   = sorted(set(kwargs) - set(accepted))
+        if unknown:
+            raise BadRequest(f"keyword '{unknown[0]}' is not taken by {route}; it takes {', '.join(accepted)}", 400)
 
         await self._ensure_capabilities(exchange)
 

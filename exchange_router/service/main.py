@@ -273,13 +273,17 @@ async def get_trades(exchange: str, market_type: MarketType, symbol: str, limit:
 
 
 @app.get("/{exchange}/{market_type}/agg_trades/{symbol}")
-async def get_agg_trades(exchange: str, market_type: MarketType, symbol: str, start: Optional[int] = None, limit: int = Query(500, ge=1)):
+async def get_agg_trades(exchange: str, market_type: MarketType, symbol: str, start: Optional[int] = None, limit: int = Query(500, ge=1), end: Optional[int] = None):
+    start = end if end is not None else start
+
     adapter, symbol = await validate_market(exchange, market_type, symbol)
     return await adapter.get_agg_trades(market_type, symbol, start, limit)
 
 
 @app.get("/{exchange}/{market_type}/candles/{symbol}")
-async def get_candles(exchange: str, market_type: MarketType, symbol: str, interval: str = "1h", start: Optional[int] = None, limit: int = Query(100, ge=1)):
+async def get_candles(exchange: str, market_type: MarketType, symbol: str, interval: str = "1h", start: Optional[int] = None, limit: int = Query(100, ge=1), end: Optional[int] = None):
+    start = end if end is not None else start
+
     adapter = validate_request(exchange, market_type)
     validate_interval(adapter, market_type, "candles", "Interval", interval)
     symbol  = await adapter.listed_symbol(market_type, symbol)
@@ -287,7 +291,10 @@ async def get_candles(exchange: str, market_type: MarketType, symbol: str, inter
 
 
 @app.get("/{exchange}/{market_type}/open_interest/{symbol}")
-async def get_open_interest(exchange: str, market_type: MarketType, symbol: str, period: str = Query("1h"), start: Optional[int] = None, limit: int = Query(30, ge=1)):
+async def get_open_interest(exchange: str, market_type: MarketType, symbol: str, period: str = Query("1h"), start: Optional[int] = None, limit: int = Query(30, ge=1), interval: Optional[str] = None, end: Optional[int] = None):
+    period = interval if interval is not None else period
+    start  = end if end is not None else start
+
     adapter = validate_request(exchange, market_type)
     validate_interval(adapter, market_type, "open_interest", "Period", period)
     symbol  = await adapter.listed_symbol(market_type, symbol)
@@ -297,19 +304,26 @@ async def get_open_interest(exchange: str, market_type: MarketType, symbol: str,
 
 
 @app.get("/{exchange}/{market_type}/funding_rate/{symbol}")
-async def get_funding_rate(exchange: str, market_type: MarketType, symbol: str, start: Optional[int] = None, limit: int = Query(100, ge=1)):
+async def get_funding_rate(exchange: str, market_type: MarketType, symbol: str, start: Optional[int] = None, limit: int = Query(100, ge=1), end: Optional[int] = None):
+    start = end if end is not None else start
+
     adapter, symbol = await validate_market(exchange, market_type, symbol)
     return await adapter.get_funding_rate(market_type, symbol, start, limit)
 
 
 @app.get("/{exchange}/{market_type}/liquidations/{symbol}")
-async def get_liquidations(exchange: str, market_type: MarketType, symbol: str, start: Optional[int] = None, limit: int = Query(100, ge=1)):
+async def get_liquidations(exchange: str, market_type: MarketType, symbol: str, start: Optional[int] = None, limit: int = Query(100, ge=1), end: Optional[int] = None):
+    start = end if end is not None else start
+
     adapter, symbol = await validate_market(exchange, market_type, symbol)
     return await adapter.get_liquidations(market_type, symbol, start, limit)
 
 
 @app.get("/{exchange}/{market_type}/long_short_ratio/{symbol}")
-async def get_long_short_ratio(exchange: str, market_type: MarketType, symbol: str, period: str = Query("5m"), start: Optional[int] = None, limit: int = Query(30, ge=1)):
+async def get_long_short_ratio(exchange: str, market_type: MarketType, symbol: str, period: str = Query("5m"), start: Optional[int] = None, limit: int = Query(30, ge=1), interval: Optional[str] = None, end: Optional[int] = None):
+    period = interval if interval is not None else period
+    start  = end if end is not None else start
+
     adapter = validate_request(exchange, market_type)
     validate_interval(adapter, market_type, "long_short_ratio", "Period", period)
     symbol  = await adapter.listed_symbol(market_type, symbol)
