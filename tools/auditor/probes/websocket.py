@@ -37,6 +37,67 @@ def silent_window_verdict(stamps: List[int], start_ms: int, end_ms: int) -> str:
     return "unknown"
 
 
+def subscribed_verdict(frame: Any, channel: str, symbol: Optional[str]) -> Optional[str]:
+    said = (frame.get("channel"), frame.get("symbol"), frame.get("schema_version")) if isinstance(frame, dict) else None
+    if said != (channel, symbol, SCHEMA_VERSION):
+        return f"subscribed names {said}, not ({channel!r}, {symbol!r}, {SCHEMA_VERSION})"
+    return None
+
+
+def stream_refusal_verdict(body: Any, close_code: Optional[int]) -> Optional[str]:
+    title = body.get("error") if isinstance(body, dict) else None
+    if title != "Unknown Symbol":
+        return f"the stream sent {body!r} and closed with {close_code}, where an Unknown Symbol body was due"
+    if close_code != 1003:
+        return f"the stream closed with {close_code} after its Unknown Symbol body, where 1003 was due"
+    return None
+
+
+def ws_base() -> str:
+    return API_URL.replace("https://", "wss://").replace("http://", "ws://")
+
+
+class StreamRefusalProbe(Probe):
+    kind  = "ws"
+    route = "error_paths"
+    name  = "error:bad_symbol_stream"
+
+
+    def applies(self, ctx: ProbeContext) -> bool:
+        return ctx.market_type is None
+
+
+    async def run(self, ctx: ProbeContext) -> List[ProbeResult]:
+        started  = time.time()
+        spot     = (ctx.caps.get("market_types") or {}).get("spot") or {}
+        channels = [route for route, block in spot.items() if isinstance(block, dict) and block.get("ws")]
+        if not channels:
+            return [self.result(ctx, self.name, started, status="skip", error_type=ErrorType.SKIPPED, message="no spot stream to ask for")]
+
+        url        = f"{ws_base()}/ws/{ctx.exchange}/spot"
+        body, code = None, None
+        try:
+            async with websockets.connect(url, open_timeout=WS_OPEN_TIMEOUT) as ws:
+                await ws.send(json.dumps({"channel": channels[0], "symbol": "ZZZNOTREAL", "schema_version": SCHEMA_VERSION}))
+                try:
+                    body = json.loads(await asyncio.wait_for(ws.recv(), timeout=WS_OPEN_TIMEOUT))
+                    await asyncio.wait_for(ws.wait_closed(), timeout=WS_OPEN_TIMEOUT)
+                except websockets.exceptions.ConnectionClosed:
+                    pass
+                code = ws.close_code
+        except (asyncio.TimeoutError, OSError, json.JSONDecodeError, websockets.exceptions.WebSocketException) as e:
+            return [self.result(ctx, self.name, started, status="fail", error_type=ErrorType.NETWORK, message=f"ws error: {e}", evidence={"url": url, "channel": channels[0]})]
+
+        problem = stream_refusal_verdict(body, code)
+        return [self.result(
+            ctx, self.name, started,
+            status="fail" if problem else "pass",
+            error_type=ErrorType.LOGIC if problem else ErrorType.OK,
+            message=problem or f"the {channels[0]} stream answered Unknown Symbol, then closed with 1003",
+            evidence={"url": url, "channel": channels[0], "body": body, "close_code": code},
+        )]
+
+
 class WebSocketProbe(Probe):
     kind = "ws"
 
@@ -54,11 +115,7 @@ class WebSocketProbe(Probe):
 
 
     async def run(self, ctx: ProbeContext) -> List[ProbeResult]:
-        if API_URL.startswith("https://"):
-            base_ws = API_URL.replace("https://", "wss://")
-        else:
-            base_ws = API_URL.replace("http://", "ws://")
-        ws_url = f"{base_ws}/ws/{ctx.exchange}/{ctx.market_type}"
+        ws_url = f"{ws_base()}/ws/{ctx.exchange}/{ctx.market_type}"
 
         started         = time.time()
         frames_received = 0
@@ -67,6 +124,7 @@ class WebSocketProbe(Probe):
         last_error: Optional[str]       = None
         bad_frame: Optional[Dict[str, Any]] = None
         kind_flag: Optional[Tuple[str, ErrorType, str, Dict[str, Any]]] = None
+        lost = 0
 
         captured_frames: List[Dict[str, Any]] = []
 
@@ -93,12 +151,19 @@ class WebSocketProbe(Probe):
                         break
 
                     if isinstance(msg, dict) and len(msg) == 1 and next(iter(msg)) in ("subscribed", "lost"):
-                        if subscribed_ms is None and "subscribed" in msg:
+                        if "lost" in msg:
+                            lost += 1
+                            continue
+                        problem = subscribed_verdict(msg["subscribed"], self.channel, ctx.symbol)
+                        if problem:
+                            bad_frame = {"reason": "control", "error": problem}
+                            break
+                        if subscribed_ms is None:
                             subscribed_ms = arrived
                         continue
 
                     if isinstance(msg, dict) and msg.get("error"):
-                        bad_frame = {"reason": "upstream_error", "error": f"{msg['error']}: {msg.get('detail')}"}
+                        bad_frame = {"reason": "error_body", "error": f"{msg['error']}: {msg.get('detail')}"}
                         break
 
                     if subscribed_ms is None:
@@ -164,10 +229,23 @@ class WebSocketProbe(Probe):
             "min_required":    self.min_frames,
             "first_frame_ms":  first_frame_ms,
             "subscribed_ms":   subscribed_ms,
+            "lost":            lost,
             "window_s":        WS_TEST_DURATION,
         }
 
         sample = [item["frame"] for item in captured_frames[:SAMPLE_MAX_ITEMS]]
+
+        if lost and frames_received < self.min_frames:
+            r = self.result(
+                ctx, self.name, started,
+                status="warn",
+                error_type=ErrorType.NETWORK,
+                message=f"the venue dropped the stream {lost} times; {frames_received}/{self.min_frames} frames came",
+                evidence=evidence,
+                ended=ended,
+            )
+            r.sample = sample
+            return [r]
 
         if frames_received == 0 and self.channel in TRADE_CHANNELS:
             stamps = await trade_stamps(ctx)

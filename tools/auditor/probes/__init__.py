@@ -20,7 +20,7 @@ from tools.auditor.probes.paginated import PaginatedProbe
 from tools.auditor.probes.snapshot import SnapshotProbe
 from tools.auditor.probes.symbol import SymbolResolutionProbe
 from tools.auditor.probes.trades import TradesProbe
-from tools.auditor.probes.websocket import WS_CHANNEL_MODEL, WebSocketProbe
+from tools.auditor.probes.websocket import WS_CHANNEL_MODEL, StreamRefusalProbe, WebSocketProbe
 
 
 __all__ = [
@@ -74,4 +74,4 @@ def market_probes(caps_slice: Dict[str, Any]) -> List[Probe]:
 
 
 def exchange_probes() -> List[Probe]:
-    return [ErrorPathProbe()]
+    return [ErrorPathProbe(), StreamRefusalProbe()]

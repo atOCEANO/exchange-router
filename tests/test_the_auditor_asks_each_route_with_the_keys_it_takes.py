@@ -26,7 +26,7 @@ async def test_every_rest_probe_asks_with_keys_its_route_takes(audit):
     results = []
 
     await runner._overview(client, "fake", results.append)
-    for probe in exchange_probes():
+    for probe in [probe for probe in exchange_probes() if probe.kind == "rest"]:
         results.extend(await probe.run(base.ProbeContext(client=client, exchange="fake", market_type=None, symbol=None, caps=caps, caps_slice=None, now_ms=base.now_ms())))
 
     for market_type, block in caps["market_types"].items():
