@@ -1,5 +1,6 @@
+import dataclasses
 import time
-from typing import List
+from typing import Any, Dict, List
 
 from tools.auditor.aggregator import ErrorType, ProbeResult
 from tools.auditor.config import SAMPLE_MAX_ITEMS
@@ -102,3 +103,78 @@ class MarketsProbe(Probe):
         )
         r.sample = sample
         return [r]
+
+
+LIMITED = ("trades", "agg_trades", "candles", "funding_rate", "open_interest", "liquidations", "long_short_ratio")
+
+
+class HaltedMarketProbe(Probe):
+    kind  = "rest"
+    route = "markets"
+    name  = "markets:halted"
+
+
+    def applies(self, ctx: ProbeContext) -> bool:
+        return ctx.market_type is not None
+
+
+    async def run(self, ctx: ProbeContext) -> List[ProbeResult]:
+        started = time.time()
+        status, body, err = await fetch(ctx.client, f"/{ctx.exchange}/{ctx.market_type}/markets", {"status": "halted"})
+
+        if status != 200:
+            return [self.http_failure(ctx, self.name, started, status, body, err)]
+        entries = body.get("markets") if isinstance(body, dict) else None
+        if not entries:
+            return [self.result(ctx, self.name, started, status="skip", error_type=ErrorType.SKIPPED, message="no halted market listed")]
+
+        halted = dataclasses.replace(ctx, symbol=entries[0]["symbol"])
+        out    = [await self._symbol_info(halted)]
+        for route, block in (ctx.caps_slice or {}).items():
+            if isinstance(block, dict) and block.get("rest"):
+                out.append(await self._answers(halted, route, block))
+        return out
+
+
+    async def _symbol_info(self, ctx: ProbeContext) -> ProbeResult:
+        name    = f"{self.name}:symbol_info"
+        started = time.time()
+        status, info, err = await fetch(ctx.client, f"/{ctx.exchange}/{ctx.market_type}/markets/{ctx.symbol}")
+
+        if status != 200:
+            return self.http_failure(ctx, name, started, status, info, err)
+        said = (info.get("status"), info.get("time_source"))
+        if said != ("halted", "router") or not info.get("timestamp"):
+            return self.result(
+                ctx, name, started,
+                status="fail",
+                error_type=ErrorType.LOGIC,
+                message=f"a halted market's symbol info says {said}, read at {info.get('timestamp')}",
+                evidence={"status": said[0], "time_source": said[1], "timestamp": info.get("timestamp")},
+            )
+        return self.result(
+            ctx, name, started,
+            status="pass",
+            error_type=ErrorType.OK,
+            message=f"{ctx.symbol} says halted, read at {info['timestamp']}",
+            evidence={"timestamp": info["timestamp"]},
+        )
+
+
+    async def _answers(self, ctx: ProbeContext, route: str, block: Dict[str, Any]) -> ProbeResult:
+        name    = f"{self.name}:{route}"
+        started = time.time()
+        params: Dict[str, Any] = {"limit": 5} if route in LIMITED else {}
+        if block.get("intervals"):
+            params["interval"] = block["intervals"][0]
+        status, data, err = await fetch(ctx.client, f"/{ctx.exchange}/{ctx.market_type}/{route}/{ctx.symbol}", params)
+
+        if status != 200:
+            return self.http_failure(ctx, name, started, status, data, err)
+        return self.result(
+            ctx, name, started,
+            status="pass",
+            error_type=ErrorType.OK,
+            message=f"{ctx.symbol} is halted and {route} answers",
+            evidence={"params": params},
+        )

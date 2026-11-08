@@ -14,7 +14,7 @@ from tools.auditor.probes.cross_route import CrossRouteConsistencyProbe
 from tools.auditor.probes.errors import ErrorPathProbe
 from tools.auditor.probes.info import InfoProbe
 from tools.auditor.probes.margin_tiers import MarginTiersProbe
-from tools.auditor.probes.markets import MarketsProbe
+from tools.auditor.probes.markets import HaltedMarketProbe, MarketsProbe
 from tools.auditor.probes.orderbook import OrderBookProbe
 from tools.auditor.probes.paginated import PaginatedProbe
 from tools.auditor.probes.snapshot import SnapshotProbe
@@ -38,6 +38,7 @@ def market_probes(caps_slice: Dict[str, Any]) -> List[Probe]:
 
     probes.append(InfoProbe())
     probes.append(MarketsProbe())
+    probes.append(HaltedMarketProbe())
     probes.append(SymbolResolutionProbe())
     probes.append(CapabilitiesConsistencyProbe())
 
