@@ -74,7 +74,7 @@ The modes share one API and return the same types. Local serves every route the 
 
 Clients talk to one endpoint, the router routes requests to the right exchange adapter, and the adapter normalizes the response into a schema that is identical across exchanges. REST and WebSocket both sit on the same port, and the same adapter instance serves both, so a client written against Binance spot works against Bybit linear with a single path change.
 
-The wire format carries nested value objects on every quantitative record: each `qty`, `volume`, or `open_interest` field comes back as `{native, unit, contract_size?, usd, usd_basis?}` so a single record contains both the raw upstream value and a quote-currency notional with the conversion basis spelled out. Funding uses a `kind: "discrete" | "continuous"` discriminator so a position-PnL calculation branches on the funding model itself, with no exchange-specific code. See [HTTP Reference](.Documentation/HTTP_Reference.md) for the wire-format spec with worked response examples, and [Exchange Notes](.Documentation/Exchange_Notes.md) for per-exchange semantic quirks.
+The wire format carries nested value objects on every quantitative record: each `qty`, `volume`, or `open_interest` field comes back as `{native, unit, contract_size, notional, notional_basis}` so a single record contains both the raw upstream value and its notional in the quote currency, with the price it was worked out at spelled out. Where exchanges differ in what a value means, the record names the case in a kind: the funding model, the source of a price, the clock that stamped a snapshot. A value the exchange did not send is `null`. See [HTTP Reference](.Documentation/HTTP_Reference.md) for the wire-format spec with worked response examples, and [Exchange Notes](.Documentation/Exchange_Notes.md) for per-exchange semantic quirks.
 
 <br>
 <br>
@@ -91,7 +91,7 @@ Public market data from every registered exchange adapter, normalized to one sch
 * **No historical archive.** History is fetched from upstream on demand, bounded by each venue's own retention. The router never stores rows past the response.
 * **No inbound rate limiting.** Outbound rate-limit respect, which keeps the router from being banned by upstreams, is enforced per adapter. Inbound limits, quotas, and per-client throttling belong in a reverse proxy.
 * **No observability.** Logs go to stdout via Python `logging`. Metrics and traces are not emitted. Wrap the service at the edge if you need them.
-* **No invented data.** When an upstream omits a field, the router surfaces the gap (`null`, `0`, or an empty list), never a derived or fabricated value. See the [data fidelity rule](.Documentation/Exchange_Notes.md#data-fidelity-rule) in Exchange Notes.
+* **No invented data.** When an upstream omits a field, the router surfaces the gap (`null` or an empty list), never a derived or fabricated value. See the [data fidelity rule](.Documentation/Exchange_Notes.md#data-fidelity-rule) in Exchange Notes.
 
 ### Deployment posture
 
@@ -433,7 +433,7 @@ with Router.service("http://localhost:8040", exchanges=["binance"]) as client:
 from exchange_router import Router
 
 with Router.local(exchanges=["binance"]) as client:
-    symbols = [m["symbol"] for m in client.get_markets("binance", "spot")["markets"]]
+    symbols = [m["symbol"] for m in client.get_markets("binance", "spot")]
 
     result = client.candles_many("binance", "spot", symbols, interval="1d", limit=1000)
 
