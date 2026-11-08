@@ -1,6 +1,10 @@
 from enum import Enum
-from typing import List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class Record(BaseModel):
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
 
 
 class MarketType(str, Enum):
@@ -9,7 +13,7 @@ class MarketType(str, Enum):
     INVERSE = "inverse"
 
 
-class NotionalBasis(BaseModel):
+class NotionalBasis(Record):
     method: str = Field(
         ...,
         description="How notional was worked out. Known values: row_price, the native amount times the row's own price, a candle's close; contract_size, contracts times their size, exact, using no price; candle_close, the native amount times the close of the candle that ends at the reading's time; mark, the native amount times the mark price read with it. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
@@ -31,33 +35,7 @@ class NotionalBasis(BaseModel):
         return self
 
 
-class QtyValue(BaseModel):
-    native: float = Field(
-        ...,
-        description="The size in unit, as the venue states it.",
-    )
-    unit: str = Field(
-        ...,
-        description="What native counts. Known values: base, the base asset, on spot and linear; contract, on inverse. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
-    )
-    contract_size: Optional[float] = Field(
-        ...,
-        description="Quote notional of one contract; null when unit is base.",
-    )
-    notional: float = Field(
-        ...,
-        description="The size's value in quote, never converted: native times the row's price on base, native times contract_size on contracts.",
-    )
-
-
-    @model_validator(mode="after")
-    def _contract_requires_size(self) -> "QtyValue":
-        if self.unit == "contract" and self.contract_size is None:
-            raise ValueError("QtyValue.contract_size must be set when unit == 'contract'")
-        return self
-
-
-class VolumeValue(BaseModel):
+class VolumeValue(Record):
     native: float = Field(
         ...,
         description="Volume in unit, as the venue states it.",
@@ -87,7 +65,7 @@ class VolumeValue(BaseModel):
         return self
 
 
-class OiValue(BaseModel):
+class OiValue(Record):
     native: float = Field(
         ...,
         description="Open interest in unit, as the venue states it.",
@@ -117,14 +95,14 @@ class OiValue(BaseModel):
         return self
 
 
-class FundingConvention(BaseModel):
+class FundingConvention(Record):
     kind: str = Field(
         ...,
         description="Funding model of the market. Known values: discrete, settled at fixed cycles; continuous, accrued smoothly and sampled at a fixed cadence. The cycle lives on the mark price and the funding history, since a venue can change it without changing the model. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
     )
 
 
-class QtyUnit(BaseModel):
+class QtyUnit(Record):
     unit: str = Field(
         ...,
         description="What a size counts. Known values: base, the base asset, on spot and linear; contract, on inverse. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
@@ -161,7 +139,18 @@ class QtyGrid(QtyUnit):
     )
 
 
-class PriceTick(BaseModel):
+class QtyValue(QtyUnit):
+    native: float = Field(
+        ...,
+        description="The size in unit, as the venue states it.",
+    )
+    notional: float = Field(
+        ...,
+        description="The size's value in quote, never converted: native times the row's price on base, native times contract_size on contracts.",
+    )
+
+
+class PriceTick(Record):
     kind: Literal["tick"] = Field(
         ...,
         description="The venue states a fixed price step. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
@@ -176,7 +165,7 @@ class PriceTick(BaseModel):
     )
 
 
-class PriceSignificantFigures(BaseModel):
+class PriceSignificantFigures(Record):
     kind: Literal["significant_figures"] = Field(
         ...,
         description="The venue states no tick and holds a price to a count of significant figures. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
@@ -191,7 +180,7 @@ class PriceSignificantFigures(BaseModel):
     )
 
 
-class PriceOther(BaseModel):
+class PriceOther(Record):
     model_config = ConfigDict(extra="allow")
     kind: str = Field(
         ...,
@@ -199,14 +188,14 @@ class PriceOther(BaseModel):
     )
 
 
-class Notional(BaseModel):
+class Notional(Record):
     min: Optional[float] = Field(
         ...,
         description="Smallest order value, in quote; null where the venue states none.",
     )
 
 
-class FundingDeadline(BaseModel):
+class FundingDeadline(Record):
     kind: str = Field(
         ...,
         description="What the deadline is. Known values: settlement, the moment per_cycle is charged, as the venue states it or its fixed schedule sets it; estimate, the router's reckoning where the venue does not say when its rate is next replaced. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
@@ -217,7 +206,7 @@ class FundingDeadline(BaseModel):
     )
 
 
-class FundingCurrent(BaseModel):
+class FundingCurrent(Record):
     kind: str = Field(
         ...,
         description="Funding model. Known values: discrete, per_cycle is the rate to be charged at the settlement valid_until names; continuous, per_cycle is the rate accrued over each cycle_ms-length window, and partial holds pay in proportion. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
@@ -236,7 +225,7 @@ class FundingCurrent(BaseModel):
     )
 
 
-class FundingHistorical(BaseModel):
+class FundingHistorical(Record):
     kind: str = Field(
         ...,
         description="Funding model. Known values: discrete, rows are settlement events; continuous, rows are sample observations. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
@@ -251,7 +240,7 @@ class FundingHistorical(BaseModel):
     )
 
 
-class SymbolInfo(BaseModel):
+class SymbolInfo(Record):
     symbol: str = Field(
         ...,
         description="Routing-facing symbol; exchange-native form with contract-type prefixes or suffixes stripped (e.g. 'BTCUSDT' on Binance, 'XBTUSD' on Kraken futures where the PF_ prefix is stripped). No base-currency translation (XBT stays XBT).",
@@ -302,7 +291,7 @@ class SymbolInfo(BaseModel):
     )
 
 
-class Ticker(BaseModel):
+class Ticker(Record):
     symbol: str = Field(
         ...,
         description="Routing-facing symbol matching SymbolInfo.symbol.",
@@ -375,7 +364,7 @@ class Ticker(BaseModel):
         return self
 
 
-class BookTicker(BaseModel):
+class BookTicker(Record):
     symbol: str = Field(
         ...,
         description="Routing-facing symbol matching SymbolInfo.symbol.",
@@ -423,7 +412,7 @@ class BookTicker(BaseModel):
         return self
 
 
-class MarkPrice(BaseModel):
+class MarkPrice(Record):
     symbol: str = Field(
         ...,
         description="Routing-facing symbol matching SymbolInfo.symbol.",
@@ -468,7 +457,7 @@ class MarkPrice(BaseModel):
         return self
 
 
-class Trade(BaseModel):
+class Trade(Record):
     id: Optional[str] = Field(
         None,
         description="Exchange-native trade id when available, with an adapter-synthesized event-time fallback on rows where the upstream omits it. Null when neither is available. Not all exchanges produce sortable values; do not rely on lexicographic ordering. Sort by timestamp for chronology.",
@@ -503,7 +492,7 @@ class Trade(BaseModel):
     )
 
 
-class AggTrade(BaseModel):
+class AggTrade(Record):
     agg_id: str = Field(
         ...,
         description="Exchange-native aggregate-trade id, stringified.",
@@ -546,7 +535,7 @@ class AggTrade(BaseModel):
     )
 
 
-class Candle(BaseModel):
+class Candle(Record):
     symbol: str = Field(
         ...,
         description="Routing-facing symbol matching SymbolInfo.symbol.",
@@ -600,7 +589,7 @@ class Candle(BaseModel):
         return self
 
 
-class OrderBook(BaseModel):
+class OrderBook(Record):
     symbol: str = Field(
         ...,
         description="Routing-facing symbol matching SymbolInfo.symbol.",
@@ -635,7 +624,7 @@ class OrderBook(BaseModel):
     )
 
 
-class MarginTier(BaseModel):
+class MarginTier(Record):
     up_to: Optional[float] = Field(
         None,
         description="Position size where the tier ends, in up_to_unit. Null on an open last tier.",
@@ -658,7 +647,7 @@ class MarginTier(BaseModel):
     )
 
 
-class MarginTiers(BaseModel):
+class MarginTiers(Record):
     symbol: str = Field(
         ...,
         description="Routing-facing symbol matching SymbolInfo.symbol.",
@@ -671,9 +660,9 @@ class MarginTiers(BaseModel):
         ...,
         description="Quote currency of the market.",
     )
-    up_to_unit: Literal["quote", "base", "contract"] = Field(
+    up_to_unit: str = Field(
         ...,
-        description="How to read up_to: 'quote' is a position value in quote, 'base' an amount of the base asset, 'contract' a contract count.",
+        description="How to read up_to. Known values: quote, a position value in quote; base, an amount of the base asset; contract, a contract count. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
     )
     tiers: List[MarginTier] = Field(
         ...,
@@ -691,7 +680,7 @@ class MarginTiers(BaseModel):
         return self
 
 
-class FundingRate(BaseModel):
+class FundingRate(Record):
     symbol: str = Field(
         ...,
         description="Routing-facing symbol matching SymbolInfo.symbol.",
@@ -714,7 +703,7 @@ class FundingRate(BaseModel):
     )
 
 
-class OpenInterest(BaseModel):
+class OpenInterest(Record):
     symbol: str = Field(
         ...,
         description="Routing-facing symbol matching SymbolInfo.symbol.",
@@ -745,7 +734,7 @@ class OpenInterest(BaseModel):
     )
 
 
-class Liquidation(BaseModel):
+class Liquidation(Record):
     symbol: str = Field(
         ...,
         description="Routing-facing symbol matching SymbolInfo.symbol.",
@@ -776,7 +765,7 @@ class Liquidation(BaseModel):
     )
 
 
-class LongShortRatio(BaseModel):
+class LongShortRatio(Record):
     symbol: str = Field(
         ...,
         description="Routing-facing symbol matching SymbolInfo.symbol.",
@@ -801,11 +790,164 @@ class LongShortRatio(BaseModel):
         None,
         description="Fraction of accounts on the short side, in [0, 1]. Null when account_scope == 'opaque'.",
     )
-    account_scope: Literal["top_traders", "all_accounts", "opaque"] = Field(
+    account_scope: str = Field(
         ...,
-        description="Whose accounts are counted: 'top_traders', 'all_accounts', or 'opaque' when the upstream exposes no breakdown. Per-venue specifics live in Exchange Notes. Cross-exchange comparisons require matching scope.",
+        description="Whose accounts are counted. Known values: all_accounts; top_traders; opaque, when the upstream exposes no breakdown. Per-venue specifics live in Exchange Notes, and comparing venues needs a matching scope. Open: the known values are listed here, and a client that meets another leaves the block it qualifies uninterpreted.",
     )
     timestamp: int = Field(
         ...,
         description="Bucket close time in unix milliseconds (end of `interval`).",
+    )
+
+
+class ErrorBody(Record):
+    error: Literal["Invalid Request", "Unknown Symbol", "Not Found", "Not Implemented", "Bad Upstream Response", "Upstream Unavailable", "Internal Server Error"] = Field(
+        ...,
+        description="The kind of error, one of a fixed list a client can switch on.",
+    )
+    detail: str = Field(
+        ...,
+        description="What went wrong, and where to look.",
+    )
+
+
+class MarketEntry(Record):
+    symbol: str = Field(
+        ...,
+        description="Routing-facing symbol matching SymbolInfo.symbol.",
+    )
+    status: str = Field(
+        ...,
+        description="Whether the market trades now, as on SymbolInfo.status.",
+    )
+    base: str = Field(
+        ...,
+        description="Base asset, in the venue's own code.",
+    )
+    quote: str = Field(
+        ...,
+        description="Quote asset.",
+    )
+    qty: QtyUnit = Field(
+        ...,
+        description="What a size counts on the market.",
+    )
+    funding: Optional[FundingConvention] = Field(
+        ...,
+        description="Funding convention; null on spot.",
+    )
+
+
+class MarketList(Record):
+    exchange: str = Field(
+        ...,
+        description="The exchange the list was read from.",
+    )
+    market_type: MarketType = Field(
+        ...,
+        description="The market type the list covers.",
+    )
+    count: int = Field(
+        ...,
+        description="How many markets the list holds.",
+    )
+    markets: List[MarketEntry] = Field(
+        ...,
+        description="The markets in the state ?status= asks for, trading by default.",
+    )
+
+
+class MarketTypeList(Record):
+    market_types: List[MarketType] = Field(
+        ...,
+        description="The market types the exchange is served for.",
+    )
+
+
+class MarketTypeOverview(Record):
+    market_type: MarketType = Field(
+        ...,
+        description="The market type this entry describes.",
+    )
+    symbol_count: Optional[int] = Field(
+        ...,
+        description="How many markets the venue lists that trade; null when the list could not be read.",
+    )
+    capabilities: Dict[str, Any] = Field(
+        ...,
+        description="The capability block of the market type, as /{exchange}/capabilities gives it.",
+    )
+
+
+class ExchangeOverview(Record):
+    exchange: str = Field(
+        ...,
+        description="The exchange described.",
+    )
+    market_types: List[MarketTypeOverview] = Field(
+        ...,
+        description="One entry per market type the exchange is served for.",
+    )
+
+
+class ServedExchange(Record):
+    name: str = Field(
+        ...,
+        description="The exchange's name in every route.",
+    )
+    market_types: List[MarketType] = Field(
+        ...,
+        description="The market types it is served for.",
+    )
+
+
+class ServiceRoot(Record):
+    service: str = Field(
+        ...,
+        description="The service's name.",
+    )
+    version: str = Field(
+        ...,
+        description="The release the service runs.",
+    )
+    schema_version: int = Field(
+        ...,
+        description="The schema every answer follows.",
+    )
+    exchanges: List[ServedExchange] = Field(
+        ...,
+        description="The exchanges served, with their market types.",
+    )
+
+
+class ServiceStatus(Record):
+    status: str = Field(
+        ...,
+        description="Always ok: answering at all is the signal.",
+    )
+    service: str = Field(
+        ...,
+        description="The service's name.",
+    )
+
+
+class ServiceVersion(Record):
+    version: str = Field(
+        ...,
+        description="The release the service runs.",
+    )
+    schema_version: int = Field(
+        ...,
+        description="The schema every answer follows; an SDK that speaks another one stops at its first call.",
+    )
+
+
+class ExchangeList(Record):
+    count: int = Field(
+        ...,
+        description="How many exchanges are served.",
+    )
+    exchanges: List[str] = Field(
+        ...,
+        description="The exchanges served, by name.",
     )

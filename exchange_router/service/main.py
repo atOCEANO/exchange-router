@@ -8,13 +8,18 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import HTTPConnection
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from pydantic import ValidationError
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Any, Dict, List, Optional
 from exchange_router.capabilities import KNOWN_WS_CHANNELS, market_block, route_block
 from exchange_router.exchanges import EXCHANGE_REGISTRY, get_adapter, shutdown_exchanges, startup_exchanges
 from exchange_router.exchanges.base import UNREADABLE, RequestError, UnknownSymbolError, UpstreamUnavailableError, join_open_interest_basis, series_interval, symbol_info_to_lite
-from exchange_router.models import MarketType
+from exchange_router.models import (
+    AggTrade, BookTicker, Candle, ErrorBody, ExchangeList, ExchangeOverview, FundingRate, Liquidation, LongShortRatio,
+    MarginTiers, MarkPrice, MarketList, MarketType, MarketTypeList, OpenInterest, OrderBook, ServiceRoot, ServiceStatus,
+    ServiceVersion, SymbolInfo, Ticker, Trade,
+)
 from exchange_router.service.answers import TITLES, refuse, status_of
 from exchange_router.service.stream_manager import StreamManager
 from exchange_router.version import SCHEMA_VERSION, VERSION
@@ -27,6 +32,8 @@ stream_manager = StreamManager()
 WS_HANDSHAKE_TIMEOUT_S = 10.0
 
 RENAMED = {"period": "interval", "start": "end"}
+
+ERRORS = {status: {"model": ErrorBody} for status in (400, 404, 501, 502, 503, 500)}
 
 
 def refuse_unknown_keys(connection: HTTPConnection) -> None:
@@ -67,6 +74,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def published() -> dict:
+    if app.openapi_schema is None:
+        schema = get_openapi(
+            title   = app.title,
+            version = app.version,
+            routes  = app.routes,
+        )
+        for path in schema["paths"].values():
+            for operation in path.values():
+                operation["responses"].pop("422", None)
+        for name in ("HTTPValidationError", "ValidationError"):
+            schema["components"]["schemas"].pop(name, None)
+        app.openapi_schema = schema
+    return app.openapi_schema
+
+
+app.openapi = published
 
 
 @app.middleware("http")
@@ -158,7 +184,10 @@ async def validate_market(exchange: str, market_type: MarketType, symbol: str):
     return adapter, await adapter.listed_symbol(market_type, symbol)
 
 
-@app.get("/")
+@app.get(
+    "/",
+    responses = {200: {"model": ServiceRoot}, **ERRORS},
+)
 async def service_root():
     return {
         "service":        "exchange-router-service",
@@ -174,22 +203,34 @@ async def service_root():
     }
 
 
-@app.get("/status")
+@app.get(
+    "/status",
+    responses = {200: {"model": ServiceStatus}, **ERRORS},
+)
 def service_status():
     return {"status": "ok", "service": "exchange-router-service"}
 
 
-@app.get("/version")
+@app.get(
+    "/version",
+    responses = {200: {"model": ServiceVersion}, **ERRORS},
+)
 def service_version():
     return {"version": VERSION, "schema_version": SCHEMA_VERSION}
 
 
-@app.get("/exchanges")
+@app.get(
+    "/exchanges",
+    responses = {200: {"model": ExchangeList}, **ERRORS},
+)
 def list_exchanges():
     return {"count": len(EXCHANGE_REGISTRY), "exchanges": list(EXCHANGE_REGISTRY.keys())}
 
 
-@app.get("/{exchange}")
+@app.get(
+    "/{exchange}",
+    responses = {200: {"model": ExchangeOverview}, **ERRORS},
+)
 async def exchange_overview(exchange: str):
     adapter      = validate_request(exchange)
     capabilities = adapter.get_capabilities()
@@ -220,19 +261,28 @@ async def exchange_overview(exchange: str):
     }
 
 
-@app.get("/{exchange}/capabilities")
+@app.get(
+    "/{exchange}/capabilities",
+    responses = {200: {"model": Dict[str, Any]}, **ERRORS},
+)
 def exchange_capabilities(exchange: str):
     adapter = validate_request(exchange)
     return adapter.get_capabilities()
 
 
-@app.get("/{exchange}/market_types")
+@app.get(
+    "/{exchange}/market_types",
+    responses = {200: {"model": MarketTypeList}, **ERRORS},
+)
 def list_market_types(exchange: str):
     adapter = validate_request(exchange)
     return {"market_types": adapter.supported_market_types}
 
 
-@app.get("/{exchange}/{market_type}/markets")
+@app.get(
+    "/{exchange}/{market_type}/markets",
+    responses = {200: {"model": MarketList}, **ERRORS},
+)
 async def get_markets(exchange: str, market_type: MarketType, status: str = "trading"):
     adapter   = validate_request(exchange, market_type)
     info_list = await adapter.get_exchange_info(market_type, status)
@@ -244,49 +294,73 @@ async def get_markets(exchange: str, market_type: MarketType, status: str = "tra
     }
 
 
-@app.get("/{exchange}/{market_type}/markets/{symbol}")
+@app.get(
+    "/{exchange}/{market_type}/markets/{symbol}",
+    responses = {200: {"model": SymbolInfo}, **ERRORS},
+)
 async def get_market_symbol(exchange: str, market_type: MarketType, symbol: str):
     adapter = validate_request(exchange, market_type)
     return await adapter.get_symbol_info(market_type, symbol)
 
 
-@app.get("/{exchange}/{market_type}/ticker/{symbol}")
+@app.get(
+    "/{exchange}/{market_type}/ticker/{symbol}",
+    responses = {200: {"model": Ticker}, **ERRORS},
+)
 async def get_ticker(exchange: str, market_type: MarketType, symbol: str):
     adapter, symbol = await validate_market(exchange, market_type, symbol)
     return await adapter.get_ticker(market_type, symbol)
 
 
-@app.get("/{exchange}/{market_type}/book_ticker/{symbol}")
+@app.get(
+    "/{exchange}/{market_type}/book_ticker/{symbol}",
+    responses = {200: {"model": BookTicker}, **ERRORS},
+)
 async def get_book_ticker(exchange: str, market_type: MarketType, symbol: str):
     adapter, symbol = await validate_market(exchange, market_type, symbol)
     return await adapter.get_book_ticker(market_type, symbol)
 
 
-@app.get("/{exchange}/{market_type}/mark_price/{symbol}")
+@app.get(
+    "/{exchange}/{market_type}/mark_price/{symbol}",
+    responses = {200: {"model": MarkPrice}, **ERRORS},
+)
 async def get_mark_price(exchange: str, market_type: MarketType, symbol: str):
     adapter, symbol = await validate_market(exchange, market_type, symbol)
     return await adapter.get_mark_price(market_type, symbol)
 
 
-@app.get("/{exchange}/{market_type}/orderbook/{symbol}")
+@app.get(
+    "/{exchange}/{market_type}/orderbook/{symbol}",
+    responses = {200: {"model": OrderBook}, **ERRORS},
+)
 async def get_orderbook(exchange: str, market_type: MarketType, symbol: str, depth: int = Query(20, ge=1)):
     adapter, symbol = await validate_market(exchange, market_type, symbol)
     return await adapter.get_orderbook(market_type, symbol, depth)
 
 
-@app.get("/{exchange}/{market_type}/trades/{symbol}")
+@app.get(
+    "/{exchange}/{market_type}/trades/{symbol}",
+    responses = {200: {"model": List[Trade]}, **ERRORS},
+)
 async def get_trades(exchange: str, market_type: MarketType, symbol: str, limit: int = Query(100, ge=1)):
     adapter, symbol = await validate_market(exchange, market_type, symbol)
     return await adapter.get_trades(market_type, symbol, limit)
 
 
-@app.get("/{exchange}/{market_type}/agg_trades/{symbol}")
+@app.get(
+    "/{exchange}/{market_type}/agg_trades/{symbol}",
+    responses = {200: {"model": List[AggTrade]}, **ERRORS},
+)
 async def get_agg_trades(exchange: str, market_type: MarketType, symbol: str, end: Optional[int] = None, limit: int = Query(500, ge=1)):
     adapter, symbol = await validate_market(exchange, market_type, symbol)
     return await adapter.get_agg_trades(market_type, symbol, end, limit)
 
 
-@app.get("/{exchange}/{market_type}/candles/{symbol}")
+@app.get(
+    "/{exchange}/{market_type}/candles/{symbol}",
+    responses = {200: {"model": List[Candle]}, **ERRORS},
+)
 async def get_candles(exchange: str, market_type: MarketType, symbol: str, interval: Optional[str] = None, end: Optional[int] = None, limit: int = Query(100, ge=1)):
     adapter  = validate_request(exchange, market_type)
     interval = series_interval(adapter, market_type, "candles", interval, end, "1h")
@@ -294,7 +368,10 @@ async def get_candles(exchange: str, market_type: MarketType, symbol: str, inter
     return await adapter.get_candles(market_type, symbol, interval, end, limit)
 
 
-@app.get("/{exchange}/{market_type}/open_interest/{symbol}")
+@app.get(
+    "/{exchange}/{market_type}/open_interest/{symbol}",
+    responses = {200: {"model": List[OpenInterest]}, **ERRORS},
+)
 async def get_open_interest(exchange: str, market_type: MarketType, symbol: str, interval: Optional[str] = None, end: Optional[int] = None, limit: int = Query(30, ge=1)):
     adapter  = validate_request(exchange, market_type)
     interval = series_interval(adapter, market_type, "open_interest", interval, end, "1h")
@@ -304,19 +381,28 @@ async def get_open_interest(exchange: str, market_type: MarketType, symbol: str,
     return await join_open_interest_basis(adapter, market_type, symbol, interval, end, limit, oi_rows)
 
 
-@app.get("/{exchange}/{market_type}/funding_rate/{symbol}")
+@app.get(
+    "/{exchange}/{market_type}/funding_rate/{symbol}",
+    responses = {200: {"model": List[FundingRate]}, **ERRORS},
+)
 async def get_funding_rate(exchange: str, market_type: MarketType, symbol: str, end: Optional[int] = None, limit: int = Query(100, ge=1)):
     adapter, symbol = await validate_market(exchange, market_type, symbol)
     return await adapter.get_funding_rate(market_type, symbol, end, limit)
 
 
-@app.get("/{exchange}/{market_type}/liquidations/{symbol}")
+@app.get(
+    "/{exchange}/{market_type}/liquidations/{symbol}",
+    responses = {200: {"model": List[Liquidation]}, **ERRORS},
+)
 async def get_liquidations(exchange: str, market_type: MarketType, symbol: str, end: Optional[int] = None, limit: int = Query(100, ge=1)):
     adapter, symbol = await validate_market(exchange, market_type, symbol)
     return await adapter.get_liquidations(market_type, symbol, end, limit)
 
 
-@app.get("/{exchange}/{market_type}/long_short_ratio/{symbol}")
+@app.get(
+    "/{exchange}/{market_type}/long_short_ratio/{symbol}",
+    responses = {200: {"model": List[LongShortRatio]}, **ERRORS},
+)
 async def get_long_short_ratio(exchange: str, market_type: MarketType, symbol: str, interval: Optional[str] = None, end: Optional[int] = None, limit: int = Query(30, ge=1)):
     adapter  = validate_request(exchange, market_type)
     interval = series_interval(adapter, market_type, "long_short_ratio", interval, end, "5m")
@@ -324,7 +410,10 @@ async def get_long_short_ratio(exchange: str, market_type: MarketType, symbol: s
     return await adapter.get_long_short_ratio(market_type, symbol, interval, end, limit)
 
 
-@app.get("/{exchange}/{market_type}/margin_tiers/{symbol}")
+@app.get(
+    "/{exchange}/{market_type}/margin_tiers/{symbol}",
+    responses = {200: {"model": MarginTiers}, **ERRORS},
+)
 async def get_margin_tiers(exchange: str, market_type: MarketType, symbol: str):
     adapter, symbol = await validate_market(exchange, market_type, symbol)
     return await adapter.get_margin_tiers(market_type, symbol)
