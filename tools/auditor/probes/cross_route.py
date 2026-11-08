@@ -58,6 +58,15 @@ class CrossRouteConsistencyProbe(Probe):
                     )
                 r.sample = {"ticker": d_t, "book_ticker": d_b}
                 out.append(r)
+            else:
+                out.append(self.result(
+                    ctx, "cross:ticker_vs_book", started,
+                    status="skip",
+                    error_type=ErrorType.SKIPPED,
+                    message="no last trade or an empty book side; nothing to compare",
+                    evidence={"ticker_price": tp, "bid": bid, "ask": ask},
+                    ended=ended,
+                ))
 
         if m == "linear" and ctx.caps_slice.get("mark_price", {}).get("rest"):
             started = time.time()
@@ -88,5 +97,14 @@ class CrossRouteConsistencyProbe(Probe):
                         )
                     r.sample = {"mark_price": d_m, "ticker": d_t}
                     out.append(r)
+                else:
+                    out.append(self.result(
+                        ctx, "cross:mark_vs_ticker", started,
+                        status="skip",
+                        error_type=ErrorType.SKIPPED,
+                        message="no last trade; nothing to compare the mark with",
+                        evidence={"mark_price": mp, "ticker_price": tp},
+                        ended=ended,
+                    ))
 
         return out

@@ -55,12 +55,13 @@ ROUTER_STAMPED = {
     ("hyperliquid", "linear", "ticker"),
     ("hyperliquid", "linear", "mark_price"),
     ("kraken", "spot", "ticker"),
+    ("kraken", "spot", "book_ticker"),
+    ("kraken", "spot", "orderbook"),
     ("kucoin", "linear", "ticker"),
     ("kucoin", "inverse", "ticker"),
     ("binance", "spot", "book_ticker"),
+    ("binance", "spot", "orderbook"),
 }
-
-MID_PRICED = {"hyperliquid"}
 
 LIVE_READINGS = {("hyperliquid", "open_interest")}
 

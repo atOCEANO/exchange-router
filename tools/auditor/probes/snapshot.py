@@ -3,21 +3,12 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 from pydantic import BaseModel
 
-from tools.auditor.config import DEADLINES, MID_PRICED, ROUTER_STAMPED, SNAPSHOT_FRESHNESS_MS
+from tools.auditor.config import DEADLINES
 from tools.auditor.aggregator import ErrorType, ProbeResult
 
 from tools.auditor.probes.base import (
-    Probe, ProbeContext, dig, fetch, now_ms, validate_one, venue_fetch,
+    Probe, ProbeContext, dig, fetch, judge_time, validate_one, venue_fetch,
 )
-
-
-def _age(d: dict, ctx: ProbeContext, route: str) -> Optional[Tuple[str, ErrorType, str, Dict[str, Any]]]:
-    if (ctx.exchange, ctx.market_type, route) in ROUTER_STAMPED:
-        return None
-    age_ms = now_ms() - d["timestamp"]
-    if age_ms > SNAPSHOT_FRESHNESS_MS:
-        return "warn", ErrorType.LOGIC, f"stale: {age_ms/1000:.0f}s old", {"age_ms": age_ms, "timestamp": d["timestamp"]}
-    return None
 
 
 def _ticker_checks(d: dict, ctx: ProbeContext) -> Tuple[str, ErrorType, str, Dict[str, Any]]:
@@ -26,16 +17,13 @@ def _ticker_checks(d: dict, ctx: ProbeContext) -> Tuple[str, ErrorType, str, Dic
     vol_obj   = d.get("volume_24h") or {}
     vol_native = vol_obj.get("native", 0) if isinstance(vol_obj, dict) else 0
     if price is None:
-        return "warn", ErrorType.LOGIC, "no last trade (price null)", {"price": price}
-    if price < 0:
-        return "fail", ErrorType.LOGIC, f"negative price {price}", {"price": price}
-    if ctx.exchange not in MID_PRICED and high and low and not (low <= price <= high):
+        return "skip", ErrorType.SKIPPED, "no last trade (price null)", {"price": price}
+    if price <= 0:
+        return "fail", ErrorType.LOGIC, f"non-positive price {price}", {"price": price}
+    if d.get("price_source") == "last_trade" and high and low and not (low <= price <= high):
         return "warn", ErrorType.LOGIC, f"price {price} outside 24h range [{low}, {high}]", {"price": price, "low": low, "high": high}
     if vol_native < 0:
         return "fail", ErrorType.LOGIC, f"negative volume {vol_native}", {"volume": vol_native}
-    stale = _age(d, ctx, "ticker")
-    if stale:
-        return stale
     return "pass", ErrorType.OK, f"price={price}, vol24h={vol_native:.4g}", {"price": price}
 
 
@@ -47,16 +35,13 @@ def _book_ticker_checks(d: dict, ctx: ProbeContext) -> Tuple[str, ErrorType, str
     ask_qty = ask_qty_obj.get("native", 0) if isinstance(ask_qty_obj, dict) else 0
     empty = [side for side, price in (("bid", bid), ("ask", ask)) if price is None]
     if empty:
-        return "warn", ErrorType.LOGIC, f"{' and '.join(empty)} side empty", {"bid": bid, "ask": ask}
-    if bid < 0 or ask < 0:
-        return "fail", ErrorType.LOGIC, f"negative price: bid={bid}, ask={ask}", {"bid": bid, "ask": ask}
+        return "skip", ErrorType.SKIPPED, f"{' and '.join(empty)} side empty; no spread to check", {"bid": bid, "ask": ask}
+    if bid <= 0 or ask <= 0:
+        return "fail", ErrorType.LOGIC, f"non-positive price: bid={bid}, ask={ask}", {"bid": bid, "ask": ask}
     if bid > ask:
         return "fail", ErrorType.LOGIC, f"crossed book: bid {bid} > ask {ask}", {"bid": bid, "ask": ask}
     if bid_qty <= 0 or ask_qty <= 0:
         return "fail", ErrorType.LOGIC, f"non-positive qty: bid_qty={bid_qty}, ask_qty={ask_qty}", {"bid_qty": bid_qty, "ask_qty": ask_qty}
-    stale = _age(d, ctx, "book_ticker")
-    if stale:
-        return stale
     spread = ask - bid
     return "pass", ErrorType.OK, f"bid={bid}, ask={ask}, spread={spread:.6g}", {"bid": bid, "ask": ask, "spread": spread}
 
@@ -70,9 +55,6 @@ def _mark_price_checks(d: dict, ctx: ProbeContext) -> Tuple[str, ErrorType, str,
         return "fail", ErrorType.LOGIC, f"non-positive mark={mp}", {"mark": mp}
     if ip is not None and ip <= 0:
         return "fail", ErrorType.LOGIC, f"non-positive index={ip}", {"index": ip}
-    stale = _age(d, ctx, "mark_price")
-    if stale:
-        return stale
     return "pass", ErrorType.OK, f"mark={mp}, index={ip}, fr={fr}", {"mark": mp, "index": ip, "funding_rate": fr}
 
 
@@ -138,6 +120,8 @@ class SnapshotProbe(Probe):
             return [r]
 
         s, et, msg, ev = self.checks(data, ctx)
+        if s == "pass":
+            s, et, msg, ev = await judge_time(ctx, self.route, data) or (s, et, msg, ev)
         r = self.result(
             ctx, self.name, started,
             status=s,

@@ -8,7 +8,10 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from tools.auditor.aggregator import ErrorType, ProbeResult
-from tools.auditor.config import API_URL, HTTP_BODY_PREVIEW_CHARS, MIN_REST_INTERVAL_MS, REST_INTERVAL_MS, VENUE_MIN_INTERVAL_MS
+from tools.auditor.config import (
+    API_URL, HTTP_BODY_PREVIEW_CHARS, MIN_REST_INTERVAL_MS, REST_INTERVAL_MS, ROUTER_STAMPED,
+    SNAPSHOT_FRESHNESS_MS, VENUE_MIN_INTERVAL_MS,
+)
 
 
 @dataclass
@@ -76,6 +79,24 @@ async def trade_stamps(ctx: ProbeContext) -> List[int]:
     if code != 200 or not isinstance(rows, list):
         return []
     return [row["timestamp"] for row in rows if isinstance(row, dict) and "timestamp" in row]
+
+
+async def judge_time(ctx: ProbeContext, route: str, row: dict) -> Optional[Tuple[str, ErrorType, str, Dict[str, Any]]]:
+    if row.get("time_source") == "router":
+        if (ctx.exchange, ctx.market_type, route) in ROUTER_STAMPED:
+            return None
+        return "warn", ErrorType.LOGIC, f"router clock on {ctx.exchange} {ctx.market_type} {route}, which the venue stamps", {"time_source": "router"}
+
+    age_ms = now_ms() - row["timestamp"]
+    if age_ms <= SNAPSHOT_FRESHNESS_MS:
+        return None
+
+    _, info, _ = await fetch(ctx.client, f"/{ctx.exchange}/{ctx.market_type}/markets/{ctx.symbol}")
+    status     = info.get("status") if isinstance(info, dict) else None
+    evidence   = {"age_ms": age_ms, "timestamp": row["timestamp"], "market_status": status}
+    if status not in (None, "trading"):
+        return "pass", ErrorType.OK, f"the market is {status}; its {age_ms/1000:.0f}s old stamp is the venue's last", evidence
+    return "warn", ErrorType.LOGIC, f"stale: {age_ms/1000:.0f}s old on a trading market", evidence
 
 
 _venue_next_slot_at: Dict[str, float] = {}

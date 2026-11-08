@@ -2,11 +2,10 @@ import time
 from typing import List
 
 from exchange_router.models import OrderBook
-from tools.auditor.config import SNAPSHOT_FRESHNESS_MS
 from tools.auditor.aggregator import ErrorType, ProbeResult
 
 from tools.auditor.probes.base import (
-    Probe, ProbeContext, fetch, now_ms, validate_one,
+    Probe, ProbeContext, fetch, judge_time, validate_one,
 )
 
 
@@ -109,14 +108,15 @@ class OrderBookProbe(Probe):
                         evidence={"side": side, "idx": i, "price": p, "qty": q},
                     )
 
-        age_ms = now_ms() - data["timestamp"]
-        if age_ms > SNAPSHOT_FRESHNESS_MS:
+        found = await judge_time(ctx, "orderbook", data)
+        if found:
+            s, et, msg, ev = found
             return self.result(
                 ctx, probe_name, started,
-                status="warn",
-                error_type=ErrorType.LOGIC,
-                message=f"stale orderbook: {age_ms/1000:.0f}s old",
-                evidence={"age_ms": age_ms, "timestamp": data["timestamp"]},
+                status=s,
+                error_type=et,
+                message=msg,
+                evidence=ev,
             )
 
         spread = asks[0][0] - bids[0][0] if bids and asks else 0

@@ -47,18 +47,17 @@ def test_a_deadline_one_cycle_off_is_read_again_and_one_that_matches_passes():
 def test_the_range_is_checked_only_where_the_price_is_a_last_trade():
     ticker = {"price": 0.010045, "low_24h": 0.01003, "high_24h": 0.01003, "volume_24h": {"native": 1480.0}, "timestamp": 2**62}
 
-    assert _ticker_checks(ticker, ctx("hyperliquid", "spot"))[0] == "pass"
-    assert _ticker_checks(ticker, ctx("binance", "spot"))[0] == "warn"
-    assert _ticker_checks(dict(ticker, price=None), ctx("kraken", "spot"))[:3:2] == ("warn", "no last trade (price null)")
+    assert _ticker_checks(dict(ticker, price_source="mid"), ctx("hyperliquid", "spot"))[0] == "pass"
+    assert _ticker_checks(dict(ticker, price_source="last_trade"), ctx("binance", "spot"))[0] == "warn"
+    assert _ticker_checks(dict(ticker, price=None), ctx("kraken", "spot"))[:3:2] == ("skip", "no last trade (price null)")
 
 
-def test_an_empty_side_warns_and_a_router_stamp_is_not_judged_for_age():
+def test_an_empty_side_is_skipped_with_no_spread_to_check():
     empty = {"bid_price": None, "bid_qty": None, "ask_price": None, "ask_qty": None, "timestamp": 0}
     quoted = {"bid_price": 99.5, "bid_qty": {"native": 2.0}, "ask_price": 100.5, "ask_qty": {"native": 3.0}, "timestamp": 0}
 
-    assert _book_ticker_checks(empty, ctx("okx", "spot"))[:3:2] == ("warn", "bid and ask side empty")
-    assert _book_ticker_checks(quoted, ctx("binance", "spot"))[0] == "pass"
-    assert _book_ticker_checks(quoted, ctx("okx", "spot"))[0] == "warn"
+    assert _book_ticker_checks(empty, ctx("okx", "spot"))[:3:2] == ("skip", "bid and ask side empty; no spread to check")
+    assert _book_ticker_checks(quoted, ctx("okx", "spot"))[0] == "pass"
 
 
 def test_a_silent_trade_stream_is_skipped_only_where_the_venue_did_not_trade():
