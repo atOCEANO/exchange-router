@@ -567,6 +567,10 @@ class Candle(BaseModel):
         ...,
         description="Bucket open time in unix milliseconds on every exchange.",
     )
+    closed: bool = Field(
+        ...,
+        description="Whether the bar has ended: the venue's own flag where it sends one, as OKX does, otherwise the bar's end against the time of the read. The newest bar is often still forming.",
+    )
     open: float = Field(
         ...,
         description="First traded price of the bucket, in quote.",

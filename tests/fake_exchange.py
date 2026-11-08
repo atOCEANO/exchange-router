@@ -371,6 +371,7 @@ class FakeExchange(BaseExchange):
                 quote       = QUOTES[market_type],
                 interval    = interval,
                 timestamp   = start + i * step,
+                closed      = True,
                 open        = close - 0.5,
                 high        = close + 1.0,
                 low         = close - 1.0,

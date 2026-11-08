@@ -6,7 +6,7 @@ import websockets
 import logging
 from typing import List, AsyncGenerator, Dict, Any, Optional, Set, Tuple
 from exchange_router.exchanges.base import (
-    BaseExchange, StreamHub, UpstreamUnavailableError,
+    BaseExchange, StreamHub, UpstreamUnavailableError, bar_closed,
     build_qty_unit, build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
     build_step_from_decimals, build_margin_tier,
@@ -714,13 +714,15 @@ class HyperliquidAdapter(BaseExchange):
 
             parsed = []
             for k in rows:
-                close = float(k["c"])
+                close  = float(k["c"])
+                opened = self.normalize_timestamp(k["t"])
                 parsed.append(Candle(
                     symbol      = model_sym,
                     market_type = market_type,
                     quote       = quote,
                     interval    = interval,
-                    timestamp   = self.normalize_timestamp(k["t"]),
+                    timestamp   = opened,
+                    closed      = bar_closed(opened, interval),
                     open        = float(k["o"]),
                     high        = float(k["h"]),
                     low         = float(k["l"]),

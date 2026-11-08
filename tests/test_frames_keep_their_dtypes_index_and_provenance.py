@@ -80,7 +80,7 @@ async def test_with_provenance_moves_the_attrs_into_columns_without_losing_them(
     assert list(wide["exchange"]) == [EX] * 4
     assert list(wide["symbol"])   == ["BTCUSDT"] * 4
     assert wide.attrs["exchange"] == EX
-    assert list(df.columns) == ["open", "high", "low", "close", "volume", "volume_notional"]
+    assert list(df.columns) == ["closed", "open", "high", "low", "close", "volume", "volume_notional"]
 
 
 async def test_with_provenance_carries_the_unit_a_tier_table_is_counted_in(router):

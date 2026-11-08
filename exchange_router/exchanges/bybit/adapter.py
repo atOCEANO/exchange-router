@@ -6,7 +6,7 @@ import websockets
 import logging
 from typing import List, AsyncGenerator, Dict, Any, Optional, Tuple
 from exchange_router.exchanges.base import (
-    BaseExchange, StreamHub, UpstreamUnavailableError,
+    BaseExchange, StreamHub, UpstreamUnavailableError, bar_closed,
     build_qty_unit, build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention, build_step,
     build_margin_tier, build_notional, build_price_tick, build_qty_grid,
@@ -675,13 +675,15 @@ class BybitAdapter(BaseExchange):
 
             parsed = []
             for k in data["list"]:
-                close = float(k[4])
+                close  = float(k[4])
+                opened = self.normalize_timestamp(k[0])
                 parsed.append(Candle(
                     symbol      = model_sym,
                     market_type = market_type,
                     quote       = quote,
                     interval    = interval,
-                    timestamp   = self.normalize_timestamp(k[0]),
+                    timestamp   = opened,
+                    closed      = bar_closed(opened, interval),
                     open        = float(k[1]),
                     high        = float(k[2]),
                     low         = float(k[3]),

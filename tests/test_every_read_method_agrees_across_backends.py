@@ -175,7 +175,7 @@ async def test_margin_tiers_are_refused_on_spot_and_on_an_unlisted_symbol(router
 async def test_candles_are_spaced_by_their_own_interval(router, market_type, symbol, quote, unit, size, interval):
     df = await router.get_candles(EX, market_type, symbol, interval=interval, limit=5)
 
-    assert list(df.columns) == ["open", "high", "low", "close", "volume", "volume_notional"]
+    assert list(df.columns) == ["closed", "open", "high", "low", "close", "volume", "volume_notional"]
     assert len(df) == 5
     assert list(df["close"]) == [100.0, 101.0, 102.0, 103.0, 104.0]
     assert list(df["volume"]) == [10.0, 11.0, 12.0, 13.0, 14.0]

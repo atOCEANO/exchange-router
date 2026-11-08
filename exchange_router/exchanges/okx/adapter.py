@@ -7,7 +7,7 @@ import websockets
 import logging
 from typing import List, AsyncGenerator, Dict, Any, Optional, Deque, Tuple
 from exchange_router.exchanges.base import (
-    BaseExchange, StreamHub, UpstreamUnavailableError,
+    BaseExchange, StreamHub, UpstreamUnavailableError, bar_closed,
     build_qty_unit, build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention, build_step,
     build_margin_tier, build_notional, build_price_tick, build_qty_grid,
@@ -869,6 +869,7 @@ class OkxAdapter(BaseExchange):
                         quote       = quote,
                         interval    = interval,
                         timestamp   = ts,
+                        closed      = r[8] == "1" if len(r) > 8 else bar_closed(ts, interval),
                         open        = float(r[1]),
                         high        = float(r[2]),
                         low         = float(r[3]),

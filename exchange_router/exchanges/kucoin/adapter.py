@@ -7,7 +7,7 @@ import websockets
 import logging
 from typing import List, AsyncGenerator, Dict, Any, Optional, Tuple
 from exchange_router.exchanges.base import (
-    BaseExchange, StreamHub, UpstreamUnavailableError,
+    BaseExchange, StreamHub, UpstreamUnavailableError, bar_closed,
     build_qty_unit, build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
     build_notional, build_price_tick, build_qty_grid, build_step,
@@ -891,6 +891,7 @@ class KucoinAdapter(BaseExchange):
                         quote       = quote,
                         interval    = interval,
                         timestamp   = ts,
+                        closed      = bar_closed(ts, interval),
                         open        = float(r[1]),
                         close       = close,
                         high        = float(r[3]),
@@ -966,6 +967,7 @@ class KucoinAdapter(BaseExchange):
                         quote       = quote,
                         interval    = interval,
                         timestamp   = ts,
+                        closed      = bar_closed(ts, interval),
                         open        = float(r[1]),
                         high        = float(r[2]),
                         low         = float(r[3]),

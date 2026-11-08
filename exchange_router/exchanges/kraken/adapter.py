@@ -7,7 +7,7 @@ import websockets
 import logging
 from typing import List, AsyncGenerator, Dict, Any, Optional, Tuple
 from exchange_router.exchanges.base import (
-    BaseExchange, StreamHub, UpstreamUnavailableError,
+    BaseExchange, StreamHub, UpstreamUnavailableError, bar_closed,
     build_qty_unit, build_qty_value, build_volume_value, build_oi_value,
     build_funding_current, build_funding_historical, build_funding_convention,
     build_notional, build_price_tick, build_qty_grid, build_step_from_decimals,
@@ -1061,13 +1061,15 @@ class KrakenAdapter(BaseExchange):
             results = []
 
             for b in data[pair_key]:
-                close = float(b[4])
+                close  = float(b[4])
+                opened = self.normalize_timestamp(b[0])
                 results.append(Candle(
                     symbol      = model_sym,
                     market_type = market_type,
                     quote       = quote,
                     interval    = interval,
-                    timestamp   = self.normalize_timestamp(b[0]),
+                    timestamp   = opened,
+                    closed      = bar_closed(opened, interval),
                     open        = float(b[1]),
                     high        = float(b[2]),
                     low         = float(b[3]),
@@ -1126,6 +1128,7 @@ class KrakenAdapter(BaseExchange):
                             quote       = quote,
                             interval    = interval,
                             timestamp   = ts_ms,
+                            closed      = bar_closed(ts_ms, interval),
                             open        = float(b["open"]),
                             high        = float(b["high"]),
                             low         = float(b["low"]),

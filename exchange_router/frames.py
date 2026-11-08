@@ -11,8 +11,10 @@ TEXT_COLUMNS = {"side", "id", "agg_id", "first_trade_id", "last_trade_id", "exch
 
 INT_COLUMNS = {"cycle_ms"}
 
+BOOL_COLUMNS = {"closed"}
+
 COLUMNS: Dict[str, List[str]] = {
-    "candles":          ["open", "high", "low", "close", "volume", "volume_notional"],
+    "candles":          ["closed", "open", "high", "low", "close", "volume", "volume_notional"],
     "trades":           ["price", "qty", "qty_notional", "side", "id"],
     "agg_trades":       ["price", "qty", "qty_notional", "side", "agg_id", "first_trade_id", "last_trade_id"],
     "funding_rate":     ["rate", "funding_per_hour", "cycle_ms"],
@@ -64,7 +66,7 @@ def _const(df: pd.DataFrame, column: str) -> Any:
 
 def _coerce(df: pd.DataFrame) -> pd.DataFrame:
     for column in df.columns:
-        if column in TEXT_COLUMNS:
+        if column in TEXT_COLUMNS or column in BOOL_COLUMNS:
             continue
         df[column] = pd.to_numeric(df[column], errors="coerce")
 
@@ -85,7 +87,7 @@ def _empty(ctx: Dict[str, Any], route: str) -> Tuple[pd.DataFrame, List[str]]:
     message = f"0 rows returned for {ctx['exchange']}/{ctx['market_type']}/{ctx['symbol']} {route}"
 
     index = pd.DatetimeIndex([], tz="UTC", name="datetime")
-    df    = pd.DataFrame({column: pd.Series(index=index, dtype=object if column in TEXT_COLUMNS else "int64" if column in INT_COLUMNS else "float64") for column in COLUMNS[route]}, index=index)
+    df    = pd.DataFrame({column: pd.Series(index=index, dtype=object if column in TEXT_COLUMNS else "int64" if column in INT_COLUMNS else "bool" if column in BOOL_COLUMNS else "float64") for column in COLUMNS[route]}, index=index)
     attrs = _base_attrs(ctx)
     attrs.update(dict.fromkeys(ATTRS[route]))
     attrs["warnings"] = [message]

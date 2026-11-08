@@ -7,7 +7,7 @@ import time
 import orjson
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any, Set, Tuple, Union, AsyncGenerator, Callable, Awaitable, Iterable
-from datetime import datetime
+from datetime import datetime, timezone
 from exchange_router.capabilities import route_block
 from exchange_router.models import (
     Ticker, BookTicker, MarkPrice, OrderBook, Candle, Trade, AggTrade,
@@ -307,6 +307,19 @@ def _period_to_ms(period: str) -> Optional[int]:
     except ValueError:
         return None
     return count * scale
+
+
+def bar_closed(opened: int, interval: str) -> bool:
+    if interval.endswith("M"):
+        start  = datetime.fromtimestamp(opened / 1000, tz=timezone.utc)
+        months = start.month - 1 + int(interval[:-1])
+        end    = int(start.replace(year=start.year + months // 12, month=months % 12 + 1, day=1).timestamp() * 1000)
+    else:
+        step = _period_to_ms(interval)
+        if step is None:
+            raise ValueError(f"interval '{interval}' has no known length")
+        end = opened + step
+    return end <= int(time.time() * 1000)
 
 
 async def join_open_interest_basis(adapter, market_type: MarketType, symbol: str, period: str,
