@@ -890,7 +890,10 @@ class KucoinAdapter(BaseExchange):
                 "startAt": max(end_s - window_s, 0),
                 "endAt":   end_s,
             }
-            return _parse(await self._make_request("GET", self.spot_rest_url, "/api/v1/market/candles", params))
+            rows = _parse(await self._make_request("GET", self.spot_rest_url, "/api/v1/market/candles", params))
+            if len(rows) < l:
+                rows = _parse(await self._make_request("GET", self.spot_rest_url, "/api/v1/market/candles", {**params, "startAt": 1}))
+            return rows
 
         if start_time is None and limit <= per_req:
             return (await fetch(None, limit))[-limit:]

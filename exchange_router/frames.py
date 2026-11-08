@@ -93,7 +93,7 @@ def _short_result_warning(df: pd.DataFrame, ctx: Dict[str, Any], route: str) -> 
         return None
 
     if 0 < len(df) < requested:
-        return f"{route} {ctx['exchange']}/{ctx['market_type']}/{ctx['symbol']}: got {len(df)} of {requested} requested; pass start= to fetch older history"
+        return f"{route} {ctx['exchange']}/{ctx['market_type']}/{ctx['symbol']}: got {len(df)} of {requested} requested; {ctx['exchange']} holds nothing older"
 
     return None
 

@@ -680,6 +680,9 @@ class HyperliquidAdapter(BaseExchange):
             body   = {"type": "candleSnapshot",
                       "req": {"coin": coin, "interval": interval, "startTime": start, "endTime": end}}
             rows = await self._make_request("candleSnapshot", body)
+            if len(rows or []) < count:
+                body["req"]["startTime"] = 0
+                rows = await self._make_request("candleSnapshot", body)
             if not rows:
                 return []
 
