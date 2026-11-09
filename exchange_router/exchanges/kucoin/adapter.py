@@ -923,7 +923,7 @@ class KucoinAdapter(BaseExchange):
             rows = _parse(await self._make_request("GET", self.spot_rest_url, "/api/v1/market/candles", params))
             if len(rows) < l:
                 rows = _parse(await self._make_request("GET", self.spot_rest_url, "/api/v1/market/candles", {**params, "startAt": 1}))
-            return rows
+            return [row for row in rows if row.timestamp <= anchor_ms]
 
         if start_time is None and limit <= per_req:
             return (await fetch(None, limit))[-limit:]
@@ -991,7 +991,8 @@ class KucoinAdapter(BaseExchange):
             params = {"symbol": api_symbol, "granularity": granularity}
             if anchor:
                 params["to"] = anchor + 1
-            return _parse(await self._make_request("GET", self.fut_rest_url, "/api/v1/kline/query", params))
+            rows = _parse(await self._make_request("GET", self.fut_rest_url, "/api/v1/kline/query", params))
+            return [row for row in rows if not anchor or row.timestamp <= anchor]
 
         if start_time is None and limit <= per_req:
             return (await fetch(None, limit))[-limit:]
@@ -1088,7 +1089,8 @@ class KucoinAdapter(BaseExchange):
             to_ms = (anchor + 1) if anchor else now_ms
             from_ms = max(to_ms - funding_window_ms * per_req, 0)
             params = {"symbol": api_symbol, "from": from_ms, "to": to_ms}
-            return _parse(await self._make_request("GET", self.fut_rest_url, "/api/v1/contract/funding-rates", params))
+            rows = _parse(await self._make_request("GET", self.fut_rest_url, "/api/v1/contract/funding-rates", params))
+            return [row for row in rows if not anchor or row.timestamp <= anchor]
 
         need = limit + 1
         if start_time is not None or need > per_req:
@@ -1161,7 +1163,8 @@ class KucoinAdapter(BaseExchange):
                 "endAt":    end_ms,
                 "pageSize": min(l, per_req),
             }
-            return _parse(await self._make_request("GET", self.spot_rest_url, "/api/ua/v1/market/open-interest", params))
+            rows = _parse(await self._make_request("GET", self.spot_rest_url, "/api/ua/v1/market/open-interest", params))
+            return [row for row in rows if not anchor or row.timestamp <= anchor]
 
         if start_time is not None or limit > per_req:
             return await self._paginate_backwards(fetch, limit, per_req)
