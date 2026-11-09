@@ -152,7 +152,7 @@ class PaginatedProbe(Probe):
         big = self.big_limit if upstream_max is None else min(self.big_limit, upstream_max)
 
         out: List[ProbeResult] = []
-        rows, recent = await self._probe_recent(ctx, big, retention_ms)
+        rows, recent = await self._probe_recent(ctx, big, retention_ms, paginated)
         out.append(recent)
         out.extend(self._meaning(ctx, rows if recent.status != "fail" else None))
         if rc.get("intervals", []) is None:
@@ -171,7 +171,7 @@ class PaginatedProbe(Probe):
         return out
 
 
-    async def _probe_recent(self, ctx: ProbeContext, big: int, retention_ms: Optional[int]) -> Tuple[Optional[List[dict]], ProbeResult]:
+    async def _probe_recent(self, ctx: ProbeContext, big: int, retention_ms: Optional[int], paginated: bool) -> Tuple[Optional[List[dict]], ProbeResult]:
         data, res = await self._probe(ctx, "recent", {"limit": big}, expect_empty_ok=False)
         if data is None:
             return None, res
@@ -191,12 +191,18 @@ class PaginatedProbe(Probe):
                 else:
                     findings.append(f"last record stale: {age_s:.0f}s old (threshold {threshold/1000:.0f}s)")
 
-        if n < int(ceiling * THEORETICAL_MAX_RATIO):
+        older = await self._older_than(ctx, data[0]["timestamp"]) if paginated and n < big else None
+        if older:
+            findings.append(f"got {n}/{big} while the venue holds rows before the first")
+            res.evidence["older_rows"] = older
+        elif older == 0:
+            res.evidence["nothing_older"] = data[0]["timestamp"]
+        elif n < int(ceiling * THEORETICAL_MAX_RATIO):
             findings.append(f"got {n}/{big} (theoretical max {ceiling}, retention_ms={retention_ms})")
 
         kind = unknown_kind(data)
         if findings:
-            res.status = "fail" if "stale" in findings[0] else "warn"
+            res.status = "fail" if "stale" in findings[0] or "before the first" in findings[-1] else "warn"
             res.error_type = ErrorType.LOGIC
             res.message = " | ".join(findings)
             res.evidence.update({"count": n, "ceiling": ceiling, "age_s": age_s, "retention_ms": retention_ms})
@@ -204,11 +210,16 @@ class PaginatedProbe(Probe):
             res.status, res.error_type, res.message = kind[:3]
             res.evidence.update(kind[3])
         else:
-            res.message = f"got {n}/{big}, last age={age_s:.0f}s" + ("; no trade on the venue since the newest bar" if "newest_trade" in res.evidence else "")
+            res.message = f"got {n}/{big}, last age={age_s:.0f}s" + ("; the venue holds nothing older" if "nothing_older" in res.evidence else "") + ("; no trade on the venue since the newest bar" if "newest_trade" in res.evidence else "")
             res.evidence.update({"count": n, "age_s": age_s, "ceiling": ceiling})
 
         res.sample = data[:SAMPLE_MAX_ITEMS]
         return data, res
+
+
+    async def _older_than(self, ctx: ProbeContext, first_ts: int) -> Optional[int]:
+        status, data, _ = await self._request(ctx, {"end": first_ts - 1, "limit": 5})
+        return len(data) if status == 200 and isinstance(data, list) else None
 
 
     def _meaning(self, ctx: ProbeContext, rows: Optional[List[dict]]) -> List[ProbeResult]:

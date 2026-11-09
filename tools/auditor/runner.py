@@ -158,6 +158,15 @@ async def _pick_symbol_for_market(client: httpx.AsyncClient, exchange: str, mark
     entries = data["markets"]
     symbols = [entry.get("symbol") for entry in entries if isinstance(entry, dict) and entry.get("symbol")]
 
+    if not symbols:
+        emit(
+            status_v="skip",
+            error_type=ErrorType.SKIPPED,
+            message="the market list is empty; nothing to audit",
+            evidence={"market_count": 0},
+        )
+        return None
+
     sym = pick_symbol(symbols)
     if sym is None:
         emit(
