@@ -413,3 +413,17 @@ async def test_hyperliquid_holds_a_price_to_significant_figures_and_steps_by_its
 
     assert linear["BTCUSDC"].price.model_dump() == {"kind": "significant_figures", "figures": 5, "decimals": 1}
     assert spot["HYPEUSDC"].price.model_dump()  == {"kind": "significant_figures", "figures": 5, "decimals": 6}
+
+
+async def test_a_zero_tick_or_a_contract_without_its_size_leaves_only_that_instrument_out():
+    zero_tick = copy.deepcopy(BYBIT_LINEAR)
+    zero_tick.update(symbol="ETHUSDT", baseCoin="ETH", priceFilter={"tickSize": "0"})
+
+    sizeless = copy.deepcopy(BINANCE_INVERSE)
+    sizeless.update(symbol="ETHUSD_PERP", baseAsset="ETH")
+    del sizeless["contractSize"]
+
+    linear  = await listed(BybitAdapter(), MarketType.LINEAR, bybit([BYBIT_LINEAR, zero_tick]))
+    inverse = await listed(BinanceAdapter(), MarketType.INVERSE, binance([BINANCE_INVERSE, sizeless]))
+
+    assert (list(linear), list(inverse)) == (["BTCUSDT"], ["BTCUSD"])
