@@ -847,12 +847,10 @@ class OkxAdapter(BaseExchange):
             if not isinstance(rows, list):
                 return out
             for r in rows:
-                if not isinstance(r, list) or len(r) < 6:
-                    continue
                 try:
                     ts = self.normalize_timestamp(r[0])
                     if ts <= 0:
-                        continue
+                        raise ValueError("the row carries no time")
                     close = float(r[4])
                     if market_type == MarketType.LINEAR and len(r) >= 7:
                         vol_native = float(r[6])
@@ -884,8 +882,8 @@ class OkxAdapter(BaseExchange):
                             close         = close,
                         ),
                     ))
-                except (ValueError, TypeError, KeyError):
-                    continue
+                except (ValueError, TypeError, KeyError, IndexError) as exc:
+                    raise UpstreamDataError(f"OKX sent a row it cannot read for {api_symbol}: {r!r}") from exc
             return sorted(out, key=lambda x: x.timestamp)
 
         async def fetch_recent(end_ts, l):
@@ -1039,12 +1037,10 @@ class OkxAdapter(BaseExchange):
         def _parse(rows):
             out = []
             for r in rows:
-                if not isinstance(r, list) or len(r) < 2:
-                    continue
                 try:
                     ts = self.normalize_timestamp(r[0])
                     if ts <= 0:
-                        continue
+                        raise ValueError("the row carries no time")
                     if is_linear and len(r) >= 3:
                         native_value  = float(r[2])
                         oi_unit_local = "base"
@@ -1066,8 +1062,8 @@ class OkxAdapter(BaseExchange):
                         timestamp     = ts,
                         time_source   = "venue",
                     ))
-                except (ValueError, TypeError):
-                    continue
+                except (ValueError, TypeError, KeyError, IndexError) as exc:
+                    raise UpstreamDataError(f"OKX sent a row it cannot read for {api_symbol}: {r!r}") from exc
             return sorted(out, key=lambda x: x.timestamp)
 
         async def fetch_backward(end_ts, l):
@@ -1159,12 +1155,10 @@ class OkxAdapter(BaseExchange):
         def _parse(rows):
             out = []
             for r in rows:
-                if not isinstance(r, list) or len(r) < 2:
-                    continue
                 try:
                     ts = self.normalize_timestamp(r[0])
                     if ts <= 0:
-                        continue
+                        raise ValueError("the row carries no time")
                     ratio = float(r[1])
                     out.append(LongShortRatio(
                         symbol        = model_sym,
@@ -1176,8 +1170,8 @@ class OkxAdapter(BaseExchange):
                         account_scope = "opaque",
                         timestamp     = ts,
                     ))
-                except (ValueError, TypeError):
-                    continue
+                except (ValueError, TypeError, KeyError, IndexError) as exc:
+                    raise UpstreamDataError(f"OKX sent a row it cannot read for {model_sym}: {r!r}") from exc
             return sorted(out, key=lambda x: x.timestamp)
 
         async def fetch_backward(end_ts, l):

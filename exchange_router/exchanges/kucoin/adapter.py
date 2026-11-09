@@ -881,12 +881,10 @@ class KucoinAdapter(BaseExchange):
             if not isinstance(rows, list):
                 return out
             for r in rows:
-                if not isinstance(r, list) or len(r) < 6:
-                    continue
                 try:
                     ts = self._s_to_ms(r[0])
                     if ts <= 0:
-                        continue
+                        raise ValueError("the row carries no time")
                     close = float(r[2])
                     out.append(Candle(
                         symbol      = model_sym,
@@ -906,8 +904,8 @@ class KucoinAdapter(BaseExchange):
                             close         = close,
                         ),
                     ))
-                except (ValueError, TypeError):
-                    continue
+                except (ValueError, TypeError, KeyError, IndexError) as exc:
+                    raise UpstreamDataError(f"KuCoin sent a row it cannot read for {api_symbol}: {r!r}") from exc
             return sorted(out, key=lambda x: x.timestamp)
 
         async def fetch(end_ts, l):
@@ -948,12 +946,10 @@ class KucoinAdapter(BaseExchange):
             if not isinstance(rows, list):
                 return out
             for r in rows:
-                if not isinstance(r, list) or len(r) < 6:
-                    continue
                 try:
                     ts = int(r[0])
                     if ts <= 0:
-                        continue
+                        raise ValueError("the row carries no time")
                     close    = float(r[4])
                     vol_raw  = float(r[5])
                     if is_inverse:
@@ -982,8 +978,8 @@ class KucoinAdapter(BaseExchange):
                             close         = close,
                         ),
                     ))
-                except (ValueError, TypeError):
-                    continue
+                except (ValueError, TypeError, KeyError, IndexError) as exc:
+                    raise UpstreamDataError(f"KuCoin sent a row it cannot read for {api_symbol}: {r!r}") from exc
             return sorted(out, key=lambda x: x.timestamp)
 
         async def fetch(end_ts, l):
@@ -1067,7 +1063,7 @@ class KucoinAdapter(BaseExchange):
                 try:
                     ts = int(r.get("timepoint") or r.get("timePoint") or 0)
                     if ts <= 0:
-                        continue
+                        raise ValueError("the row carries no time")
                     out.append(FundingRate(
                         symbol      = model_sym,
                         market_type = market_type,
@@ -1079,8 +1075,8 @@ class KucoinAdapter(BaseExchange):
                         ),
                         timestamp   = ts,
                     ))
-                except (ValueError, TypeError):
-                    continue
+                except (ValueError, TypeError, KeyError, IndexError) as exc:
+                    raise UpstreamDataError(f"KuCoin sent a row it cannot read for {api_symbol}: {r!r}") from exc
             return sorted(out, key=lambda x: x.timestamp)
 
         async def fetch(end_ts, l):
@@ -1123,7 +1119,7 @@ class KucoinAdapter(BaseExchange):
                 try:
                     ts = int(r.get("ts") or 0)
                     if ts <= 0:
-                        continue
+                        raise ValueError("the row carries no time")
                     raw = float(venue_value(r, "openInterest", f"KuCoin open interest of {api_symbol} at {ts}"))
                     if is_inverse:
                         native_value  = raw
@@ -1146,8 +1142,8 @@ class KucoinAdapter(BaseExchange):
                         timestamp     = ts,
                         time_source   = "venue",
                     ))
-                except (ValueError, TypeError):
-                    continue
+                except (ValueError, TypeError, KeyError, IndexError) as exc:
+                    raise UpstreamDataError(f"KuCoin sent a row it cannot read for {api_symbol}: {r!r}") from exc
             return sorted(out, key=lambda x: x.timestamp)
 
         async def fetch(end_ts, l):
