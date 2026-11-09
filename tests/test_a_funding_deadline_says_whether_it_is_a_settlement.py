@@ -1,9 +1,12 @@
+from exchange_router.exchanges.bybit.adapter import BybitAdapter
 from exchange_router.exchanges.hyperliquid.adapter import HyperliquidAdapter
 from exchange_router.exchanges.kraken.adapter import KrakenAdapter
 from exchange_router.models import MarketType
 
 
 HOUR = 3_600_000
+
+STAMP = 1794182400000
 
 ASSET_CTX = {"markPx": "75777.0", "oraclePx": "75794.4", "funding": "0.0000125"}
 
@@ -75,3 +78,31 @@ async def test_the_mark_price_row_puts_the_deadline_kind_and_the_clock_beside_th
     assert list(row)[-5:] == ["funding_per_hour", "funding_valid_until_ts", "funding_valid_until_kind", "timestamp", "time_source"]
     assert row.funding_valid_until_kind == "settlement"
     assert row.time_source              == "venue"
+
+
+async def bybit_mark(next_funding):
+    async def answer(method, endpoint, params=None):
+        return {"list": [{"symbol": "BTCUSDT", "markPrice": "75000", "indexPrice": "75010", "fundingRate": "0.0001", "nextFundingTime": str(next_funding)}], "_envelope_ts": STAMP}
+
+    async def no_info(market_type, symbol):
+        return None
+
+    async def cycle(market_type, symbol):
+        return 8 * HOUR
+
+    adapter = BybitAdapter()
+    adapter._make_request            = answer
+    adapter._info_for                = no_info
+    adapter._funding_interval_ms_for = cycle
+    try:
+        return await adapter.get_mark_price(MarketType.LINEAR, "BTCUSDT")
+    finally:
+        await adapter.shutdown()
+
+
+async def test_a_deadline_the_venue_has_not_rolled_yet_is_an_estimate_not_a_settlement():
+    stale = await bybit_mark(STAMP - 1000)
+    ahead = await bybit_mark(STAMP + HOUR)
+
+    assert (stale.funding.valid_until.kind, stale.funding.valid_until.ts) == ("estimate", STAMP + 1)
+    assert (ahead.funding.valid_until.kind, ahead.funding.valid_until.ts) == ("settlement", STAMP + HOUR)
