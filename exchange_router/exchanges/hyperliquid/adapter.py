@@ -696,8 +696,12 @@ class HyperliquidAdapter(BaseExchange):
         if interval_ms <= 0:
             raise RequestError(f"Unsupported candle interval {interval} for Hyperliquid")
         max_per_req = 5000
+        exhausted   = False
 
         async def fetch_by_end(end_ts, l):
+            nonlocal exhausted
+            if exhausted:
+                return []
             now    = int(time.time() * 1000)
             anchor = end_ts if end_ts is not None else start_time
             end    = min(anchor, now) if anchor is not None else now
@@ -709,6 +713,7 @@ class HyperliquidAdapter(BaseExchange):
             if len(rows or []) < count:
                 body["req"]["startTime"] = 0
                 rows = await self._make_request("candleSnapshot", body)
+            exhausted = len(rows or []) < count
             if not rows:
                 return []
 
