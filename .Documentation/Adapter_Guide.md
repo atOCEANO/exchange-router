@@ -481,9 +481,12 @@ Per-exchange implementation specifics:
 | Bybit | `X-Bapi-Limit-Status`, `X-Bapi-Limit-Reset-Timestamp` | back off until reset if remaining < 10 |
 | KuCoin | none (30s rolling window, no per-response remaining-weight header) | reactive only on HTTP 429 |
 | OKX | none | reactive only on HTTP 429 |
+| Hyperliquid | none (1,200 weight a minute per IP, stated only in its documentation) | a funding page that follows a full one waits until it fits 900 weight in the last minute, or 1,200 once it has waited a minute, and goes after two, in a ledger (`_WeightBudget`) that counts every answered request at its documented weight; reactive on HTTP 429, where a refused page of this kind holds every such page, itself included, for the minute |
 | Kraken | none | reactive on HTTP 429/418/502/503/504/520, body-level `EAPI:Rate limit exceeded` and `EService:Throttled: <ts>` |
 
 Reactive backoffs (HTTP 429, soft codes like Bybit's `retCode: 10006`, Kraken's body-level errors) all funnel into the same `_backoff_until` mechanism.
+
+Hyperliquid's ledger holds back only the funding pages that follow a full page, which the walk marks by passing a full page's weight as `_make_request(..., paced=weight)`; the ledger counts that weight until the answer arrives and the answer's own after it. A first page, the page after a short one and every request outside a walk go out at once and are only counted, so the ledger never holds a ticker or a book read behind a long history. A candle read is never held, since Hyperliquid keeps only about the newest 5,000 bars of an interval, so no candle read takes more than one full page and a short one. A page that has waited a minute is held only to Hyperliquid's own 1,200, and one that has waited two goes whatever the ledger holds, so a steady run of single reads slows a walk but never stops it. A refused page, like any refusal, sets `_backoff_until` 5, 10 or 15 seconds ahead, and every request waits that out. A refused funding page that follows a full one also holds every such page, itself included, for a full minute, the shortest wait after which everything spent before the refusal has left the window. `_WeightBudget.acquire` reads the backoff and the hold again after every wait, so a page reserves its weight and goes only when neither is in force, however long it has waited. What a caller sees is in [Exchange Notes](Exchange_Notes.md#a-long-history-is-paced-to-the-weight-limit).
 
 <br>
 
