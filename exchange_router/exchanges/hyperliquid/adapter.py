@@ -1,10 +1,11 @@
 import httpx
 import asyncio
+import collections
 import random
 import time
 import websockets
 import logging
-from typing import List, AsyncGenerator, Dict, Any, Optional, Set, Tuple
+from typing import List, AsyncGenerator, Dict, Any, Optional, Callable, Deque, Set, Tuple
 from exchange_router.exchanges.base import (
     BaseExchange, StreamHub, UpstreamUnavailableError, UpstreamDataError, RequestError, bar_closed,
     build_qty_unit, build_qty_value, build_volume_value, build_oi_value,
@@ -31,6 +32,52 @@ class HyperliquidAdapter(BaseExchange):
     _CTX_TTL_S           = 3.0
 
 
+    class _WeightBudget:
+
+        def __init__(self, budget: int, limit: int, window_s: float):
+            self.budget = budget
+            self.limit  = limit
+            self.window = window_s
+            self.held   = 0.0
+            self.spent: Deque[List[float]] = collections.deque()
+
+
+        def used(self, now: float) -> float:
+            while self.spent and self.spent[0][0] <= now - self.window:
+                self.spent.popleft()
+            return sum(weight for _, weight in self.spent)
+
+
+        def spend(self, weight: int) -> None:
+            now = time.monotonic()
+            self.used(now)
+            self.spent.append([now, weight])
+
+
+        def hold(self) -> None:
+            self.held = time.monotonic() + self.window
+
+
+        async def acquire(self, weight: int, backoff: Callable[[], float]) -> List[float]:
+            since = time.monotonic()
+            wider = since + self.window
+            last  = since + 2 * self.window
+            while True:
+                now  = time.monotonic()
+                wait = max(self.held - now, backoff())
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                    continue
+                room = self.budget if now < wider else self.limit
+                tier = wider if now < wider else last
+                fits = self.used(now) + weight <= room or not self.spent
+                if fits or now >= last:
+                    entry = [now, weight]
+                    self.spent.append(entry)
+                    return entry
+                await asyncio.sleep(min(self.spent[0][0] + self.window, tier) - now)
+
+
     def __init__(self):
         super().__init__()
         self.http_client = httpx.AsyncClient(timeout=30.0)
@@ -41,6 +88,7 @@ class HyperliquidAdapter(BaseExchange):
         self._backoff_until = 0.0
         self._backoff_lock  = asyncio.Lock()
         self._backoff_queue = 0
+        self._weights       = self._WeightBudget(budget=900, limit=1_200, window_s=60.0)
 
         self._hubs: List[Dict[str, Any]] = []
         self._hubs_lock = asyncio.Lock()
@@ -279,7 +327,7 @@ class HyperliquidAdapter(BaseExchange):
         return 0
 
 
-    async def _make_request(self, info_type: str, body: Dict) -> Any:
+    async def _make_request(self, info_type: str, body: Dict, paced: int = 0) -> Any:
         retries = 3
         while retries > 0:
             now = time.time()
@@ -293,18 +341,28 @@ class HyperliquidAdapter(BaseExchange):
                     await asyncio.sleep(wait_time + random.uniform(0.05, spread))
                 finally:
                     self._backoff_queue -= 1
+            entry = await self._weights.acquire(paced, self._backoff_left) if paced else None
 
             try:
                 resp = await self.http_client.post(self.info_url, json=body)
 
                 if resp.status_code == 200:
-                    return resp.json()
+                    answer = resp.json()
+                    weight = self._weight_of(info_type, answer)
+                    if entry is None:
+                        self._weights.spend(weight)
+                    else:
+                        entry[1] = weight
+                    return answer
 
                 if resp.status_code == 429:
                     backoff = 5 * (4 - retries)
                     async with self._backoff_lock:
                         self._backoff_until = max(self._backoff_until, time.time() + backoff)
-                    logger.error(f"Hyperliquid rate limit (429) on {info_type}. Backing off {backoff}s.")
+                    if paced:
+                        self._weights.hold()
+                        backoff = self._weights.window
+                    logger.error(f"Hyperliquid rate limit (429) on {info_type}. Backing off {backoff:.0f}s.")
                     retries -= 1
                     continue
 
@@ -332,6 +390,20 @@ class HyperliquidAdapter(BaseExchange):
 
         remaining = self._backoff_until - time.time()
         raise UpstreamUnavailableError(f"Max retries exceeded for {info_type}", retry_after=remaining if remaining > 0 else None)
+
+
+    def _weight_of(self, info_type: str, answer: Any) -> int:
+        rows = len(answer) if isinstance(answer, list) else 0
+
+        if info_type == "l2Book": return 2
+        if info_type == "candleSnapshot": return 20 + rows // 60
+        if info_type in ("fundingHistory", "recentTrades"): return 20 + rows // 20
+
+        return 20
+
+
+    def _backoff_left(self) -> float:
+        return self._backoff_until - time.time()
 
 
     async def _lookup(self, market_type: MarketType, symbol: str) -> Any:
@@ -757,14 +829,18 @@ class HyperliquidAdapter(BaseExchange):
         cycle_ms = cycle_ms if cycle_ms is not None else self._FUNDING_CYCLE_MS
 
         max_per_req = 500
+        full        = False
 
         async def fetch_backwards(end_ts, l):
+            nonlocal full
             anchor = end_ts if end_ts is not None else start_time
             end    = anchor if anchor is not None else int(time.time() * 1000)
             count  = min(l, max_per_req)
             start  = end - count * cycle_ms
+            paced  = 20 + count // 20 if full else 0
             body   = {"type": "fundingHistory", "coin": coin, "startTime": start, "endTime": end}
-            rows = await self._make_request("fundingHistory", body)
+            rows = await self._make_request("fundingHistory", body, paced)
+            full = len(rows) >= count
 
             parsed = [FundingRate(
                 symbol      = model_sym,
